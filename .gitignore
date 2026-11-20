@@ -1,0 +1,35 @@
+# Build output
+/build/
+/out/
+.vs/
+*.user
+__pycache__/
+
+# Never commit the original game's or server's files: archives, extracted assets, database backups,
+# exports and the quest script (each operator brings their own; docs/SERVER_SETUP.md)
+*.pk2
+*.bak
+*.sct
+/extracted/
+/data/
+
+# Local settings and logs (per user)
+sr_devtools.ini
+sr_client.ini
+SroReimagined.cfg
+SroReimagined.log
+shard.cfg
+*.pem
+
+# the player's options file (written by the Option window)
+sro_options.cfg
+# the interface textures the last runs drew (the client's warm-up list, client/src/gui/UiWarmupList.h)
+sro_ui_warmup.txt
+sro_ui_warmup.txt.*.tmp
+
+# the website's uploads and the skill lab's videos (SroWeb web-files, web-lab)
+web-files/
+web-lab/
+
+# The client's mouse cursors, extracted from the player's sro_client.exe at the first start (the original's art)
+/client/assets/cursors/

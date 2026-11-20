@@ -1,0 +1,251 @@
+// The Action page (A) on the game screen: what each icon does (the 1.188
+// client's handler by the icon's id in actionwnddata.txt), the motions and marks the server
+// tells, the helper marks over heads, auto run and auto looting.
+
+#include <algorithm>
+#include <cmath>
+
+#include "play/PlayScreen.h"
+#include "sr/assets/Model.h"
+#include "sr/core/Log.h"
+
+namespace sr::client {
+
+namespace proto = game::proto;
+
+void PlayScreen::UseAction(ScreenContext& context, std::uint32_t action) {
+    const auto send = [this](proto::MessageId id, std::vector<std::byte> payload) {
+        if (!replay_) shared_->session->SendGame(id, std::move(payload));
+    };
+    switch (action) {
+    case 1000: // Sit / Stand (N): the original's 0x704F with 4
+        send(proto::SetMotion::kId, proto::Encode(proto::SetMotion{proto::kMotionSit}));
+        return;
+    case 1001: { // Walk / Run: 2 or 3 by the pace it moves at now
+        const auto own = entityMotions_.find(view_.Self());
+        const bool walking = own != entityMotions_.end() && own->second.walking;
+        send(proto::SetMotion::kId, proto::Encode(proto::SetMotion{walking ? proto::kMotionRun : proto::kMotionWalk}));
+        return;
+    }
+    case 1003: // Trace: the selected player
+        if (player_.target.entity != 0 && player_.target.kind == game::TargetStatus::Kind::Player && player_.target.entity != view_.Self()) {
+            autoRun_ = false;
+            send(proto::Trace::kId, proto::Encode(proto::Trace{player_.target.entity}));
+        }
+        return;
+    case 1004: // Auto Run: on or off
+        autoRun_ = !autoRun_;
+        autoRunNext_ = 0.0;
+        if (autoRun_) send(proto::Trace::kId, proto::Encode(proto::Trace{0}));
+        core::LogInfo("game: auto run {}", autoRun_ ? "on" : "off");
+        return;
+    case 1006: AskExchange(context); return;              // Exchange: with the selected player (PlayExchange.cpp)
+    case 1007: hud_.OpenPage(hud::kPageParty); return;   // the party
+    case 1008: AutoLoot(context); return;                 // Auto Looting (G)
+    case 1009: OpenStall(context); return;                // Stall (PlayStall.cpp)
+    case 1013: OpenStallNetwork(context); return;         // Stall network (hidden in 1.188's data; the key F)
+    case 1011: {                                          // Helper: the helper's mark on or off (0x7402)
+        const auto own = entityMarks_.find(view_.Self());
+        const std::uint8_t marks = own != entityMarks_.end() ? own->second : 0;
+        send(proto::SetMarks::kId, proto::Encode(proto::SetMarks{std::uint8_t(marks ^ proto::kMarkHelper)}));
+        return;
+    }
+    case 1010: ToggleAlchemyWindow(hudContext_); return;  // Alchemy: its window (case 0x3F2)
+    case 1012: hud_.Show(hud::kAutoPotion); return;      // the auto potion
+    case 1017: ToggleFreePvpWindow(); return;             // Free PvP: its window
+    case 1016: hud_.Show(hud::kPartyMatch); return;      // party matching
+    case 1015: {                                         // Return to fortress
+        const std::uint32_t mine = guild_.InGuild() ? guild_.Guild().id : 0;
+        for (const proto::FortressRecord& f : fortress_.Fortresses()) {
+            if (mine != 0 && (f.holder != 0 ? f.holder : f.owner) == mine) {
+                shared_->session->SendGame(proto::FortressReturn::kId, proto::Encode(proto::FortressReturn{f.id}));
+                return;
+            }
+        }
+        player_.Post(game::GameMessage::Kind::General, gui_.data().Text("UIIT_MSG_FORT_PORTALSTONE_FAIL_03"), context.time);
+        return;
+    }
+    case 4000: // the emotes: greeting 0, laugh 6, pokun 1, yes 5, rush 2, joy 3, no 4
+    case 4001:
+    case 4002:
+    case 4003:
+    case 4004:
+    case 4005:
+    case 4006: {
+        static constexpr std::uint8_t kGestures[] = {0, 6, 1, 5, 2, 3, 4};
+        autoRun_ = false;
+        send(proto::Emote::kId, proto::Encode(proto::Emote{kGestures[action - 4000]}));
+        return;
+    }
+    default: core::LogInfo("game: action {} is not built yet", action); return;
+    }
+}
+
+// Auto Looting (the Action page's 1008, the key G): the nearest item on the ground within
+// 50 of the player, asked for (the server walks there and picks it up; whose it may be is the server's).
+void PlayScreen::AutoLoot(ScreenContext&) {
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (self == nullptr || replay_ || IsDead(*self)) return;
+    const proto::FlatPosition me = proto::ToFlat(self->position);
+    std::uint32_t best = 0;
+    double nearest = 50.0;
+    for (const auto& [id, e] : view_.Entities()) {
+        if (e.kind != proto::EntityKind::GroundItem) continue;
+        const proto::FlatPosition p = proto::ToFlat(e.position);
+        const double d = std::hypot(p.x - me.x, p.z - me.z);
+        if (d <= nearest) {
+            nearest = d;
+            best = id;
+        }
+    }
+    if (best == 0) return;
+    autoRun_ = false;
+    shared_->session->PickUp(best);
+}
+
+// Auto Run (the Action page's 1004): on until a click, the icon again or death, the character runs
+// on ahead the way the camera looks (ours: the original moves by a heading; ours asks for a point 200
+// ahead every 0.4 s, and the server's walk stops at walls).
+void PlayScreen::AutoRun(ScreenContext& context) {
+    if (!autoRun_ || replay_) return;
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (self == nullptr || IsDead(*self)) {
+        autoRun_ = false;
+        return;
+    }
+    if (context.time < autoRunNext_) return;
+    autoRunNext_ = context.time + 0.4;
+    const proto::FlatPosition at = proto::ToFlat(self->position);
+    const double ahead = 200.0;
+    const proto::WorldPosition target =
+        proto::FromFlat({at.x + std::sin(double(cameraYaw_)) * ahead, at.z + std::cos(double(cameraYaw_)) * ahead}, self->position.y);
+    shared_->session->MoveTo(target);
+}
+
+// The helper marks over heads (SYSTEM_HELPERMARK), kept while a walker shows with the mark; again when it
+// moves to another slot. The list's loop carries res\etc\helpermark.bsr at the walker's height + (0, 13, 0):
+// a model without meshes whose own effect (system\system_helpermark.efp at its root + (0, 3, 0)) is the mark,
+// so that effect is what is played there (the guild war's mark is the same: guild_war_mark.bsr).
+void PlayScreen::ActionMarks(ScreenContext& context) {
+    if (!world_ || !tables_ || !tables_->Usable()) return;
+    gfx::EffectSystem& effects = world_->Effects();
+    // What each one wears over its head: its free PvP team's cape (SYSTEM_FREEPVP_RED .. _YELLOW, in
+    // place of the other marks), else the helper's mark.
+    static constexpr const char* kCapes[] = {"SYSTEM_FREEPVP_RED", "SYSTEM_FREEPVP_GRAY", "SYSTEM_FREEPVP_BLUE", "SYSTEM_FREEPVP_WHITE",
+                                             "SYSTEM_FREEPVP_YELLOW"};
+    const auto listOf = [&](std::uint32_t id) -> std::string {
+        if (const auto p = entityPvp_.find(id); p != entityPvp_.end() && p->second.team >= 1 && p->second.team <= proto::kFreePvpTeams) {
+            return kCapes[p->second.team - 1];
+        }
+        const auto marks = entityMarks_.find(id);
+        if (marks != entityMarks_.end() && (marks->second & proto::kMarkHelper) != 0) return "SYSTEM_HELPERMARK";
+        // An NPC with something about the player's quests: the 1.188 client's kinds
+        //  1 SYSTEM_EXCLAMATION_START, 2 _GOING, 3 _END.
+        if (const auto mark = QuestMarkOf(id)) {
+            return *mark == proto::QuestMark::End ? "SYSTEM_EXCLAMATION_END" : *mark == proto::QuestMark::Going ? "SYSTEM_EXCLAMATION_GOING" : "SYSTEM_EXCLAMATION_START";
+        }
+        return "";
+    };
+    for (auto it = markEffects_.begin(); it != markEffects_.end();) {
+        const auto slot = slots_.find(it->first);
+        if (slot != slots_.end() && slot->second == it->second.slot && listOf(it->first) == it->second.list) {
+            ++it;
+            continue;
+        }
+        for (const gfx::EffectSystem::Handle h : it->second.effects) effects.Stop(h);
+        it = markEffects_.erase(it);
+    }
+    std::vector<std::uint32_t> wearers;
+    for (const auto& [id, marks] : entityMarks_) wearers.push_back(id);
+    for (const auto& [id, pvp] : entityPvp_) wearers.push_back(id);
+    if (!quests_.Marks().empty()) {
+        for (const auto& [id, e] : view_.Entities())
+            if (e.kind == proto::EntityKind::Character && IsNpc(e) && QuestMarkOf(id)) wearers.push_back(id);
+    }
+    for (const std::uint32_t id : wearers) {
+        if (markEffects_.contains(id)) continue;
+        const std::string list = listOf(id);
+        const auto* stages = list.empty() ? nullptr : tables_->skillAnimations.Stages(list);
+        if (stages == nullptr) continue;
+        const auto slot = slots_.find(id);
+        if (slot == slots_.end() || !world_->StageReady(slot->second)) continue;
+        MarkEffect& m = markEffects_[id];
+        m.slot = slot->second;
+        m.list = list;
+        for (const assets::SkillEffectStage& stage : *stages) {
+            for (const assets::ResourceData::ParticleModifier& p : CarriedEffects(context, stage.object)) {
+                gfx::EffectSystem::Request request;
+                request.path = p.effect;
+                request.kind = gfx::EffectSystem::Kind::World;
+                request.seconds = -1.0f; // while the mark is on
+                request.anchor = StageEffects::Anchor(slot->second, stage.start, true);
+                request.anchor.offset += glm::vec3(p.offset[0], p.offset[1], p.offset[2]);
+                if (const gfx::EffectSystem::Handle h = effects.Start(request); h != 0) m.effects.push_back(h);
+            }
+        }
+    }
+}
+
+// The quest mark over an NPC in sight (by its codename), none for others.
+std::optional<proto::QuestMark> PlayScreen::QuestMarkOf(std::uint32_t entity) const {
+    if (quests_.Marks().empty() || !tables_ || !tables_->Usable()) return std::nullopt;
+    const game::WorldView::Entity* e = view_.Find(entity);
+    if (e == nullptr || e->kind != proto::EntityKind::Character || !IsNpc(*e)) return std::nullopt;
+    const assets::ObjectRow* row = tables_->characters.Find(e->look.model);
+    return row != nullptr ? quests_.MarkOf(row->codename) : std::nullopt;
+}
+
+// A carried model's own effects (its .bsr's ambient particles), read once.
+const std::vector<assets::ResourceData::ParticleModifier>& PlayScreen::CarriedEffects(ScreenContext& context, const std::string& model) {
+    auto [it, fresh] = carriedEffects_.try_emplace(model);
+    if (fresh) {
+        assets::ResourceData resource;
+        std::string error;
+        if (const auto file = context.files.Read(model); file && assets::DecodeBsr(file->Bytes(), resource, error)) {
+            for (const assets::ResourceData::ModifierSet& set : resource.modifierSets) {
+                if (set.kind == 2) it->second.insert(it->second.end(), set.particles.begin(), set.particles.end());
+            }
+        }
+    }
+    return it->second;
+}
+
+// --- Free -------------------------------------------------------------------
+
+void PlayScreen::ToggleFreePvpWindow() {
+    if (hud_.Shown(hud::kFreePvp)) {
+        hud_.Hide(hud::kFreePvp);
+        return;
+    }
+    OpenFreePvpWindow(hudContext_);
+}
+
+// A foe in free PvP, as the server reckons it: both in teams, the teams apart or either the
+// Giraffe, not of one party.
+bool PlayScreen::FreePvpFoe(std::uint32_t other) const {
+    const auto a = entityPvp_.find(view_.Self()), b = entityPvp_.find(other);
+    if (a == entityPvp_.end() || b == entityPvp_.end() || a->second.team == 0 || b->second.team == 0) return false;
+    if (player_.party.InParty() && player_.party.MemberByEntity(other) != nullptr) return false;
+    return a->second.team != b->second.team || a->second.team == proto::kFreePvpTeams || b->second.team == proto::kFreePvpTeams;
+}
+
+void PlayScreen::HandleFreePvp(ScreenContext& context, const proto::EntityFreePvp& e) {
+    FreePvpState& s = entityPvp_[e.entity];
+    const bool joined = e.changing == 0 && s.team != e.team;
+    s.team = e.team;
+    s.to = e.to;
+    s.changing = e.changing != 0;
+    if (e.team == 0 && e.changing == 0) entityPvp_.erase(e.entity);
+    hudContext_.freePvpTeam = entityPvp_.contains(view_.Self()) ? entityPvp_[view_.Self()].team : 0;
+    hudContext_.freePvpChanging = entityPvp_.contains(view_.Self()) && entityPvp_[view_.Self()].changing;
+    if (e.entity == view_.Self() && joined) {
+        // Ours: the window's line said as a system line (the team's description; out: "You have exited the Free PvP mode.").
+        static constexpr const char* kTeams[] = {"UIIT_STT_FRPVP_RED", "UIIT_STT_FRPVP_GRAY", "UIIT_STT_FRPVP_BLUE", "UIIT_STT_FRPVP_WHITE",
+                                                 "UIIT_STT_FRPVP_YELLOW"};
+        const char* key = e.team >= 1 && e.team <= proto::kFreePvpTeams ? kTeams[e.team - 1] : "UIIT_MGS_ERR_FRPVP_OFF_CANCEL";
+        player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);
+        core::LogInfo("game: free PvP team {}", e.team);
+    }
+}
+
+} // namespace sr::client

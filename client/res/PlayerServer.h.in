@@ -1,0 +1,17 @@
+#pragma once
+
+// Made by CMake for the players' build (client/CMakeLists.txt, SR_PLAYER_GATEWAY and SR_PLAYER_CERTIFICATE): the shard
+// this client plays on, built into the exe. Neither its settings file nor its command line can change them.
+
+#include <string_view>
+
+namespace sr::client::player {
+
+// Where the client connects first (host:port).
+inline constexpr std::string_view kGateway = "@SR_PLAYER_GATEWAY@";
+// The name the servers' certificate is checked for.
+inline constexpr std::string_view kServerName = "@SR_PLAYER_SERVER_NAME@";
+// The servers' certificate (PEM): the client trusts these servers and no others.
+inline constexpr std::string_view kCertificate = R"srpem(@SR_PLAYER_CERTIFICATE_PEM@)srpem";
+
+} // namespace sr::client::player

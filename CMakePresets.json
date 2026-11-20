@@ -1,0 +1,75 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "clang",
+      "displayName": "Clang + lld (Ninja Multi-Config)",
+      "description": "The default: LLVM clang++ and lld from a plain shell (no vcvars). Clang finds the Windows SDK and the C++ standard library headers itself.",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/clang",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_LINKER_TYPE": "LLD",
+        "CMAKE_RC_COMPILER": "llvm-rc",
+        "CMAKE_MT": "llvm-mt"
+      }
+    },
+    {
+      "name": "server-release",
+      "inherits": "clang",
+      "displayName": "The servers for a public release",
+      "description": "Our servers alone, without the developer commands, the test seeds, the tests or the skill lab.",
+      "binaryDir": "${sourceDir}/build/server-release",
+      "cacheVariables": {
+        "SR_DEV_COMMANDS": "OFF",
+        "SR_BUILD_TESTS": "OFF",
+        "SR_BUILD_TOOLS": "OFF",
+        "SR_BUILD_CLIENT": "OFF",
+        "SR_BUILD_PROTOTYPE": "OFF",
+        "SR_TRACY": "OFF"
+      }
+    },
+    {
+      "name": "msvc",
+      "displayName": "MSVC cl (Ninja Multi-Config), fallback",
+      "description": "Needs the MSVC developer environment: run cmake through scripts\\dev.cmd.",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/msvc",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "architecture": { "value": "x64", "strategy": "external" },
+      "toolset": { "value": "host=x64", "strategy": "external" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "client-release",
+      "inherits": "msvc",
+      "displayName": "The client for players (MSVC)",
+      "description": "The players' client alone, built with MSVC: no developer tools, no profiler, no console; settings next to the exe. Run through scripts\\dev.cmd.",
+      "binaryDir": "${sourceDir}/build/client-release",
+      "cacheVariables": {
+        "SR_PLAYER_BUILD": "ON",
+        "SR_DEV_TOOLS": "OFF",
+        "SR_TRACY": "OFF",
+        "SR_BUILD_TESTS": "OFF",
+        "SR_BUILD_TOOLS": "OFF",
+        "SR_BUILD_SERVERS": "OFF",
+        "SR_BUILD_PROTOTYPE": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "clang", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "clang", "configuration": "RelWithDebInfo" },
+    { "name": "server-release", "configurePreset": "server-release", "configuration": "Release" },
+    { "name": "msvc-debug", "configurePreset": "msvc", "configuration": "Debug" },
+    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "RelWithDebInfo" },
+    { "name": "client-release", "configurePreset": "client-release", "configuration": "Release" }
+  ],
+  "testPresets": [
+    { "name": "debug", "configurePreset": "clang", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "clang", "configuration": "RelWithDebInfo", "output": { "outputOnFailure": true } }
+  ]
+}

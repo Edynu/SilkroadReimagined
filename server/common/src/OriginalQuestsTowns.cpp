@@ -1,0 +1,995 @@
+// The original's coded quests the first three files left out (59 the client lists that the quest
+// script lacks and 12 it holds in a form our script decoder drops): definitions in our format, with the same
+// conventions as OriginalQuests.cpp's and OriginalQuestsAsia.cpp's headers.
+//
+// "Data only": the quest has no behaviour of its own beyond its definition. Where the others say their own words in
+// the same flow (offer, accept, not done, done), the words are here. A delivery's items are given at the start with
+// their counts. A delivery's NPC that has several pages says its first here, as in OriginalQuestsEurope.cpp.
+// QNO_CH_PRIEST_1's eight gatherings are one lithography piece each, every one paid by the piece (125 gold and
+// 100 experience; QuestGoal::apiece).
+
+#include <string_view>
+
+#include "sr/server/QuestScript.h"
+
+namespace sr::server {
+
+namespace {
+
+constexpr std::string_view kCoded = R"(
+# --- Data only (no behaviour of their own) ---------------------------------------------------------------------------
+
+quest QNO_RM_SLAVE1_3
+start level 75-
+start after all QNO_RM_SLAVE1_2
+repeat 1
+giver NPC_RM_SLAVE1
+npc NPC_RM_SLAVE1 NPC_RM_SLAVE2 NPC_RM_SLAVE3
+finish NPC_RM_SLAVE2
+start-item ITEM_QNO_RM_SLAVE1_3_01 1
+goal deliver NPC_RM_SLAVE2 ITEM_QNO_RM_SLAVE1_3_01 1 get ITEM_QNO_RM_SLAVE1_3_02 1 talk @SN_TALK_QNO_RM_SLAVE1_3_06 text @SN_CON_QNO_RM_SLAVE1_3_02
+talk NPC_RM_SLAVE1 greeting @SN_NPC_RM_SLAVE1_QS
+talk NPC_RM_SLAVE2 greeting @SN_NPC_RM_SLAVE2_QS
+talk NPC_RM_SLAVE3 greeting @SN_NPC_RM_SLAVE3_QS
+talk NPC_RM_SLAVE1 offer @SN_TALK_QNO_RM_SLAVE1_3_01
+talk NPC_RM_SLAVE1 accepted @SN_TALK_QNO_RM_SLAVE1_3_02
+talk NPC_RM_SLAVE1 denied @SN_TALK_QNO_RM_SLAVE1_3_03
+talk NPC_RM_SLAVE1 not-done @SN_TALK_QNO_RM_SLAVE1_3_04
+talk NPC_RM_SLAVE2 not-done @SN_TALK_QNO_RM_SLAVE1_3_04
+talk NPC_RM_SLAVE2 done @SN_TALK_QNO_RM_SLAVE1_3_13
+talk NPC_RM_SLAVE1 bag-full @SN_TALK_QNO_RM_SLAVE1_3_09
+talk NPC_RM_SLAVE2 done-now @SN_TALK_QNO_RM_SLAVE1_3_16
+talk NPC_RM_SLAVE1 middle @SN_TALK_QNO_RM_SLAVE1_3_14
+
+quest QNO_RM_OLDWOMAN_7
+start level 79-
+start after all QNO_RM_OLDWOMAN_6
+repeat 1
+giver NPC_RM_SLAVE2
+npc NPC_RM_SLAVE2 NPC_RM_OLDWOMAN
+finish NPC_RM_OLDWOMAN
+start-item ITEM_QNO_RM_OLDWOMAN_7_01 1
+goal deliver NPC_RM_OLDWOMAN ITEM_QNO_RM_OLDWOMAN_7_01 1 talk @SN_TALK_QNO_RM_OLDWOMAN_7_10 text @SN_CON_QNO_RM_OLDWOMAN_7
+talk NPC_RM_SLAVE2 greeting @SN_NPC_RM_SLAVE2_QS
+talk NPC_RM_OLDWOMAN greeting @SN_NPC_RM_OLDWOMAN_QS
+talk NPC_RM_SLAVE2 offer @SN_TALK_QNO_RM_OLDWOMAN_7_01
+talk NPC_RM_SLAVE2 accepted @SN_TALK_QNO_RM_OLDWOMAN_7_02
+talk NPC_RM_SLAVE2 denied @SN_TALK_QNO_RM_OLDWOMAN_7_03
+talk NPC_RM_SLAVE2 not-done @SN_TALK_QNO_RM_OLDWOMAN_7_04
+talk NPC_RM_OLDWOMAN not-done @SN_TALK_QNO_RM_OLDWOMAN_7_04
+talk NPC_RM_SLAVE2 bag-full @SN_TALK_QNO_RM_OLDWOMAN_7_05
+talk NPC_RM_SLAVE2 middle @SN_TALK_QNO_RM_OLDWOMAN_7_09
+
+quest QNO_EU_CONS_2
+start level 1-
+repeat 1
+giver NPC_EU_POTION
+npc NPC_EU_POTION NPC_EU_MERCHANT
+finish NPC_EU_MERCHANT
+start-item ITEM_QNO_EU_CONS_2_01 1
+goal deliver NPC_EU_MERCHANT ITEM_QNO_EU_CONS_2_01 1 talk @SN_TALK_QNO_EU_CONS_2_05 text @SN_CON_QNO_EU_CONS_2
+talk NPC_EU_POTION greeting @SN_NPC_EU_POTION_QS
+talk NPC_EU_MERCHANT greeting @SN_NPC_EU_MERCHANT_QS
+talk NPC_EU_POTION offer @SN_TALK_QNO_EU_CONS_2_01
+talk NPC_EU_POTION accepted @SN_TALK_QNO_EU_CONS_2_02
+talk NPC_EU_POTION denied @SN_TALK_QNO_EU_CONS_2_03
+talk NPC_EU_POTION not-done @SN_TALK_QNO_EU_CONS_2_04
+talk NPC_EU_MERCHANT not-done @SN_TALK_QNO_EU_CONS_2_04
+talk NPC_EU_POTION bag-full @SN_TALK_QNO_EU_CONS_2_07
+talk NPC_EU_POTION middle @SN_TALK_QNO_EU_CONS_2_06
+
+quest QNO_EU_CONS_6
+start level 1-
+repeat 1
+giver NPC_EU_SPECIAL
+npc NPC_EU_SPECIAL NPC_EU_UNION1
+finish NPC_EU_UNION1
+goal talk NPC_EU_UNION1 talk @SN_TALK_QNO_EU_CONS_6_05 text @SN_CON_QNO_EU_CONS_6
+talk NPC_EU_SPECIAL greeting @SN_NPC_EU_SPECIAL_QS
+talk NPC_EU_UNION1 greeting @SN_NPC_EU_UNION1_QS
+talk NPC_EU_SPECIAL offer @SN_TALK_QNO_EU_CONS_6_01
+talk NPC_EU_SPECIAL accepted @SN_TALK_QNO_EU_CONS_6_02
+talk NPC_EU_SPECIAL denied @SN_TALK_QNO_EU_CONS_6_03
+talk NPC_EU_SPECIAL not-done @SN_TALK_QNO_EU_CONS_6_04
+talk NPC_EU_UNION1 not-done @SN_TALK_QNO_EU_CONS_6_04
+talk NPC_EU_SPECIAL middle @SN_TALK_QNO_EU_CONS_6_06
+
+quest QNO_EU_CONS_11
+start level 1-
+repeat 1
+giver NPC_EU_UNION1
+npc NPC_EU_UNION1 NPC_EU_SPECIAL
+finish NPC_EU_SPECIAL
+start-item ITEM_QNO_EU_CONS_11_01 1
+goal deliver NPC_EU_SPECIAL ITEM_QNO_EU_CONS_11_01 1 talk @SN_TALK_QNO_EU_CONS_11_05 text @SN_CON_QNO_EU_CONS_11
+talk NPC_EU_UNION1 greeting @SN_NPC_EU_UNION1_QS
+talk NPC_EU_SPECIAL greeting @SN_NPC_EU_SPECIAL_QS
+talk NPC_EU_UNION1 offer @SN_TALK_QNO_EU_CONS_11_01
+talk NPC_EU_UNION1 accepted @SN_TALK_QNO_EU_CONS_11_02
+talk NPC_EU_UNION1 denied @SN_TALK_QNO_EU_CONS_11_03
+talk NPC_EU_UNION1 not-done @SN_TALK_QNO_EU_CONS_11_04
+talk NPC_EU_SPECIAL not-done @SN_TALK_QNO_EU_CONS_11_04
+talk NPC_EU_SPECIAL done @SN_TALK_QNO_EU_CONS_11_04
+talk NPC_EU_UNION1 bag-full @SN_TALK_QNO_EU_CONS_11_07
+talk NPC_EU_UNION1 middle @SN_TALK_QNO_EU_CONS_11_06
+
+quest QNO_EU_EASTEU_8
+start level 4-
+start after all QNO_EU_EASTEU_7
+repeat 1
+giver NPC_EU_WITCH
+npc NPC_EU_WITCH NPC_EU_SMITH
+finish NPC_EU_SMITH
+start-item ITEM_QNO_EU_EASTEU_7_01 1
+goal deliver NPC_EU_SMITH ITEM_QNO_EU_EASTEU_7_01 1 get ITEM_QNO_EU_EASTEU_8_01 1 talk @SN_TALK_QNO_EU_EASTEU_8_06 text @SN_CON_QNO_EU_EASTEU_8
+talk NPC_EU_WITCH greeting @SN_NPC_EU_WITCH_QS
+talk NPC_EU_SMITH greeting @SN_NPC_EU_SMITH_QS
+talk NPC_EU_WITCH offer @SN_TALK_QNO_EU_EASTEU_8_01
+talk NPC_EU_WITCH accepted @SN_TALK_QNO_EU_EASTEU_8_02
+talk NPC_EU_WITCH denied @SN_TALK_QNO_EU_EASTEU_8_03
+talk NPC_EU_WITCH not-done @SN_TALK_QNO_EU_EASTEU_8_04
+talk NPC_EU_SMITH not-done @SN_TALK_QNO_EU_EASTEU_8_04
+talk NPC_EU_SMITH done @SN_TALK_QNO_EU_EASTEU_8_10
+talk NPC_EU_WITCH bag-full @SN_TALK_QNO_EU_EASTEU_8_05
+talk NPC_EU_SMITH done-now @SN_TALK_QNO_EU_EASTEU_8_12
+talk NPC_EU_WITCH middle @SN_TALK_QNO_EU_EASTEU_8_11
+
+quest QNO_EU_EASTEU_12
+start level 6-
+repeat 1
+giver NPC_EU_WITCH
+npc NPC_EU_WITCH NPC_EU_ADVENTURER
+finish NPC_EU_ADVENTURER
+goal talk NPC_EU_ADVENTURER talk @SN_TALK_QNO_EU_EASTEU_12_05 text @SN_CON_QNO_EU_EASTEU_12
+talk NPC_EU_WITCH greeting @SN_NPC_EU_WITCH_QS
+talk NPC_EU_ADVENTURER greeting @SN_NPC_EU_ADVENTURER_QS
+talk NPC_EU_WITCH offer @SN_TALK_QNO_EU_EASTEU_12_01
+talk NPC_EU_WITCH accepted @SN_TALK_QNO_EU_EASTEU_12_02
+talk NPC_EU_WITCH denied @SN_TALK_QNO_EU_EASTEU_12_03
+talk NPC_EU_WITCH not-done @SN_TALK_QNO_EU_EASTEU_12_04
+talk NPC_EU_ADVENTURER not-done @SN_TALK_QNO_EU_EASTEU_12_04
+talk NPC_EU_WITCH middle @SN_TALK_QNO_EU_EASTEU_12_06
+
+quest QNO_WC_ARMOR_1
+start level 28-
+repeat 1
+giver NPC_WC_ARMOR
+npc NPC_WC_ARMOR
+finish NPC_WC_ARMOR
+goal drop 20 ITEM_QNO_WC_ARMOR_1 from MOB_OA_REDSCORPION 40% MOB_OA_REDSCORPION_CLON 20% at NPC_WC_ARMOR text @SN_CON_QNO_WC_ARMOR_1
+talk NPC_WC_ARMOR offer @SN_TALK_QNO_WC_ARMOR_1_01
+talk NPC_WC_ARMOR accepted @SN_TALK_QNO_WC_ARMOR_1_02
+talk NPC_WC_ARMOR denied @SN_TALK_QNO_WC_ARMOR_1_03
+talk NPC_WC_ARMOR not-done @SN_TALK_QNO_WC_ARMOR_1_04
+talk NPC_WC_ARMOR done @SN_TALK_QNO_WC_ARMOR_1_05
+talk NPC_WC_ARMOR greeting @SN_NPC_WC_ARMOR_QS
+talk NPC_WC_ARMOR done-now @SN_TALK_QNO_WC_ARMOR_1_06
+
+quest QNO_EU_CONS_3_1
+start level 1-
+start after all QNO_EU_CONS_3
+repeat 1
+giver NPC_EU_MERCHANT
+npc NPC_EU_MERCHANT NPC_EU_SPECIAL
+finish NPC_EU_SPECIAL
+start-item ITEM_QNO_EU_CONS_3_01 1
+goal deliver NPC_EU_SPECIAL ITEM_QNO_EU_CONS_3_01 1 talk @SN_TALK_QNO_EU_CONS_3_1_06 text @SN_CON_QNO_EU_CONS_3_1
+talk NPC_EU_MERCHANT greeting @SN_NPC_EU_MERCHANT_QS
+talk NPC_EU_SPECIAL greeting @SN_NPC_EU_SPECIAL_QS
+talk NPC_EU_MERCHANT offer @SN_TALK_QNO_EU_CONS_3_1_01
+talk NPC_EU_MERCHANT accepted @SN_TALK_QNO_EU_CONS_3_1_02
+talk NPC_EU_MERCHANT denied @SN_TALK_QNO_EU_CONS_3_1_03
+talk NPC_EU_MERCHANT not-done @SN_TALK_QNO_EU_CONS_3_1_04
+talk NPC_EU_SPECIAL not-done @SN_TALK_QNO_EU_CONS_3_1_04
+talk NPC_EU_MERCHANT bag-full @SN_TALK_QNO_EU_CONS_3_1_05
+talk NPC_EU_MERCHANT middle @SN_TALK_QNO_EU_CONS_3_1_09
+
+quest QNO_EU_WITCH_1_1
+start level 14-
+start after all QNO_EU_WITCH_1
+repeat 1
+giver NPC_EU_WITCH
+npc NPC_EU_WITCH NPC_EU_GENERAL
+finish NPC_EU_GENERAL
+start-item ITEM_QNO_EU_WITCH_1_01 60
+goal deliver NPC_EU_GENERAL ITEM_QNO_EU_WITCH_1_01 60 talk @SN_TALK_QNO_EU_WITCH_1_1_07 text @SN_CON_QNO_EU_WITCH_1_1
+talk NPC_EU_WITCH greeting @SN_NPC_EU_WITCH_QS
+talk NPC_EU_GENERAL greeting @SN_NPC_EU_GENERAL_QS
+talk NPC_EU_WITCH offer @SN_TALK_QNO_EU_WITCH_1_1_01
+talk NPC_EU_WITCH accepted @SN_TALK_QNO_EU_WITCH_1_1_02
+talk NPC_EU_WITCH denied @SN_TALK_QNO_EU_WITCH_1_1_03
+talk NPC_EU_WITCH not-done @SN_TALK_QNO_EU_WITCH_1_1_04
+talk NPC_EU_GENERAL not-done @SN_TALK_QNO_EU_WITCH_1_1_04
+talk NPC_EU_GENERAL done @SN_TALK_QNO_EU_WITCH_1_1_07
+talk NPC_EU_WITCH bag-full @SN_TALK_QNO_EU_WITCH_1_1_05
+talk NPC_EU_WITCH middle @SN_TALK_QNO_EU_WITCH_1_1_08
+
+quest QNO_CA_THIEF_4
+start level 21-
+start after all QNO_CA_THIEF_3
+repeat 1
+giver NPC_CA_HUNTER
+npc NPC_CA_HUNTER NPC_CA_SPECIAL
+finish NPC_CA_SPECIAL
+start-item ITEM_QNO_CA_THIEF_2_01 1
+goal deliver NPC_CA_SPECIAL ITEM_QNO_CA_THIEF_2_01 1 talk @SN_TALK_QNO_CA_THIEF_4_06 text @SN_CON_QNO_CA_THIEF_4
+talk NPC_CA_HUNTER greeting @SN_NPC_CA_HUNTER_QS
+talk NPC_CA_SPECIAL greeting @SN_NPC_CA_SPECIAL_QS
+talk NPC_CA_HUNTER offer @SN_TALK_QNO_CA_THIEF_4_01
+talk NPC_CA_HUNTER accepted @SN_TALK_QNO_CA_THIEF_4_02
+talk NPC_CA_HUNTER denied @SN_TALK_QNO_CA_THIEF_4_03
+talk NPC_CA_HUNTER not-done @SN_TALK_QNO_CA_THIEF_4_04
+talk NPC_CA_SPECIAL not-done @SN_TALK_QNO_CA_THIEF_4_04
+talk NPC_CA_HUNTER bag-full @SN_TALK_QNO_CA_THIEF_4_05
+talk NPC_CA_HUNTER middle @SN_TALK_QNO_CA_THIEF_4_13
+
+quest QNO_CA_WAREHOUSE_4
+start level 25-
+start after all QNO_CA_WAREHOUSE_3
+repeat 3
+giver NPC_CA_WAREHOUSE
+npc NPC_CA_WAREHOUSE
+finish NPC_CA_WAREHOUSE
+goal drop 14 ITEM_QNO_CA_WAREHOUSE_4_01 from MOB_CA_HUNLANCER_CLON 10% at NPC_CA_WAREHOUSE text @SN_CON_QNO_CA_WAREHOUSE_4
+talk NPC_CA_WAREHOUSE offer @SN_TALK_QNO_CA_WAREHOUSE_4_01
+talk NPC_CA_WAREHOUSE accepted @SN_TALK_QNO_CA_WAREHOUSE_4_03
+talk NPC_CA_WAREHOUSE denied @SN_TALK_QNO_CA_WAREHOUSE_4_04
+talk NPC_CA_WAREHOUSE not-done @SN_TALK_QNO_CA_WAREHOUSE_4_05
+talk NPC_CA_WAREHOUSE done @SN_TALK_QNO_CA_WAREHOUSE_4_06
+talk NPC_CA_WAREHOUSE greeting @SN_NPC_CA_WAREHOUSE_QS
+talk NPC_CA_WAREHOUSE done-now @SN_TALK_QNO_CA_WAREHOUSE_4_07
+talk NPC_CA_WAREHOUSE offer-again @SN_TALK_QNO_CA_WAREHOUSE_4_02
+
+quest QNO_TQ_BAEKRYOUNG_11
+start level 88-
+start after all QNO_TQ_BAEKRYOUNG_10
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP NPC_KT_ACCESSORY
+finish NPC_KT_ACCESSORY
+start-item ITEM_QNO_TQ_BAEKRYEONG_11_01 1
+goal deliver NPC_KT_ACCESSORY ITEM_QNO_TQ_BAEKRYEONG_11_01 1 get ITEM_QNO_TQ_BAEKRYEONG_11_02 1 get ITEM_QNO_TQ_BAEKRYEONG_11_03 100 talk @SN_TALK_QNO_TQ_BAEKRYEONG_11_06 text @SN_CON_QNO_TQ_BAEKRYOUNG_11_01
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_KT_ACCESSORY greeting @SN_NPC_KT_ACCESSORY_QS
+talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_11_01
+talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_11_02
+talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_11_03
+talk NPC_CH_GENARAL_SP not-done @SN_TALK_QNO_TQ_BAEKRYEONG_11_04
+talk NPC_KT_ACCESSORY not-done @SN_TALK_QNO_TQ_BAEKRYEONG_11_04
+talk NPC_KT_ACCESSORY done @SN_TALK_QNO_TQ_BAEKRYEONG_11_09
+talk NPC_CH_GENARAL_SP bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_11_05
+talk NPC_KT_ACCESSORY done-now @SN_TALK_QNO_TQ_BAEKRYEONG_11_11
+talk NPC_CH_GENARAL_SP middle @SN_TALK_QNO_TQ_BAEKRYEONG_11_10
+
+quest QNO_CH_POTION_2
+start level 7-
+repeat 1
+giver NPC_CH_POTION
+npc NPC_CH_POTION NPC_CH_FERRY2
+finish NPC_CH_FERRY2
+start-item ITEM_QNO_CH_POTION_2_01 1
+goal deliver NPC_CH_FERRY2 ITEM_QNO_CH_POTION_2_01 1 talk @SN_TALK_QNO_CH_POTION_2_08 text @SN_CON_QNO_CH_POTION_2
+talk NPC_CH_POTION greeting @SN_NPC_CH_POTION_QS
+talk NPC_CH_FERRY2 greeting @SN_NPC_CH_FERRY2_QS
+talk NPC_CH_POTION offer @SN_TALK_QNO_CH_POTION_2_02
+talk NPC_CH_POTION accepted @SN_TALK_QNO_CH_POTION_2_03
+talk NPC_CH_POTION denied @SN_TALK_QNO_CH_POTION_2_04
+talk NPC_CH_POTION not-done @SN_TALK_QNO_CH_POTION_2_06
+talk NPC_CH_FERRY2 not-done @SN_TALK_QNO_CH_POTION_2_06
+talk NPC_CH_FERRY2 done @SN_TALK_QNO_CH_POTION_2_10
+talk NPC_CH_POTION bag-full @SN_TALK_QNO_CH_POTION_2_05
+talk NPC_CH_FERRY2 done-now @SN_TALK_QNO_CH_POTION_2_11
+
+quest QNO_CH_SHAMAN_2
+start level 1-
+start after all QNO_CH_SHAMAN_1
+repeat 1
+giver NPC_CH_SHAMAN
+npc NPC_CH_SHAMAN NPC_CH_INDIA
+finish NPC_CH_INDIA
+start-item ITEM_QNO_CH_SHAMAN_1 1
+goal deliver NPC_CH_INDIA ITEM_QNO_CH_SHAMAN_1 1 get ITEM_QNO_CH_SHAMAN_2_01 1 talk @SN_TALK_QNO_CH_SHAMAN_2_07 text @SN_CON_QNO_CH_SHAMAN_2
+talk NPC_CH_SHAMAN greeting @SN_NPC_CH_SHAMAN_QS
+talk NPC_CH_INDIA greeting @SN_NPC_CH_INDIA_QS
+talk NPC_CH_SHAMAN offer @SN_TALK_QNO_CH_SHAMAN_2_01
+talk NPC_CH_SHAMAN accepted @SN_TALK_QNO_CH_SHAMAN_2_02
+talk NPC_CH_SHAMAN denied @SN_TALK_QNO_CH_SHAMAN_2_03
+talk NPC_CH_SHAMAN not-done @SN_TALK_QNO_CH_SHAMAN_2_04
+talk NPC_CH_INDIA not-done @SN_TALK_QNO_CH_SHAMAN_2_04
+talk NPC_CH_INDIA done @SN_TALK_QNO_CH_SHAMAN_2_09
+talk NPC_CH_SHAMAN bag-full @SN_TALK_QNO_CH_SHAMAN_2_05
+talk NPC_CH_INDIA done-now @SN_TALK_QNO_CH_SHAMAN_2_11
+
+quest QNO_CH_POTION_4
+start level 7-
+start after all QNO_CH_POTION_2
+repeat 1
+giver NPC_CH_POTION
+npc NPC_CH_POTION NPC_CH_FERRY2 NPC_CH_FERRY
+finish NPC_CH_FERRY2
+start-item ITEM_QNO_CH_POTION_4_01 1
+goal deliver NPC_CH_FERRY2 ITEM_QNO_CH_POTION_4_01 1 talk @SN_TALK_QNO_CH_POTION_4_06 text @SN_CON_QNO_CH_POTION_4_01
+talk NPC_CH_POTION greeting @SN_NPC_CH_POTION_QS
+talk NPC_CH_FERRY2 greeting @SN_NPC_CH_FERRY2_QS
+talk NPC_CH_FERRY greeting @SN_NPC_CH_FERRY_QS
+talk NPC_CH_POTION offer @SN_TALK_QNO_CH_POTION_4_01
+talk NPC_CH_POTION accepted @SN_TALK_QNO_CH_POTION_4_02
+talk NPC_CH_POTION denied @SN_TALK_QNO_CH_POTION_4_03
+talk NPC_CH_POTION not-done @SN_TALK_QNO_CH_POTION_4_04
+talk NPC_CH_FERRY2 not-done @SN_TALK_QNO_CH_POTION_4_04
+talk NPC_CH_FERRY2 done @SN_TALK_QNO_CH_POTION_4_10
+talk NPC_CH_POTION bag-full @SN_TALK_QNO_CH_POTION_4_05
+talk NPC_CH_FERRY2 done-now @SN_TALK_QNO_CH_POTION_4_11
+
+quest QNO_WC_SOLDIER_EA2_3
+start level 13-
+start after all QNO_WC_SOLDIER_EA2_2
+repeat 1
+giver NPC_WC_SOLDIER_EA2
+npc NPC_WC_SOLDIER_EA2 NPC_CH_GENARAL
+finish NPC_CH_GENARAL
+start-item ITEM_QNO_WC_SOLDIER_EA2_3_01 2
+goal deliver NPC_CH_GENARAL ITEM_QNO_WC_SOLDIER_EA2_3_01 2 talk @SN_TALK_QNO_WC_SOLDIER_EA2_3_06 text @SN_CON_QNO_WC_SOLDIER_EA2_3
+talk NPC_WC_SOLDIER_EA2 greeting @SN_NPC_WC_SOLDIER_EA2_QS
+talk NPC_CH_GENARAL greeting @SN_NPC_CH_GENARAL_QS
+talk NPC_WC_SOLDIER_EA2 offer @SN_TALK_QNO_WC_SOLDIER_EA2_3_01
+talk NPC_WC_SOLDIER_EA2 accepted @SN_TALK_QNO_WC_SOLDIER_EA2_3_02
+talk NPC_WC_SOLDIER_EA2 denied @SN_TALK_QNO_WC_SOLDIER_EA2_3_03
+talk NPC_WC_SOLDIER_EA2 not-done @SN_TALK_QNO_WC_SOLDIER_EA2_3_04
+talk NPC_CH_GENARAL not-done @SN_TALK_QNO_WC_SOLDIER_EA2_3_04
+talk NPC_CH_GENARAL done @SN_TALK_QNO_WC_SOLDIER_EA2_3_07
+talk NPC_WC_SOLDIER_EA2 bag-full @SN_TALK_QNO_WC_SOLDIER_EA2_3_05
+talk NPC_CH_GENARAL done-now @SN_TALK_QNO_WC_SOLDIER_EA2_3_09
+talk NPC_WC_SOLDIER_EA2 middle @SN_TALK_QNO_WC_SOLDIER_EA2_3_08
+
+quest QNO_CH_PRIEST_1
+start level 1-
+repeat 1
+giver NPC_CH_PRIEST
+npc NPC_CH_PRIEST
+finish NPC_CH_PRIEST
+goal drop 1 ITEM_QNO_CH_PRIEST_1_01 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_01
+goal drop 1 ITEM_QNO_CH_PRIEST_1_02 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_02
+goal drop 1 ITEM_QNO_CH_PRIEST_1_03 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_03
+goal drop 1 ITEM_QNO_CH_PRIEST_1_04 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_04
+goal drop 1 ITEM_QNO_CH_PRIEST_1_05 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_05
+goal drop 1 ITEM_QNO_CH_PRIEST_1_06 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_06
+goal drop 1 ITEM_QNO_CH_PRIEST_1_07 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_07
+goal drop 1 ITEM_QNO_CH_PRIEST_1_08 from MOB_CH_TOMBSTONE 3% MOB_CH_TOMBSTONE_CLON 3% at NPC_CH_PRIEST apiece gold 125 exp 100 text @SN_CON_QNO_CH_PRIEST_1_08
+talk NPC_CH_PRIEST offer @SN_TALK_QNO_CH_PRIEST_1_01
+talk NPC_CH_PRIEST accepted @SN_TALK_QNO_CH_PRIEST_1_02
+talk NPC_CH_PRIEST denied @SN_TALK_QNO_CH_PRIEST_1_03
+talk NPC_CH_PRIEST not-done @SN_TALK_QNO_CH_PRIEST_1_04
+talk NPC_CH_PRIEST done @SN_TALK_QNO_CH_PRIEST_1_07
+talk NPC_CH_PRIEST bag-full @SN_TALK_QNO_CH_PRIEST_1_05
+talk NPC_CH_PRIEST greeting @SN_NPC_CH_PRIEST_QS
+talk NPC_CH_PRIEST done-now @SN_TALK_QNO_CH_PRIEST_1_08
+
+quest QNO_CH_SHAMAN_1
+start level 1-
+repeat 1
+giver NPC_CH_SHAMAN
+npc NPC_CH_SHAMAN
+finish NPC_CH_SHAMAN
+goal drop 30 ITEM_QNO_CH_SHAMAN_1 from MOB_CH_YEOHA 70% MOB_CH_YEOHA_CLON 70% at NPC_CH_SHAMAN text @SN_CON_QNO_CH_SHAMAN_1
+talk NPC_CH_SHAMAN offer @SN_TALK_QNO_CH_SHAMAN_1_01
+talk NPC_CH_SHAMAN accepted @SN_TALK_QNO_CH_SHAMAN_1_02
+talk NPC_CH_SHAMAN denied @SN_TALK_QNO_CH_SHAMAN_1_03
+talk NPC_CH_SHAMAN not-done @SN_TALK_QNO_CH_SHAMAN_1_04
+talk NPC_CH_SHAMAN done @SN_TALK_QNO_CH_SHAMAN_1_05
+talk NPC_CH_SHAMAN bag-full @SN_TALK_QNO_CH_POTION_3_05
+talk NPC_CH_SHAMAN greeting @SN_NPC_CH_SHAMAN_QS
+talk NPC_CH_SHAMAN done-now @SN_TALK_QNO_CH_SHAMAN_1_06
+
+# --- Their own talk: the same flow, their words and the differences noted --------------------------------------------
+
+# It pays at the delivery (its talk at the giver and at the merchant: no finisher).
+quest QNO_WC_POTION_3
+start level 22-
+start after all QNO_WC_POTION_2
+repeat 1
+giver NPC_WC_POTION
+npc NPC_WC_POTION NPC_CH_ACCESSORY
+start-item ITEM_QNO_WC_POTION_3_01 1
+start-item ITEM_QNO_WC_POTION_3_02 1
+goal deliver NPC_CH_ACCESSORY ITEM_QNO_WC_POTION_3_01 1 ITEM_QNO_WC_POTION_3_02 1 talk @SN_TALK_QNO_WC_POTION_3_15 text @SN_CON_QNO_WC_POTION_3
+talk NPC_WC_POTION greeting @SN_NPC_WC_POTION_QS
+talk NPC_CH_ACCESSORY greeting @SN_NPC_CH_ACCESSORY_QS
+talk NPC_WC_POTION offer @SN_TALK_QNO_WC_POTION_3_01
+talk NPC_WC_POTION accepted @SN_TALK_QNO_WC_POTION_3_03
+talk NPC_WC_POTION denied @SN_TALK_QNO_WC_POTION_3_04
+talk NPC_WC_POTION not-done @SN_TALK_QNO_WC_POTION_3_05
+talk NPC_CH_ACCESSORY done @SN_TALK_QNO_WC_POTION_3_16
+talk NPC_WC_POTION middle @SN_TALK_QNO_WC_POTION_3_07
+
+quest QNO_WC_POTION_4
+start level 22-
+start after all QNO_WC_POTION_3
+repeat 1
+giver NPC_CH_ACCESSORY
+npc NPC_CH_ACCESSORY NPC_WC_SPECIAL
+start-item ITEM_QNO_WC_POTION_3_03 1
+goal deliver NPC_WC_SPECIAL ITEM_QNO_WC_POTION_3_03 1 talk @SN_TALK_QNO_WC_POTION_4_06 text @SN_CON_QNO_WC_POTION_4
+talk NPC_CH_ACCESSORY greeting @SN_NPC_CH_ACCESSORY_QS
+talk NPC_WC_SPECIAL greeting @SN_NPC_WC_SPECIAL_QS
+talk NPC_CH_ACCESSORY offer @SN_TALK_QNO_WC_POTION_4_01
+talk NPC_CH_ACCESSORY accepted @SN_TALK_QNO_WC_POTION_4_02
+talk NPC_CH_ACCESSORY denied @SN_TALK_QNO_WC_POTION_4_04
+talk NPC_CH_ACCESSORY not-done @SN_TALK_QNO_WC_POTION_4_03
+talk NPC_CH_ACCESSORY bag-full @SN_TALK_QNO_WC_POTION_4_04
+talk NPC_CH_ACCESSORY middle @SN_TALK_QNO_WC_POTION_4_07
+
+quest QNO_WC_SMITH_3
+start level 30-
+start after all QNO_WC_SMITH_2
+repeat 1
+giver NPC_WC_SMITH
+npc NPC_WC_SMITH NPC_WC_FERRY3
+start-item ITEM_QNO_WC_SMITH_3_01 50
+goal deliver NPC_WC_FERRY3 ITEM_QNO_WC_SMITH_3_01 50 talk @SN_TALK_QNO_WC_SMITH_3_06 text @SN_CON_QNO_WC_SMITH_3
+talk NPC_WC_SMITH greeting @SN_NPC_WC_SMITH_QS
+talk NPC_WC_FERRY3 greeting @SN_NPC_WC_FERRY3_QS
+talk NPC_WC_SMITH offer @SN_TALK_QNO_WC_SMITH_3_01
+talk NPC_WC_SMITH accepted @SN_TALK_QNO_WC_SMITH_3_02
+talk NPC_WC_SMITH denied @SN_TALK_QNO_WC_SMITH_3_03
+talk NPC_WC_SMITH not-done @SN_TALK_QNO_WC_SMITH_3_04
+talk NPC_WC_SMITH bag-full @SN_TALK_QNO_WC_SMITH_3_05
+talk NPC_WC_SMITH middle @SN_TALK_QNO_WC_SMITH_3_07
+
+quest QNO_WC_ACCESSORY_3
+start level 16-
+start after all QNO_WC_ACCESSORY_2
+repeat 1
+giver NPC_WC_ACCESSORY
+npc NPC_WC_ACCESSORY NPC_CH_ACCESSORY
+finish NPC_CH_ACCESSORY
+start-item ITEM_QNO_WC_ACCESSORY_3_01 1
+goal deliver NPC_CH_ACCESSORY ITEM_QNO_WC_ACCESSORY_3_01 1 get ITEM_QNO_WC_ACCESSORY_3_02 1 talk @SN_TALK_QNO_WC_ACCESSORY_3_06 text @SN_CON_QNO_WC_ACCESSORY_3
+talk NPC_WC_ACCESSORY greeting @SN_NPC_WC_ACCESSORY_QS
+talk NPC_CH_ACCESSORY greeting @SN_NPC_CH_ACCESSORY_QS
+talk NPC_WC_ACCESSORY offer @SN_TALK_QNO_WC_ACCESSORY_3_01
+talk NPC_WC_ACCESSORY accepted @SN_TALK_QNO_WC_ACCESSORY_3_02
+talk NPC_WC_ACCESSORY denied @SN_TALK_QNO_WC_ACCESSORY_3_03
+talk NPC_WC_ACCESSORY not-done @SN_TALK_QNO_WC_ACCESSORY_3_04
+talk NPC_CH_ACCESSORY not-done @SN_TALK_QNO_WC_ACCESSORY_3_04
+talk NPC_CH_ACCESSORY done @SN_TALK_QNO_WC_ACCESSORY_3_07
+talk NPC_WC_ACCESSORY bag-full @SN_TALK_QNO_WC_ACCESSORY_3_05
+talk NPC_CH_ACCESSORY done-now @SN_TALK_QNO_WC_ACCESSORY_3_09
+talk NPC_WC_ACCESSORY middle @SN_TALK_QNO_WC_ACCESSORY_3_08
+
+# Its timer raises a Wing Tribe within 0..20 of its holder every 60 s while it runs: the ones its goal counts.
+quest QNO_RM_SLAVE2_2
+start level 75-
+start after all QNO_RM_SLAVE1_4
+repeat 1
+giver NPC_RM_SLAVE2
+npc NPC_RM_SLAVE2 NPC_RM_SLAVE1
+finish NPC_RM_SLAVE2
+goal kill 10 MOB_QT_01_WINGTRIBE text @SN_CON_QNO_RM_SLAVE2_2
+talk NPC_RM_SLAVE2 greeting @SN_NPC_RM_SLAVE2_QS
+talk NPC_RM_SLAVE1 greeting @SN_NPC_RM_SLAVE1_QS
+talk NPC_RM_SLAVE2 offer @SN_TALK_QNO_RM_SLAVE2_2_01
+talk NPC_RM_SLAVE2 accepted @SN_TALK_QNO_RM_SLAVE2_2_02
+talk NPC_RM_SLAVE2 denied @SN_TALK_QNO_RM_SLAVE2_2_03
+talk NPC_RM_SLAVE2 not-done @SN_TALK_QNO_RM_SLAVE2_2_04
+talk NPC_RM_SLAVE2 done-now @SN_TALK_QNO_RM_SLAVE2_2_09
+talk NPC_RM_SLAVE2 middle @SN_TALK_QNO_RM_SLAVE2_2_08
+raise MOB_QT_01_WINGTRIBE every 60 radius 0 20
+
+# Hotan's smith and accessory merchant: taking one chain closes the other (the smith's talk sets ACCESSORY_2/3's records;
+# ACCESSORY_2 lists SMITH_2/3 as never taken). Both need ACCESSORY_1 finished three times.
+quest QNO_KT_SMITH_2
+start level 55-
+start after all QNO_KT_ACCESSORY_1*3
+repeat 1
+giver NPC_KT_SMITH
+npc NPC_KT_SMITH
+finish NPC_KT_SMITH
+goal drop 100 ITEM_QNO_KT_SMITH_2_01 from MOB_TK_DEVILEYE 20% MOB_TK_DEVILEYE_CLON 20% at NPC_KT_SMITH text @SN_CON_QNO_KT_SMITH_2
+talk NPC_KT_SMITH offer @SN_TALK_QNO_KT_SMITH_2_03
+talk NPC_KT_SMITH accepted @SN_TALK_QNO_KT_SMITH_2_06
+talk NPC_KT_SMITH denied @SN_TALK_QNO_KT_SMITH_2_07
+talk NPC_KT_SMITH not-done @SN_TALK_QNO_KT_SMITH_2_08
+talk NPC_KT_SMITH done @SN_TALK_QNO_KT_SMITH_2_09
+talk NPC_KT_SMITH greeting @SN_NPC_KT_SMITH_QS
+talk NPC_KT_SMITH done-now @SN_TALK_QNO_KT_SMITH_2_10
+start never QNO_KT_ACCESSORY_2 QNO_KT_ACCESSORY_3
+
+quest QNO_KT_ACCESSORY_2
+start level 55-
+start after all QNO_KT_ACCESSORY_1*3
+start never QNO_KT_SMITH_2 QNO_KT_SMITH_3
+repeat 1
+giver NPC_KT_ACCESSORY
+npc NPC_KT_ACCESSORY
+finish NPC_KT_ACCESSORY
+goal drop 100 ITEM_QNO_KT_SMITH_2_01 from MOB_TK_DEVILEYE_CLON 20% MOB_TK_DEVILEYE 20% at NPC_KT_ACCESSORY text @SN_CON_QNO_KT_ACCESSORY_2
+talk NPC_KT_ACCESSORY offer @SN_TALK_QNO_KT_ACCESSORY_2_01
+talk NPC_KT_ACCESSORY accepted @SN_TALK_QNO_KT_ACCESSORY_2_02
+talk NPC_KT_ACCESSORY denied @SN_TALK_QNO_KT_ACCESSORY_2_03
+talk NPC_KT_ACCESSORY not-done @SN_TALK_QNO_KT_ACCESSORY_2_04
+talk NPC_KT_ACCESSORY done @SN_TALK_QNO_KT_ACCESSORY_2_05
+talk NPC_KT_ACCESSORY greeting @SN_NPC_KT_ACCESSORY_QS
+talk NPC_KT_ACCESSORY done-now @SN_TALK_QNO_KT_ACCESSORY_2_06
+
+quest QNO_KT_SMITH_3
+start level 55-
+start after all QNO_KT_SMITH_2
+repeat 1
+giver NPC_KT_SMITH
+npc NPC_KT_SMITH
+finish NPC_KT_SMITH
+goal drop 100 ITEM_QNO_KT_SMITH_3_01 from MOB_TK_BONESOLDIER_CLON 20% MOB_TK_BONESOLDIER 20% at NPC_KT_SMITH text @SN_CON_QNO_KT_SMITH_3
+talk NPC_KT_SMITH offer @SN_TALK_QNO_KT_SMITH_3_01
+talk NPC_KT_SMITH accepted @SN_TALK_QNO_KT_SMITH_3_02
+talk NPC_KT_SMITH denied @SN_TALK_QNO_KT_SMITH_3_03
+talk NPC_KT_SMITH not-done @SN_TALK_QNO_KT_SMITH_3_04
+talk NPC_KT_SMITH done @SN_TALK_QNO_KT_SMITH_3_05
+talk NPC_KT_SMITH greeting @SN_NPC_KT_SMITH_QS
+talk NPC_KT_SMITH done-now @SN_TALK_QNO_KT_SMITH_3_06
+
+quest QNO_KT_ACCESSORY_3
+start level 55-
+start after all QNO_KT_ACCESSORY_2
+repeat 1
+giver NPC_KT_ACCESSORY
+npc NPC_KT_ACCESSORY
+finish NPC_KT_ACCESSORY
+goal drop 100 ITEM_QNO_KT_ACCESSORY_3_01 from MOB_TK_BONESOLDIER_CLON 20% MOB_TK_BONESOLDIER 20% at NPC_KT_ACCESSORY text @SN_CON_QNO_KT_ACCESSORY_3
+talk NPC_KT_ACCESSORY offer @SN_TALK_QNO_KT_ACCESSORY_3_01
+talk NPC_KT_ACCESSORY accepted @SN_TALK_QNO_KT_ACCESSORY_3_02
+talk NPC_KT_ACCESSORY denied @SN_TALK_QNO_KT_ACCESSORY_3_03
+talk NPC_KT_ACCESSORY not-done @SN_TALK_QNO_KT_ACCESSORY_3_04
+talk NPC_KT_ACCESSORY done @SN_TALK_QNO_KT_ACCESSORY_3_05
+talk NPC_KT_ACCESSORY greeting @SN_NPC_KT_ACCESSORY_QS
+talk NPC_KT_ACCESSORY done-now @SN_TALK_QNO_KT_ACCESSORY_3_06
+
+quest QNO_EU_CONS_4
+start level 1-
+start party
+repeat 1
+giver NPC_EU_SPECIAL
+npc NPC_EU_SPECIAL
+finish NPC_EU_SPECIAL
+goal talk NPC_EU_SPECIAL talk @SN_TALK_QNO_EU_CONS_4_05 text @SN_CON_QNO_EU_CONS_4
+talk NPC_EU_SPECIAL offer @SN_TALK_QNO_EU_CONS_4_01
+talk NPC_EU_SPECIAL accepted @SN_TALK_QNO_EU_CONS_4_02
+talk NPC_EU_SPECIAL denied @SN_TALK_QNO_EU_CONS_4_03
+talk NPC_EU_SPECIAL not-done @SN_TALK_QNO_EU_CONS_4_04
+talk NPC_EU_SPECIAL done @SN_TALK_QNO_EU_CONS_4_06
+talk NPC_EU_SPECIAL greeting @SN_NPC_EU_SPECIAL_QS
+talk NPC_EU_SPECIAL middle @SN_TALK_QNO_EU_CONS_4_07
+
+quest QNO_EU_CONS_7
+start level 1-
+start after all QNO_EU_CONS_6
+repeat 1
+giver NPC_EU_UNION1
+npc NPC_EU_UNION1 NPC_EU_WITCH
+finish NPC_EU_WITCH
+goal talk NPC_EU_WITCH talk @SN_TALK_QNO_EU_CONS_7_06 text @SN_CON_QNO_EU_CONS_7
+talk NPC_EU_UNION1 greeting @SN_NPC_EU_UNION1_QS
+talk NPC_EU_WITCH greeting @SN_NPC_EU_WITCH_QS
+talk NPC_EU_UNION1 offer @SN_TALK_QNO_EU_CONS_7_01
+talk NPC_EU_UNION1 accepted @SN_TALK_QNO_EU_CONS_7_02
+talk NPC_EU_UNION1 denied @SN_TALK_QNO_EU_CONS_7_03
+talk NPC_EU_UNION1 not-done @SN_TALK_QNO_EU_CONS_7_04
+talk NPC_EU_WITCH not-done @SN_TALK_QNO_EU_CONS_7_04
+talk NPC_EU_WITCH done @SN_TALK_QNO_EU_CONS_7_13
+talk NPC_EU_WITCH bag-full @SN_TALK_QNO_EU_CONS_7_05
+talk NPC_EU_WITCH done-now @SN_TALK_QNO_EU_CONS_7_15
+talk NPC_EU_UNION1 middle @SN_TALK_QNO_EU_CONS_7_14
+
+# The ferryman pays one of two items, the talk's row picking it; _RefQuestReward's SelectionCnt says 0.
+quest QNO_EU_FERRY2_1
+start level 11-
+start party
+repeat 1
+giver NPC_EU_FERRY2
+npc NPC_EU_FERRY2
+finish NPC_EU_FERRY2
+goal drop 1 ITEM_QNO_EU_FERRY2_1_01 from MOB_QT_01_CRAB_CLON 50% at NPC_EU_FERRY2 text @SN_CON_QNO_EU_FERRY2_1
+talk NPC_EU_FERRY2 offer @SN_TALK_QNO_EU_FERRY2_1_01
+talk NPC_EU_FERRY2 accepted @SN_TALK_QNO_EU_FERRY2_1_02
+talk NPC_EU_FERRY2 denied @SN_TALK_QNO_EU_FERRY2_1_03
+talk NPC_EU_FERRY2 not-done @SN_TALK_QNO_EU_FERRY2_1_04
+talk NPC_EU_FERRY2 done @SN_TALK_QNO_EU_FERRY2_1_06
+talk NPC_EU_FERRY2 bag-full @SN_TALK_QNO_EU_FERRY2_1_05
+talk NPC_EU_FERRY2 greeting @SN_NPC_EU_FERRY2_QS
+talk NPC_EU_FERRY2 done-now @SN_TALK_QNO_EU_FERRY2_1_09
+talk NPC_EU_FERRY2 not-party @SN_TALK_QNO_EU_FERRY2_1_11
+reward choose 1
+
+quest QNO_CA_THIEF_5
+start level 21-
+start after all QNO_CA_THIEF_4
+repeat 1
+giver NPC_CA_SPECIAL
+npc NPC_CA_SPECIAL
+finish NPC_CA_SPECIAL
+goal drop 10 ITEM_QNO_CA_THIEF_5_01 from MOB_CA_PERYTON 10% at NPC_CA_SPECIAL text @SN_CON_QNO_CA_THIEF_5
+talk NPC_CA_SPECIAL offer @SN_TALK_QNO_CA_THIEF_5_01
+talk NPC_CA_SPECIAL accepted @SN_TALK_QNO_CA_THIEF_5_02
+talk NPC_CA_SPECIAL denied @SN_TALK_QNO_CA_THIEF_5_06
+talk NPC_CA_SPECIAL not-done @SN_TALK_QNO_CA_THIEF_5_07
+talk NPC_CA_SPECIAL done @SN_TALK_QNO_CA_THIEF_5_09
+talk NPC_CA_SPECIAL bag-full @SN_TALK_QNO_CA_THIEF_5_08
+talk NPC_CA_SPECIAL greeting @SN_NPC_CA_SPECIAL_QS
+talk NPC_CA_SPECIAL done-now @SN_TALK_QNO_CA_THIEF_5_10
+
+quest QNO_TQ_BAEKRYOUNG_5
+start level 88-
+start after all QNO_TQ_BAEKRYOUNG_4
+repeat 1
+giver NPC_CH_POTION
+npc NPC_CH_POTION NPC_CH_BEGGARBOY
+start-item ITEM_QNO_TQ_BAEKRYEONG_5_01 1
+goal deliver NPC_CH_BEGGARBOY ITEM_QNO_TQ_BAEKRYEONG_5_01 1 get ITEM_QNO_TQ_BAEKRYEONG_5_01 1 talk @SN_TALK_QNO_TQ_BAEKRYEONG_5_06 text @SN_CON_QNO_TQ_BAEKRYOUNG_5_01
+talk NPC_CH_POTION greeting @SN_NPC_CH_POTION_QS
+talk NPC_CH_BEGGARBOY greeting @SN_NPC_CH_BEGGARBOY_QS
+talk NPC_CH_POTION offer @SN_TALK_QNO_TQ_BAEKRYEONG_5_01
+talk NPC_CH_POTION accepted @SN_TALK_QNO_TQ_BAEKRYEONG_5_02
+talk NPC_CH_POTION denied @SN_TALK_QNO_TQ_BAEKRYEONG_5_03
+talk NPC_CH_POTION not-done @SN_TALK_QNO_TQ_BAEKRYEONG_5_04
+talk NPC_CH_POTION bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_5_05
+talk NPC_CH_POTION middle @SN_TALK_QNO_TQ_BAEKRYEONG_5_09
+
+quest QNO_WC_PRIEST1_1
+start level 11-
+repeat 1
+giver NPC_WC_PRIEST1
+npc NPC_WC_PRIEST1
+finish NPC_WC_PRIEST1
+goal kill 30 MOB_WC_HYUNGNO MOB_WC_HYUNGNO_CLON text @SN_CON_QNO_WC_PRIEST1_1
+talk NPC_WC_PRIEST1 offer @SN_TALK_QNO_WC_PRIEST1_2
+talk NPC_WC_PRIEST1 accepted @SN_TALK_QNO_WC_PRIEST1_3
+talk NPC_WC_PRIEST1 denied @SN_TALK_QNO_WC_PRIEST1_4
+talk NPC_WC_PRIEST1 not-done @SN_TALK_QNO_WC_PRIEST1_5
+talk NPC_WC_PRIEST1 done @SN_TALK_QNO_WC_PRIEST1_6
+talk NPC_WC_PRIEST1 greeting @SN_NPC_WC_PRIEST1_QS
+talk NPC_WC_PRIEST1 done-now @SN_TALK_QNO_WC_PRIEST1_7
+
+# --- Jangan: Wangwon's debts (the lottery; QNO_WC_FERRY4_1 the script's) ---------------------------------------------------
+
+# Asa's flute shown to Wangwon: a story told and done in one talk (_01.._05 the talk, the
+# player's lines among them, _06 on the yes, _07 on the no, _08 the drinks to find). Offered after the ferry's quest while
+# the flute is held (the start's flag 4).
+quest QNO_CH_LOTTERY_1
+start level 25-
+start after all QNO_WC_FERRY4_1
+start holding ITEM_QNO_WC_FERRY4_1_01
+repeat 1
+giver NPC_CH_LOTTERY
+npc NPC_CH_LOTTERY
+talk NPC_CH_LOTTERY greeting @SN_NPC_CH_LOTTERY_QS
+talk NPC_CH_LOTTERY offer @SN_TALK_QNO_CH_LOTTERY_1_01
+talk NPC_CH_LOTTERY offer @SN_TALK_QNO_CH_LOTTERY_1_02
+talk NPC_CH_LOTTERY offer @SN_TALK_QNO_CH_LOTTERY_1_03
+talk NPC_CH_LOTTERY offer @SN_TALK_QNO_CH_LOTTERY_1_04
+talk NPC_CH_LOTTERY offer @SN_TALK_QNO_CH_LOTTERY_1_05
+talk NPC_CH_LOTTERY accepted @SN_TALK_QNO_CH_LOTTERY_1_06
+talk NPC_CH_LOTTERY accepted @SN_TALK_QNO_CH_LOTTERY_1_08
+talk NPC_CH_LOTTERY denied @SN_TALK_QNO_CH_LOTTERY_1_07
+
+# The liquor for Huhoan: three ingredients, 100 of each (three gatherings), paid with three of each of the merchant's
+# drinks (_RefQuestRewardItems); after it, three of each again once a game day (_10 the day's given, _07 no room, _09 and
+# the drinks). Offered until the lottery's second is finished.
+quest QNO_CH_POTION_5
+start level 25-
+start after all QNO_CH_LOTTERY_1
+start before QNO_CH_LOTTERY_2
+repeat 1
+giver NPC_CH_POTION
+npc NPC_CH_POTION
+finish NPC_CH_POTION
+goal drop 100 ITEM_QNO_CH_POTION_5_01 from MOB_WC_HYEONGCHEON 50% at NPC_CH_POTION text @SN_CON_QNO_CH_POTION_5_01
+goal drop 100 ITEM_QNO_CH_POTION_5_02 from MOB_OA_ONG 50% at NPC_CH_POTION text @SN_CON_QNO_CH_POTION_5_02
+goal drop 100 ITEM_QNO_CH_POTION_5_03 from MOB_OA_REDSCORPION_CLON 50% at NPC_CH_POTION text @SN_CON_QNO_CH_POTION_5_03
+resupply ITEM_QNO_CH_POTION_5_04 3
+resupply ITEM_QNO_CH_POTION_5_05 3
+resupply ITEM_QNO_CH_POTION_5_06 3
+resupply-daily after
+talk NPC_CH_POTION greeting @SN_NPC_CH_POTION_QS
+talk NPC_CH_POTION offer @SN_TALK_QNO_CH_POTION_5_01
+talk NPC_CH_POTION offer @SN_TALK_QNO_CH_POTION_5_02
+talk NPC_CH_POTION offer @SN_TALK_QNO_CH_POTION_5_03
+talk NPC_CH_POTION accepted @SN_TALK_QNO_CH_POTION_5_04
+talk NPC_CH_POTION denied @SN_TALK_QNO_CH_POTION_5_05
+talk NPC_CH_POTION not-done @SN_TALK_QNO_CH_POTION_5_06
+talk NPC_CH_POTION bag-full @SN_TALK_QNO_CH_POTION_5_07
+talk NPC_CH_POTION done @SN_TALK_QNO_CH_POTION_5_08
+talk NPC_CH_POTION resupply @SN_TALK_QNO_CH_POTION_5_09
+talk NPC_CH_POTION resupply-spent @SN_TALK_QNO_CH_POTION_5_10
+talk NPC_CH_POTION done-now @SN_TALK_QNO_CH_POTION_5_11
+
+# The same at Flora with Europe's drinks (QNO_CH_EUROPE_3).
+quest QNO_CH_EUROPE_3
+start level 25-
+start after all QNO_CH_LOTTERY_1
+start before QNO_CH_LOTTERY_2
+repeat 1
+giver NPC_CH_EUROPE
+npc NPC_CH_EUROPE
+finish NPC_CH_EUROPE
+goal drop 100 ITEM_QNO_CH_EUROPE_3_01 from MOB_WC_EARTHKING_CLON 50% at NPC_CH_EUROPE text @SN_CON_QNO_CH_EUROPE_3_01
+goal drop 100 ITEM_QNO_CH_EUROPE_3_02 from MOB_OA_DESERTTRUNKZ 50% at NPC_CH_EUROPE text @SN_CON_QNO_CH_EUROPE_3_02
+goal drop 100 ITEM_QNO_CH_EUROPE_3_03 from MOB_OA_REDSCORPION 50% at NPC_CH_EUROPE text @SN_CON_QNO_CH_EUROPE_3_03
+resupply ITEM_QNO_CH_EUROPE_3_04 3
+resupply ITEM_QNO_CH_EUROPE_3_05 3
+resupply ITEM_QNO_CH_EUROPE_3_06 3
+resupply-daily after
+talk NPC_CH_EUROPE greeting @SN_NPC_CH_EUROPE_QS
+talk NPC_CH_EUROPE offer @SN_TALK_QNO_CH_EUROPE_3_01
+talk NPC_CH_EUROPE accepted @SN_TALK_QNO_CH_EUROPE_3_02
+talk NPC_CH_EUROPE denied @SN_TALK_QNO_CH_EUROPE_3_03
+talk NPC_CH_EUROPE not-done @SN_TALK_QNO_CH_EUROPE_3_04
+talk NPC_CH_EUROPE bag-full @SN_TALK_QNO_CH_EUROPE_3_05
+talk NPC_CH_EUROPE done @SN_TALK_QNO_CH_EUROPE_3_06
+talk NPC_CH_EUROPE resupply @SN_TALK_QNO_CH_EUROPE_3_07
+talk NPC_CH_EUROPE resupply-spent @SN_TALK_QNO_CH_EUROPE_3_08
+talk NPC_CH_EUROPE done-now @SN_TALK_QNO_CH_EUROPE_3_09
+
+# Huhoan's account book for Wangwon: its one mission (kind 9) is met when Huhoan's quest is finished; ours, the book
+# handed to Wangwon. Offered after either merchant's drinks while one of them is held.
+quest QNO_CH_LOTTERY_2
+start level 25-
+start after one QNO_CH_POTION_5 QNO_CH_EUROPE_3
+start holding-one ITEM_QNO_CH_POTION_5_04 ITEM_QNO_CH_POTION_5_05 ITEM_QNO_CH_POTION_5_06 ITEM_QNO_CH_EUROPE_3_04 ITEM_QNO_CH_EUROPE_3_05 ITEM_QNO_CH_EUROPE_3_06
+repeat 1
+giver NPC_CH_LOTTERY
+npc NPC_CH_LOTTERY NPC_CH_BIGMAN
+finish NPC_CH_LOTTERY
+goal deliver NPC_CH_LOTTERY ITEM_QNO_CH_BIGMAN_1_01 1 talk @SN_TALK_QNO_CH_LOTTERY_2_06 text @SN_CON_QNO_CH_LOTTERY_2
+talk NPC_CH_LOTTERY greeting @SN_NPC_CH_LOTTERY_QS
+talk NPC_CH_LOTTERY offer @SN_TALK_QNO_CH_LOTTERY_2_01
+talk NPC_CH_LOTTERY accepted @SN_TALK_QNO_CH_LOTTERY_2_02
+talk NPC_CH_LOTTERY denied @SN_TALK_QNO_CH_LOTTERY_2_03
+talk NPC_CH_LOTTERY not-done @SN_TALK_QNO_CH_LOTTERY_2_04
+talk NPC_CH_LOTTERY bag-full @SN_TALK_QNO_CH_LOTTERY_2_05
+talk NPC_CH_LOTTERY done @SN_TALK_QNO_CH_LOTTERY_2_06
+
+# Huhoan's drinking game (QuestDef::talkGame, Quests::PlayTalkGame): the
+# drinks poured to his mood exactly (30..40 by twos), then the book for Asa's flute or 50,000 gold. Offered while the
+# lottery's second runs and a drink is held.
+quest QNO_CH_BIGMAN_1
+start level 25-
+start during QNO_CH_LOTTERY_2
+start holding-one ITEM_QNO_CH_POTION_5_04 ITEM_QNO_CH_POTION_5_05 ITEM_QNO_CH_POTION_5_06 ITEM_QNO_CH_EUROPE_3_04 ITEM_QNO_CH_EUROPE_3_05 ITEM_QNO_CH_EUROPE_3_06
+repeat 1
+giver NPC_CH_BIGMAN
+npc NPC_CH_BIGMAN
+talk-game huhoan-drinks
+talk NPC_CH_BIGMAN greeting @SN_NPC_CH_BIGMAN_QS
+
+# --- Errands and catches with behaviour of their own --------------------------------------------------------------------
+
+# Hotan's lost horseshoes, three times: 250 from the Niya generals. Its two helper gatherings (_02 and _03, 150 each, 200
+# and 400 gold a piece) are paid by the other stable keepers in Donwhang and Jangan (_07, _08); where those pieces come
+# from is not known yet, so they are left out.
+quest QNO_KT_HORSE_1
+start level 69-
+repeat 3
+giver NPC_KT_HORSE
+npc NPC_KT_HORSE NPC_WC_HORSE NPC_CH_HORSE
+finish NPC_KT_HORSE
+goal drop 250 ITEM_QNO_KT_HORSE_1_01 from MOB_TK_BONEGENERAL_CLON 50% MOB_TK_BONEGENERAL 50% at NPC_KT_HORSE text @SN_CON_QNO_KT_HORSE_1
+talk NPC_KT_HORSE greeting @SN_NPC_KT_HORSE_QS
+talk NPC_KT_HORSE offer @SN_TALK_QNO_KT_HORSE_1_01
+talk NPC_KT_HORSE accepted @SN_TALK_QNO_KT_HORSE_1_02
+talk NPC_KT_HORSE denied @SN_TALK_QNO_KT_HORSE_1_03
+talk NPC_KT_HORSE not-done @SN_TALK_QNO_KT_HORSE_1_04
+talk NPC_KT_HORSE done @SN_TALK_QNO_KT_HORSE_1_05
+talk NPC_KT_HORSE done-now @SN_TALK_QNO_KT_HORSE_1_06
+
+# Demetri's trap carried to the witch, paid there.
+quest QNO_EU_EASTEU_14
+start level 6-
+start after all QNO_EU_EASTEU_13
+repeat 1
+giver NPC_EU_ADVENTURER
+npc NPC_EU_ADVENTURER NPC_EU_WITCH
+start-item ITEM_QNO_EU_EASTEU_14_01 1
+goal deliver NPC_EU_WITCH ITEM_QNO_EU_EASTEU_14_01 1 talk @SN_TALK_QNO_EU_EASTEU_14_06 text @SN_CON_QNO_EU_EASTEU_14
+talk NPC_EU_ADVENTURER greeting @SN_NPC_EU_ADVENTURER_QS
+talk NPC_EU_WITCH greeting @SN_NPC_EU_WITCH_QS
+talk NPC_EU_ADVENTURER offer @SN_TALK_QNO_EU_EASTEU_14_01
+talk NPC_EU_ADVENTURER accepted @SN_TALK_QNO_EU_EASTEU_14_02
+talk NPC_EU_ADVENTURER denied @SN_TALK_QNO_EU_EASTEU_14_03
+talk NPC_EU_ADVENTURER not-done @SN_TALK_QNO_EU_EASTEU_14_04
+talk NPC_EU_ADVENTURER bag-full @SN_TALK_QNO_EU_EASTEU_14_05
+talk NPC_EU_ADVENTURER middle @SN_TALK_QNO_EU_EASTEU_14_07
+
+# Nemea's Lion caught in Demetri's trap (the item rule in game/QuestItems.cpp, 20 minutes) and brought to the witch;
+# five traps at the start, more once a game day when none is left (_12 the row,
+# _13 given, _05 none left, _14 none to give today, _06 no room).
+quest QNO_EU_EASTEU_14_1
+start level 6-
+start after all QNO_EU_EASTEU_14
+repeat 1
+giver NPC_EU_WITCH
+npc NPC_EU_WITCH
+finish NPC_EU_WITCH
+start-item ITEM_QNO_EU_EASTEU_14_02 5
+goal drop 1 ITEM_QNO_EU_EASTEU_14_1_02 at NPC_EU_WITCH text @SN_CON_QNO_EU_EASTEU_14_1
+resupply ITEM_QNO_EU_EASTEU_14_02 5
+resupply-daily
+talk NPC_EU_WITCH greeting @SN_NPC_EU_WITCH_QS
+talk NPC_EU_WITCH offer @SN_TALK_QNO_EU_EASTEU_14_1_01
+talk NPC_EU_WITCH accepted @SN_TALK_QNO_EU_EASTEU_14_1_02
+talk NPC_EU_WITCH denied @SN_TALK_QNO_EU_EASTEU_14_1_03
+talk NPC_EU_WITCH not-done @SN_TALK_QNO_EU_EASTEU_14_1_04
+talk NPC_EU_WITCH resupply @SN_TALK_QNO_EU_EASTEU_14_1_13
+talk NPC_EU_WITCH resupply-spent @SN_TALK_QNO_EU_EASTEU_14_1_14
+talk NPC_EU_WITCH bag-full @SN_TALK_QNO_EU_EASTEU_14_1_06
+talk NPC_EU_WITCH done @SN_TALK_QNO_EU_EASTEU_14_1_07
+talk NPC_EU_WITCH done-now @SN_TALK_QNO_EU_EASTEU_14_1_08
+
+# Hoyun's wrapped leather for Martel the nun, who sends a perfume pouch back to Hoyun (two talk missions, kind 6: Martel
+# _08.._12, Hoyun _14; the box given at the start, the pouch at Martel: _07 / _13 no room).
+quest QNO_CA_WAREHOUSE_2
+start level 19-
+start after all QNO_CA_WAREHOUSE_1
+repeat 1
+giver NPC_CA_WAREHOUSE
+npc NPC_CA_WAREHOUSE NPC_CA_POTION NPC_CA_HORSE
+start-item ITEM_QNO_CA_WAREHOUSE_2_01 1
+goal deliver NPC_CA_POTION ITEM_QNO_CA_WAREHOUSE_2_01 1 get ITEM_QNO_CA_WAREHOUSE_2_02 1 talk @SN_TALK_QNO_CA_WAREHOUSE_2_08 text @SN_CON_QNO_CA_WAREHOUSE_2
+goal talk NPC_CA_HORSE talk @SN_TALK_QNO_CA_WAREHOUSE_2_14 text @SN_CON_QNO_CA_WAREHOUSE_2_1
+talk NPC_CA_WAREHOUSE greeting @SN_NPC_CA_WAREHOUSE_QS
+talk NPC_CA_POTION greeting @SN_NPC_CA_POTION_QS
+talk NPC_CA_HORSE greeting @SN_NPC_CA_HORSE_QS
+talk NPC_CA_WAREHOUSE offer @SN_TALK_QNO_CA_WAREHOUSE_2_01
+talk NPC_CA_WAREHOUSE offer @SN_TALK_QNO_CA_WAREHOUSE_2_02
+talk NPC_CA_WAREHOUSE offer @SN_TALK_QNO_CA_WAREHOUSE_2_03
+talk NPC_CA_WAREHOUSE accepted @SN_TALK_QNO_CA_WAREHOUSE_2_04
+talk NPC_CA_WAREHOUSE denied @SN_TALK_QNO_CA_WAREHOUSE_2_05
+talk NPC_CA_WAREHOUSE not-done @SN_TALK_QNO_CA_WAREHOUSE_2_06
+talk NPC_CA_WAREHOUSE bag-full @SN_TALK_QNO_CA_WAREHOUSE_2_07
+talk NPC_CA_POTION bag-full @SN_TALK_QNO_CA_WAREHOUSE_2_13
+talk NPC_CA_WAREHOUSE middle @SN_TALK_QNO_CA_WAREHOUSE_2_17
+talk NPC_CA_WAREHOUSE done-now @SN_TALK_QNO_CA_WAREHOUSE_2_16
+
+# Shahad's thief: the victims asked in turn (the start's six NPCs); one of them found the Blue Pearl (the mission's NPC,
+# kind 6: the merchant's _16 and the pearl, _09 no room), taken back to Shahad. The original picks which victim tells;
+# ours, the merchant as the quest names.
+quest QNO_CA_THIEF_2
+start level 21-
+start after all QNO_CA_THIEF_1
+repeat 1
+giver NPC_CA_HUNTER
+npc NPC_CA_HUNTER NPC_CA_WAREHOUSE NPC_CA_SMITH NPC_CA_ARMOR NPC_CA_POTION NPC_CA_MERCHANT
+finish NPC_CA_HUNTER
+goal deliver NPC_CA_MERCHANT get ITEM_QNO_CA_THIEF_2_01 1 talk @SN_TALK_QNO_CA_THIEF_2_16 text @SN_CON_QNO_CA_THIEF_2_05
+talk NPC_CA_HUNTER greeting @SN_NPC_CA_HUNTER_QS
+talk NPC_CA_WAREHOUSE greeting @SN_NPC_CA_WAREHOUSE_QS
+talk NPC_CA_SMITH greeting @SN_NPC_CA_SMITH_QS
+talk NPC_CA_ARMOR greeting @SN_NPC_CA_ARMOR_QS
+talk NPC_CA_POTION greeting @SN_NPC_CA_POTION_QS
+talk NPC_CA_MERCHANT greeting @SN_NPC_CA_MERCHANT_QS
+talk NPC_CA_HUNTER offer @SN_TALK_QNO_CA_THIEF_2_01
+talk NPC_CA_HUNTER accepted @SN_TALK_QNO_CA_THIEF_2_02
+talk NPC_CA_HUNTER denied @SN_TALK_QNO_CA_THIEF_2_03
+talk NPC_CA_HUNTER not-done @SN_TALK_QNO_CA_THIEF_2_04
+talk NPC_CA_MERCHANT bag-full @SN_TALK_QNO_CA_THIEF_2_09
+talk NPC_CA_WAREHOUSE middle @SN_TALK_QNO_CA_THIEF_2_10
+talk NPC_CA_SMITH middle @SN_TALK_QNO_CA_THIEF_2_12
+talk NPC_CA_ARMOR middle @SN_TALK_QNO_CA_THIEF_2_14
+talk NPC_CA_POTION middle @SN_TALK_QNO_CA_THIEF_2_17
+talk NPC_CA_HUNTER middle @SN_TALK_QNO_CA_THIEF_2_08
+talk NPC_CA_HUNTER done @SN_TALK_QNO_CA_THIEF_2_18
+talk NPC_CA_HUNTER done-now @SN_TALK_QNO_CA_THIEF_2_19
+
+# The white viper asked about among the entertainers (seven NPCs): the beggar boy's errand; the one who knows tells (ours: any
+# of the six entertainers, _06; the original picks one, the others saying they know nothing), back to the boy.
+quest QNO_TQ_BAEKRYOUNG_6
+start level 88-
+start after all QNO_TQ_BAEKRYOUNG_5
+repeat 1
+giver NPC_CH_BEGGARBOY
+npc NPC_CH_BEGGARBOY NPC_CH_KISAENG1 NPC_CH_KISAENG2 NPC_CH_KISAENG3 NPC_CH_KISAENG4 NPC_CH_KISAENG5 NPC_CH_KISAENG6
+finish NPC_CH_BEGGARBOY
+goal talk NPC_CH_KISAENG1 NPC_CH_KISAENG2 NPC_CH_KISAENG3 NPC_CH_KISAENG4 NPC_CH_KISAENG5 NPC_CH_KISAENG6 talk @SN_TALK_QNO_TQ_BAEKRYEONG_6_06 text @SN_CON_QNO_TQ_BAEKRYOUNG_6_06
+talk NPC_CH_BEGGARBOY greeting @SN_NPC_CH_BEGGARBOY_QS
+talk NPC_CH_BEGGARBOY offer @SN_TALK_QNO_TQ_BAEKRYEONG_6_01
+talk NPC_CH_BEGGARBOY accepted @SN_TALK_QNO_TQ_BAEKRYEONG_6_02
+talk NPC_CH_BEGGARBOY denied @SN_TALK_QNO_TQ_BAEKRYEONG_6_03
+talk NPC_CH_BEGGARBOY not-done @SN_TALK_QNO_TQ_BAEKRYEONG_6_04
+talk NPC_CH_BEGGARBOY done @SN_TALK_QNO_TQ_BAEKRYEONG_6_21
+talk NPC_CH_BEGGARBOY done-now @SN_TALK_QNO_TQ_BAEKRYEONG_6_22
+
+# Kushan's incense for General Sonhyeon: a visit to the monk that receives (a delivery of nothing, its second list the
+# incense: _05, _07 no room), brought back to the general.
+quest QNO_TQ_GENERALORDER_1
+start level 88-
+repeat 1
+giver NPC_CH_GENARAL
+npc NPC_CH_GENARAL NPC_CH_INDIA
+finish NPC_CH_GENARAL
+goal deliver NPC_CH_INDIA get ITEM_QNO_TQ_GENERALORDER_1_01 1 talk @SN_TALK_QNO_TQ_GENERALORDER_1_05 text @SN_CON_QNO_TQ_GENERALORDER_1_01
+talk NPC_CH_GENARAL greeting @SN_NPC_CH_GENARAL_QS
+talk NPC_CH_INDIA greeting @SN_NPC_CH_INDIA_QS
+talk NPC_CH_GENARAL offer @SN_TALK_QNO_TQ_GENERALORDER_1_01
+talk NPC_CH_GENARAL accepted @SN_TALK_QNO_TQ_GENERALORDER_1_02
+talk NPC_CH_GENARAL denied @SN_TALK_QNO_TQ_GENERALORDER_1_03
+talk NPC_CH_GENARAL not-done @SN_TALK_QNO_TQ_GENERALORDER_1_04
+talk NPC_CH_INDIA bag-full @SN_TALK_QNO_TQ_GENERALORDER_1_07
+talk NPC_CH_GENARAL middle @SN_TALK_QNO_TQ_GENERALORDER_1_06
+talk NPC_CH_GENARAL done @SN_TALK_QNO_TQ_GENERALORDER_1_08
+talk NPC_CH_GENARAL done-now @SN_TALK_QNO_TQ_GENERALORDER_1_10
+
+# --- Conversions by kill, and the viper chain's delivery ---------------------------------------------------------------
+
+# Each champion Wing Tribe its hidden kill goal counts changes one tool into a result (kind 10: the tool, the result); a
+# party sharing.
+quest QNO_RM_FLYSHIP2_2
+start level 70-
+start after all QNO_RM_FLYSHIP2_1
+start party
+repeat 1
+giver NPC_RM_FLYSHIP2
+npc NPC_RM_FLYSHIP2
+finish NPC_RM_FLYSHIP2
+start-item ITEM_QNO_RM_FLYSHIP2_1_01 100
+goal drop 100 ITEM_QNO_RM_FLYSHIP2_2_01 text @SN_CON_QNO_RM_FLYSHIP2_2
+goal kill 100 MOB_RM_WINGTRIBE class champion text @SN_CON_QNO_RM_FLYSHIP2_2 hidden
+talk NPC_RM_FLYSHIP2 offer @SN_TALK_QNO_RM_FLYSHIP2_2_01
+talk NPC_RM_FLYSHIP2 accepted @SN_TALK_QNO_RM_FLYSHIP2_2_02
+talk NPC_RM_FLYSHIP2 denied @SN_TALK_QNO_RM_FLYSHIP2_2_03
+talk NPC_RM_FLYSHIP2 not-done @SN_TALK_QNO_RM_FLYSHIP2_2_04
+talk NPC_RM_FLYSHIP2 done @SN_TALK_QNO_RM_FLYSHIP2_2_07
+talk NPC_RM_FLYSHIP2 bag-full @SN_TALK_QNO_RM_FLYSHIP2_2_05
+talk NPC_RM_FLYSHIP2 greeting @SN_NPC_RM_FLYSHIP2_QS
+talk NPC_RM_FLYSHIP2 done-now @SN_TALK_QNO_RM_FLYSHIP2_2_08
+talk NPC_RM_FLYSHIP2 not-party @SN_TALK_QNO_RM_FLYSHIP2_2_06
+on kill MOB_RM_WINGTRIBE need ITEM_QNO_RM_FLYSHIP2_1_01 take ITEM_QNO_RM_FLYSHIP2_1_01 give ITEM_QNO_RM_FLYSHIP2_2_01
+
+# The same with the Tomb snake men.
+quest QNO_TQ_BAEKRYOUNG_12
+start level 89-
+start after all QNO_TQ_BAEKRYOUNG_11
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP
+finish NPC_CH_GENARAL_SP
+start-item ITEM_QNO_TQ_BAEKRYEONG_11_03 100
+goal drop 100 ITEM_QNO_TQ_BAEKRYEONG_12_01 text @SN_CON_QNO_TQ_BAEKRYOUNG_12_01
+goal kill 100 MOB_TQ_SNAKEMAN text @SN_CON_QNO_TQ_BAEKRYOUNG_12_01 hidden
+talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_12_01
+talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_12_02
+talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_12_03
+talk NPC_CH_GENARAL_SP not-done @SN_TALK_QNO_TQ_BAEKRYEONG_12_04
+talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_12_06
+talk NPC_CH_GENARAL_SP bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_12_05
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_GENARAL_SP done-now @SN_TALK_QNO_TQ_BAEKRYEONG_12_07
+on kill MOB_TQ_SNAKEMAN need ITEM_QNO_TQ_BAEKRYEONG_11_03 take ITEM_QNO_TQ_BAEKRYEONG_11_03 give ITEM_QNO_TQ_BAEKRYEONG_12_01
+
+# It shares the White Viper family's behaviour (the instance of QNO_TQ_BAEKRYOUNG_10 entered from it).
+quest QNO_TQ_BAEKRYOUNG_9
+start level 88-
+start after all QNO_TQ_BAEKRYOUNG_8
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP NPC_CH_MOONSHADOW
+finish NPC_CH_MOONSHADOW
+start-item ITEM_QNO_TQ_BAEKRYEONG_9_03 1
+start-item ITEM_QNO_TQ_BAEKRYEONG_9_01 1
+goal deliver NPC_CH_MOONSHADOW ITEM_QNO_TQ_BAEKRYEONG_9_03 1 ITEM_QNO_TQ_BAEKRYEONG_9_01 1 get ITEM_QNO_TQ_BAEKRYEONG_9_02 1 talk @SN_TALK_QNO_TQ_BAEKRYEONG_9_06 text @SN_CON_QNO_TQ_BAEKRYOUNG_9_01
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_MOONSHADOW greeting @SN_NPC_CH_MOONSHADOW_QS
+talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_9_01
+talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_9_02
+talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_9_03
+talk NPC_CH_GENARAL_SP not-done @SN_TALK_QNO_TQ_BAEKRYEONG_9_04
+talk NPC_CH_MOONSHADOW not-done @SN_TALK_QNO_TQ_BAEKRYEONG_9_04
+talk NPC_CH_MOONSHADOW done @SN_TALK_QNO_TQ_BAEKRYEONG_9_11
+talk NPC_CH_GENARAL_SP bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_9_05
+talk NPC_CH_MOONSHADOW done-now @SN_TALK_QNO_TQ_BAEKRYEONG_9_13
+talk NPC_CH_GENARAL_SP middle @SN_TALK_QNO_TQ_BAEKRYEONG_9_12
+)";
+
+} // namespace
+
+std::string_view CodedQuestsTowns() { return kCoded; }
+
+} // namespace sr::server
