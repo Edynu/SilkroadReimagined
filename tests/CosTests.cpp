@@ -1365,7 +1365,8 @@ TEST_CASE("Game server: a job suit's rules: the refusals' codes, the 10 s change
 
     // A trader with its alias in town: the change starts (0x189B), it and those near see its 10 s; then the suit is on.
     auto a = s.Make("Wearer", 1030, {Stored(kTraderSuit, 1)}, 1, 0, 0, 1000, trader("Wearer1"));
-    for (int i = 0; i < 100; ++i) s.game.Poll(2ms); // those near see it
+    // Those near see it (a newcomer is in the views around it within kViewTurn ticks): by the clock.
+    for (const auto until = std::chrono::steady_clock::now() + 500ms; std::chrono::steady_clock::now() < until;) s.game.Poll(2ms);
     const std::uint8_t place = PlaceOf(a.bag, kTraderSuit);
     r = wear(a, place, game::slot::kJobSuit);
     CHECK(r.status == proto::ItemStatus::JobChange);

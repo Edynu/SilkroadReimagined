@@ -169,6 +169,79 @@ TEST_CASE("Framing: the latest lane keeps only the newest value, in the first on
     CHECK_FALSE(queue.Take(frames));
 }
 
+TEST_CASE("Framing: a run of latest-lane messages of one id goes as one packed frame, and comes out as they were") {
+    OutgoingQueue queue;
+    queue.Push(1, Bytes("first"));
+    for (std::uint64_t key = 1; key <= 5; ++key) queue.PushLatest(key, 0x1011, Bytes("move " + std::to_string(key)));
+    queue.PushLatest(3, 0x1011, Bytes("move 3 again")); // replaced in its place: still one run
+    queue.Push(2, Bytes("last"));
+    std::vector<std::byte> frames;
+    REQUIRE(queue.Take(frames));
+    // Three frames: "first", the packed five, "last".
+    FrameParser parser(1024);
+    std::vector<Message> out;
+    std::string error;
+    REQUIRE(parser.Feed(frames, out, error));
+    REQUIRE(out.size() == 7);
+    CHECK(Text(out[0].payload) == "first");
+    for (int i = 1; i <= 5; ++i) {
+        CHECK(out[std::size_t(i)].id == 0x1011);
+        CHECK(Text(out[std::size_t(i)].payload) == (i == 3 ? std::string("move 3 again") : "move " + std::to_string(i)));
+    }
+    CHECK(Text(out[6].payload) == "last");
+    // Smaller than five frames of their own: one header and a byte of length each instead of six bytes each.
+    std::size_t plain = 0;
+    for (const Message& m : out) plain += kFrameHeaderSize + m.payload.size();
+    CHECK(frames.size() < plain);
+    // The frame after "first" (its header and 5 bytes) is the packed one.
+    const std::size_t second = kFrameHeaderSize + 5;
+    CHECK(std::uint16_t(std::uint16_t(frames[second + 4]) | std::uint16_t(frames[second + 5]) << 8) == kPackedId);
+}
+
+TEST_CASE("Framing: a long run is split into packed frames the receiver's limit takes") {
+    OutgoingQueue queue;
+    const std::string payload(1000, 'x');
+    for (std::uint64_t key = 1; key <= 100; ++key) queue.PushLatest(key, 7, Bytes(payload));
+    std::vector<std::byte> frames;
+    REQUIRE(queue.Take(frames));
+    FrameParser parser(std::uint32_t(kPackedMaxPayload + 64));
+    std::vector<Message> out;
+    std::string error;
+    REQUIRE_MESSAGE(parser.Feed(frames, out, error), error);
+    REQUIRE(out.size() == 100);
+    for (const Message& m : out) CHECK(m.payload.size() == 1000);
+}
+
+TEST_CASE("Framing: a malformed packed frame is refused") {
+    const auto feed = [](std::vector<std::byte> payload) {
+        std::vector<std::byte> stream;
+        AppendFrame(stream, kPackedId, payload);
+        FrameParser parser(1024);
+        std::vector<Message> out;
+        std::string error;
+        return parser.Feed(stream, out, error);
+    };
+    CHECK_FALSE(feed({std::byte{7}}));                                       // no message id
+    CHECK_FALSE(feed({std::byte{7}, std::byte{0}, std::byte{5}, std::byte{'a'}})); // a length past the end
+    CHECK_FALSE(feed({std::byte{0xFE}, std::byte{0xFF}, std::byte{0}}));      // packed inside packed
+    CHECK(feed({std::byte{7}, std::byte{0}, std::byte{1}, std::byte{'a'}, std::byte{0}}));
+}
+
+TEST_CASE("Framing: a queue replaced into many times keeps only what it sends") {
+    OutgoingQueue queue;
+    const std::string big(4000, 'y');
+    for (int i = 0; i < 1000; ++i) queue.PushLatest(1, 9, Bytes(big + std::to_string(i)));
+    CHECK(queue.PendingBytes() == kFrameHeaderSize + big.size() + 3);
+    std::vector<std::byte> frames;
+    REQUIRE(queue.Take(frames));
+    FrameParser parser(1 << 16);
+    std::vector<Message> out;
+    std::string error;
+    REQUIRE(parser.Feed(frames, out, error));
+    REQUIRE(out.size() == 1);
+    CHECK(Text(out[0].payload) == big + "999");
+}
+
 TEST_CASE("Net: messages over TLS, both ways, and the version check") {
     NetService server(2), client(1);
     EchoServer echo(server);

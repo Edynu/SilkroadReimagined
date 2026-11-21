@@ -119,6 +119,21 @@ public:
         Queue([&](OutgoingQueue& q) { q.PushLatest(key, id, payload); });
     }
 
+    void SendMany(std::span<const OutgoingMessage> messages) override {
+        if (messages.empty()) return;
+        Queue(
+            [&](OutgoingQueue& q) {
+                for (const OutgoingMessage& m : messages) {
+                    if (m.latestKey != 0) {
+                        q.PushLatest(m.latestKey, m.id, m.payload);
+                    } else {
+                        q.Push(m.id, m.payload);
+                    }
+                }
+            },
+            messages.size());
+    }
+
     std::size_t Receive(std::vector<Message>& out) override {
         std::lock_guard lock(mutex_);
         const std::size_t n = received_.size();
@@ -166,13 +181,13 @@ public:
 
 private:
     template <typename F>
-    void Queue(F&& push) {
+    void Queue(F&& push, std::size_t messages = 1) {
         if (state_ == ConnectionState::Closed || closeAfterSend_) return;
         bool overflow = false;
         {
             std::lock_guard lock(mutex_);
             push(outgoing_);
-            ++stats_.messagesSent;
+            stats_.messagesSent += messages;
             overflow = outgoing_.PendingBytes() > limits_.maxPendingBytes;
         }
         if (overflow) {
@@ -254,13 +269,17 @@ private:
         std::vector<Message> fresh;
         std::string error;
         if (!parser_.Feed(std::span(readBuffer_.data(), n), fresh, error)) return CloseNow("malformed frame: " + error);
+        {
+            std::lock_guard lock(mutex_);
+            stats_.bytesReceived += n; // as read (packed frames count as the bytes they took)
+        }
         if (!fresh.empty()) {
             bool flooded = false;
             {
                 std::lock_guard lock(mutex_);
                 for (Message& m : fresh) {
+                    // The flood limit counts each message as its own frame: a packed run cannot slip past it.
                     receivedBytes_ += kFrameHeaderSize + m.payload.size();
-                    stats_.bytesReceived += kFrameHeaderSize + m.payload.size();
                     ++stats_.messagesReceived;
                     received_.push_back(std::move(m));
                 }

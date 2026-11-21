@@ -46,6 +46,13 @@ struct ConnectionStats {
     std::uint64_t latestReplaced = 0;
 };
 
+// One message of a batch (Connection::SendMany): latestKey 0 the reliable lane, else the latest lane with that key.
+struct OutgoingMessage {
+    MessageId id = 0;
+    std::span<const std::byte> payload;
+    std::uint64_t latestKey = 0;
+};
+
 class Connection {
 public:
     virtual ~Connection() = default;
@@ -54,6 +61,17 @@ public:
     virtual void Send(MessageId id, std::span<const std::byte> payload) = 0;
     // Latest lane: while it waits to be written, a newer message with the same key replaces it.
     virtual void SendLatest(std::uint64_t key, MessageId id, std::span<const std::byte> payload) = 0;
+    // Several at once, in order, each on its lane: one lock and one wake of the writer for all of them (a server's
+    // messages to one player on a tick), where Send and SendLatest take one each.
+    virtual void SendMany(std::span<const OutgoingMessage> messages) {
+        for (const OutgoingMessage& m : messages) {
+            if (m.latestKey != 0) {
+                SendLatest(m.latestKey, m.id, m.payload);
+            } else {
+                Send(m.id, m.payload);
+            }
+        }
+    }
     // Appends every message received so far to `out`; returns how many.
     virtual std::size_t Receive(std::vector<Message>& out) = 0;
 

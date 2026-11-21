@@ -987,7 +987,11 @@ TEST_CASE("Fortress war: flags, repair kits and the shock bomb (game files)") {
     CHECK(forts->MayHit(a.character, flag) == FortressError::StructureOwnGuild);
     CHECK(forts->MayHit(b.character, flag) == FortressError::None);
     // Its time over (3 s here, 120 s in the game): gone.
-    for (int i = 0; i < 400 && !forts->Objects(1, game::StructureKind::Flag).empty(); ++i) rig.pump();
+    // By the clock, not by a count of pumps (a pump's time is the server's, which says nothing of the flag's 3 s).
+    for (const auto until = std::chrono::steady_clock::now() + 8s;
+         std::chrono::steady_clock::now() < until && !forts->Objects(1, game::StructureKind::Flag).empty();) {
+        rig.pump();
+    }
     CHECK(forts->Objects(1, game::StructureKind::Flag).empty());
     // A repair kit: the Raiders' refused (not the holder, 0x18E5); on a whole structure 0x18ED; on the tower once hit, its
     // health back by 1 % (10 of 1,000) a pulse.

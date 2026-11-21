@@ -24,11 +24,13 @@
 // - A player enters once the navigation around it is loaded; its first message is its own
 //   character (WorldEntered), as the original sends its character's data before anything else.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -76,11 +78,26 @@ struct WorldPlayer {
     bool dropOnGround = false; // put down on the surface nearest its height (a first entry)
 };
 
+// A message's bytes, read-only and shared by everyone they are told to: a walker's new leg is encoded once and goes to
+// hundreds of players without a copy (a copy is an allocation; a crowd's tick holds thousands of them).
+class SharedBytes {
+public:
+    SharedBytes() = default;
+    SharedBytes(std::vector<std::byte> bytes) : bytes_(std::make_shared<const std::vector<std::byte>>(std::move(bytes))) {}
+    std::span<const std::byte> Span() const { return bytes_ ? std::span<const std::byte>(*bytes_) : std::span<const std::byte>(); }
+    operator std::span<const std::byte>() const { return Span(); }
+    std::size_t size() const { return bytes_ ? bytes_->size() : 0; }
+    bool empty() const { return size() == 0; }
+
+private:
+    std::shared_ptr<const std::vector<std::byte>> bytes_;
+};
+
 // What a tick sends.
 struct WorldMessage {
     std::uint64_t peer = 0;
     game::proto::MessageId id = 0;
-    std::vector<std::byte> payload;
+    SharedBytes payload;
     std::uint64_t latestKey = 0; // not 0: the latest lane, with this key
 };
 
@@ -105,6 +122,38 @@ struct WorldStats {
     std::uint64_t watcherTicks = 0, seen = 0, seenPlayers = 0, seenMonsters = 0, seenItems = 0;
     std::size_t seenMax = 0;
     std::uint64_t legsSent = 0, legsDeferred = 0; // legs told at once, and held for a farther tier's tick
+    std::uint64_t viewsWorkedOut = 0; // views whose members were worked out again (the rest stood; by kind: these)
+
+    // Another reading added to this one (counts summed, the largest kept, the entities as the later reading saw them):
+    // each reader of the world's stats (the log, the site's load sample) keeps its own total.
+    void Add(const WorldStats& w) {
+        ticks += w.ticks;
+        dropped += w.dropped;
+        overBudget += w.overBudget;
+        tickMsSum += w.tickMsSum;
+        tickMsMax = std::max(tickMsMax, w.tickMsMax);
+        zoneMsMax = std::max(zoneMsMax, w.zoneMsMax);
+        interestMsMax = std::max(interestMsMax, w.interestMsMax);
+        zonesMax = std::max(zonesMax, w.zonesMax);
+        entities = w.entities;
+        messages += w.messages;
+        legs += w.legs;
+        zoneChanges += w.zoneChanges;
+        refused += w.refused;
+        refusedFar += w.refusedFar;
+        refusedNavigation += w.refusedNavigation;
+        refusedFloor += w.refusedFloor;
+        refusedWalk += w.refusedWalk;
+        watcherTicks += w.watcherTicks;
+        seen += w.seen;
+        seenPlayers += w.seenPlayers;
+        seenMonsters += w.seenMonsters;
+        seenItems += w.seenItems;
+        seenMax = std::max(seenMax, w.seenMax);
+        legsSent += w.legsSent;
+        legsDeferred += w.legsDeferred;
+        viewsWorkedOut += w.viewsWorkedOut;
+    }
 };
 
 class World {

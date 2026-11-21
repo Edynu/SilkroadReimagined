@@ -163,8 +163,64 @@ struct MoveToward {
     }
 };
 
+namespace detail {
+
+// A leg's values packed (EntityMoved): x and z (0 to 2048) in 1/32ths, y (-2048 to 2048) in 1/16ths, the speed (0 to
+// 655) in 1/100ths; false when the value is outside its range (it then goes as its float).
+inline bool PackXz(float v, std::uint16_t& q) {
+    const float s = std::round(v * 32.0f);
+    if (!(s >= 0.0f && s <= 65535.0f)) return false;
+    q = std::uint16_t(s);
+    return true;
+}
+inline bool PackY(float v, std::int16_t& q) {
+    const float s = std::round(v * 16.0f);
+    if (!(s >= -32768.0f && s <= 32767.0f)) return false;
+    q = std::int16_t(s);
+    return true;
+}
+inline bool PackSpeed(float v, std::uint16_t& q) {
+    const float s = std::round(v * 100.0f);
+    if (!(s >= 0.0f && s <= 65535.0f)) return false;
+    q = std::uint16_t(s);
+    return true;
+}
+
+// One place of a leg, written or read: packed, or (`exact`) as its floats.
+template <typename V>
+void LegPlace(V& v, bool exact, WorldPosition& p) {
+    v("region", p.region);
+    if (exact) {
+        v("x", p.x);
+        v("y", p.y);
+        v("z", p.z);
+        return;
+    }
+    std::uint16_t x = 0, z = 0;
+    std::int16_t y = 0;
+    if constexpr (std::is_same_v<V, Writer>) {
+        PackXz(p.x, x);
+        PackY(p.y, y);
+        PackXz(p.z, z);
+    }
+    v("x", x);
+    v("y", y);
+    v("z", z);
+    if constexpr (std::is_same_v<V, Reader>) {
+        p.x = float(x) / 32.0f;
+        p.y = float(y) / 16.0f;
+        p.z = float(z) / 32.0f;
+    }
+}
+
+} // namespace detail
+
 // A walker's leg: from where it is now to where it stops (equal: it stands), at a speed. Sent on
-// the latest lane, keyed by the entity (only the newest leg matters).
+// the latest lane, keyed by the entity (only the newest leg matters); a tick's legs for a player
+// go packed into one frame (net/Framing.h). Most of the world's traffic, so its places are packed
+// too (detail::PackXz and the others: 23 bytes where the floats take 36), each place or the
+// speed whose values fall outside their range as its floats; `packed` (on the wire only) has a
+// bit for each of them that does (1 from, 2 to, 4 the speed). The logs show the plain values.
 struct EntityMoved {
     static constexpr MessageId kId = 0x1011;
     std::uint32_t entity = 0;
@@ -173,9 +229,30 @@ struct EntityMoved {
     template <typename V>
     void Visit(V& v) {
         v("entity", entity);
-        v("from", from);
-        v("to", to);
-        v("speed", speed);
+        if constexpr (std::is_same_v<V, detail::Writer> || std::is_same_v<V, detail::Reader>) {
+            std::uint8_t exact = 0;
+            if constexpr (std::is_same_v<V, detail::Writer>) {
+                std::uint16_t qx = 0, qs = 0;
+                std::int16_t qy = 0;
+                const auto fits = [&](const WorldPosition& p) { return detail::PackXz(p.x, qx) && detail::PackY(p.y, qy) && detail::PackXz(p.z, qx); };
+                exact = std::uint8_t((fits(from) ? 0 : 1) | (fits(to) ? 0 : 2) | (detail::PackSpeed(speed, qs) ? 0 : 4));
+            }
+            v("packed", exact);
+            detail::LegPlace(v, (exact & 1) != 0, from);
+            detail::LegPlace(v, (exact & 2) != 0, to);
+            if (exact & 4) {
+                v("speed", speed);
+            } else {
+                std::uint16_t qs = 0;
+                if constexpr (std::is_same_v<V, detail::Writer>) detail::PackSpeed(speed, qs);
+                v("speed", qs);
+                if constexpr (std::is_same_v<V, detail::Reader>) speed = float(qs) / 100.0f;
+            }
+        } else {
+            v("from", from);
+            v("to", to);
+            v("speed", speed);
+        }
     }
 };
 

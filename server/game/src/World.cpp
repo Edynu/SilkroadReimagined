@@ -70,7 +70,7 @@ struct World::State {
         std::uint8_t rarity = 0;   // a monster's kind
         bool fresh = false;        // a ground item just put down: told as fallen on the next pass only
         std::uint32_t maxHp = 0, maxMp = 0; // a player's (WorldEntered)
-        std::vector<std::byte> appearBytes; // an NPC's EntityAppeared, encoded once
+        SharedBytes appearBytes; // an NPC's EntityAppeared, encoded once (shared by everyone told)
         std::vector<proto::StateRecord> states; // its states (SetStates), their time left at statesAt
         std::vector<std::uint32_t> buffs;        // the skills of its buffs (SetBuffs)
         std::uint8_t hideMask = 0, hideLevel = 0;     // SetHidden
@@ -79,7 +79,7 @@ struct World::State {
         std::uint32_t mount = 0;                      // Carry: what carries it (its legs are copied to it)
         std::optional<proto::CharacterSummary> shown; // SetShownLook: a transform's look
         // What newcomers hear after its appearance (SetExtra): one message of each id.
-        std::vector<std::pair<proto::MessageId, std::vector<std::byte>>> extras;
+        std::vector<std::pair<proto::MessageId, SharedBytes>> extras;
         WorldClock::time_point statesAt;
         game::NavPosition nav;      // where it stands on the navigation (its cell and object)
         game::NavPosition legStart; // the leg's start and end on the navigation (the walk MoveTo checked)
@@ -96,6 +96,14 @@ struct World::State {
         };
         std::vector<Seen> seen;
         std::vector<std::uint32_t> observers; // the players whose view holds it (their entity ids)
+        // A player's view's bookkeeping (Interest): worked out again at once (new, back from a teleport, its limits,
+        // party or detection changed); a leg in it held for a farther tier's tick; when it was last worked out, in
+        // which cell, and the sum of the versions of the cells around it then.
+        bool viewDirty = true, viewPending = false;
+        std::uint64_t viewTick = 0, viewCell = 0, viewSignature = 0;
+        // The grid cell it stood in on the last pass (its key), while it is in the grid.
+        std::uint64_t gridCell = 0;
+        bool inGrid = false;
         // A player's own limits (ViewLimits; at most the shares): a kind it lowered takes no lent places.
         std::size_t viewPlayers = SIZE_MAX, viewMonsters = SIZE_MAX;
         double viewRadius = 0.0; // how far it sees, when below the server's (0: the server's)
@@ -116,6 +124,13 @@ struct World::State {
     std::unordered_map<std::uint16_t, int> navUsers; // region -> entities holding it
 
     std::unordered_map<std::uint32_t, Entity> entities;
+    // Each grid cell's version: raised whenever an entity comes into it or leaves it (it walks across, appears,
+    // leaves the world, hides, changes party): a view whose cells' versions did not change has nobody new to see.
+    std::unordered_map<std::uint64_t, std::uint64_t> cellVersion;
+    // Something about `e` changed who may see it: the views around it are worked out again on their turn.
+    void Touch(Entity& e) {
+        if (e.inGrid) ++cellVersion[e.gridCell];
+    }
     // Entity ids: this server's range [idFirst, idEnd), the next to try; past the end the range starts again from its
     // bottom, skipping those still in use (one is given again only after the whole range came round).
     std::uint32_t idFirst = 1, idEnd = 0, nextId = 1;
@@ -357,82 +372,143 @@ struct World::State {
         return true;
     }
 
-    // Who sees whom, and what each player is told of it (the rules in World.h). Each player's view
-    // is worked out on the jobs, in parallel (it reads every walker's place and writes only its own
-    // list and messages); each walker's leg and appearance is encoded once and the bytes shared by
-    // everyone told of it. Then, on this thread, each entity's observers follow the views' changes.
+    // Who sees whom, and what each player is told of it (the rules in World.h). A view's members (who is in it) are
+    // worked out again only when they may have changed:
+    // - at once when the view is new or was dropped (an entry, a teleport) or what decides it changed (the player's
+    //   limits, party or detection: viewDirty);
+    // - else on the player's turn, every kViewTurn ticks (the players spread over the ticks by their dense number),
+    //   when it walks, stands in another cell than last time, the cells around it changed (their versions: raised
+    //   whenever an entity comes into or leaves one), or kViewRefresh ticks went by (what walked across the radius
+    //   within the same cells).
+    // A view worked out again: on the jobs, in parallel (each reads every walker's place and writes only its own list
+    // and messages), then on this thread each entity's observers follow the views' changes. Every other view stands
+    // and is only told of what it holds: the new legs of the walkers in it (found from their observers lists) and the
+    // legs held for a farther tier's tick. Each walker's leg is encoded once and the bytes shared by everyone told.
+    static constexpr std::uint64_t kViewTurn = 4, kViewRefresh = 20;
+
     void Interest(std::vector<WorldMessage>& out) {
+        const double cell = std::max(64.0, double(config.gridCell));
+        const auto cellOf = [cell](double v) { return std::int64_t(std::floor(v / cell)); };
+        const auto key = [](std::int64_t cx, std::int64_t cz) {
+            return (std::uint64_t(std::uint32_t(cx)) << 32) | std::uint64_t(std::uint32_t(cz));
+        };
+        // The placed with their places; the cells' versions follow what came into a cell or left it.
         std::vector<Entity*> placed;
+        std::vector<double> fx, fz;
         std::vector<std::uint32_t> watchers, changed; // their slots: the players; those with a new leg
+        std::unordered_set<std::uint64_t> freshCells;   // the cells of ground items just put down (seen falling now)
+        placed.reserve(entities.size());
+        fx.reserve(entities.size());
+        fz.reserve(entities.size());
         for (auto& [id, e] : entities) {
-            if (!e.placed) continue;
+            if (!e.placed) {
+                if (e.inGrid) {
+                    ++cellVersion[e.gridCell];
+                    e.inGrid = false;
+                }
+                continue;
+            }
+            const Flat f = ToFlat(e.position);
+            const std::uint64_t k = key(cellOf(f.x), cellOf(f.z));
+            if (!e.inGrid || k != e.gridCell) {
+                if (e.inGrid) ++cellVersion[e.gridCell];
+                ++cellVersion[k];
+                e.gridCell = k;
+                e.inGrid = true;
+            }
             e.slot = placed.size();
             if (e.watcher) watchers.push_back(std::uint32_t(e.slot));
             if (e.legChanged) changed.push_back(std::uint32_t(e.slot));
+            if (e.fresh) freshCells.insert(k);
             placed.push_back(&e);
+            fx.push_back(f.x);
+            fz.push_back(f.z);
         }
         // Nobody to tell (a server without players): no views to work out, only the pass's end.
         if (watchers.empty()) {
             EndInterestPass();
             return;
         }
-        // Each placed entity's place and kind, once a tick (read by every view that holds it).
         enum Class : std::uint8_t { kPlayer, kMonster, kItem, kNpc };
-        std::vector<double> fx(placed.size()), fz(placed.size());
         std::vector<std::uint8_t> classOf(placed.size());
         for (std::size_t i = 0; i < placed.size(); ++i) {
             const Entity& e = *placed[i];
-            const Flat f = ToFlat(e.position);
-            fx[i] = f.x;
-            fz[i] = f.z;
             classOf[i] = e.kind == proto::EntityKind::GroundItem ? kItem : e.npc ? kNpc : e.kind == proto::EntityKind::Monster ? kMonster : kPlayer;
         }
-        // The grid: the placed by cell; and, once for every cell a player stands in, the candidates
-        // any player there can see (the cells within reach of the cell's whole square), shared by
-        // all the players in it (a crowd stands in a few cells).
-        const double cell = std::max(64.0, double(config.gridCell));
-        const auto cellOf = [cell](double v) { return std::int64_t(std::floor(v / cell)); };
-        const auto key = [](std::int64_t cx, std::int64_t cz) {
-            return (std::uint64_t(std::uint32_t(cx)) << 32) | std::uint64_t(std::uint32_t(cz));
-        };
+        // The grid: the placed by cell; the cells the players stand in, each with the sum of the versions of the cells
+        // within reach of its whole square (a crowd stands in a few cells: worked out once for all of them).
         std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
         grid.reserve(placed.size());
-        for (std::size_t i = 0; i < placed.size(); ++i) grid[key(cellOf(fx[i]), cellOf(fz[i]))].push_back(std::uint32_t(i));
+        for (std::size_t i = 0; i < placed.size(); ++i) grid[placed[i]->gridCell].push_back(std::uint32_t(i));
         const double reachOut = std::max(1.0, double(config.viewRadius)) * (1.0 + std::clamp(double(config.viewKeep), 0.0, 0.9));
-        std::unordered_map<std::uint64_t, std::uint32_t> watcherCell; // a cell key -> its candidate list
+        std::unordered_map<std::uint64_t, std::uint32_t> watcherCell; // a cell key -> its index among the players' cells
         std::vector<std::pair<std::int64_t, std::int64_t>> watcherCells;
         std::vector<std::uint32_t> cellOfWatcher(placed.size(), 0);
-        for (std::size_t i = 0; i < placed.size(); ++i) {
-            if (!placed[i]->watcher) continue;
+        for (const std::uint32_t i : watchers) {
             const std::int64_t cx = cellOf(fx[i]), cz = cellOf(fz[i]);
             const auto [it, added] = watcherCell.try_emplace(key(cx, cz), std::uint32_t(watcherCells.size()));
             if (added) watcherCells.push_back({cx, cz});
             cellOfWatcher[i] = it->second;
         }
+        const auto forReach = [&](std::size_t w, auto&& visit) {
+            const auto [cx, cz] = watcherCells[w];
+            const double x0 = double(cx) * cell, z0 = double(cz) * cell;
+            for (std::int64_t gx = cellOf(x0 - reachOut), gx1 = cellOf(x0 + cell + reachOut); gx <= gx1; ++gx) {
+                for (std::int64_t gz = cellOf(z0 - reachOut), gz1 = cellOf(z0 + cell + reachOut); gz <= gz1; ++gz) visit(key(gx, gz));
+            }
+        };
+        // A ground item just put down is told as falling on this pass only: the views around it are worked out now.
+        std::vector<std::uint64_t> signature(watcherCells.size(), 0);
+        std::vector<char> urgent(watcherCells.size(), 0);
+        jobs.ParallelFor(watcherCells.size(), 16, [&](std::size_t begin, std::size_t end) {
+            for (std::size_t w = begin; w < end; ++w) {
+                forReach(w, [&](std::uint64_t k) {
+                    if (const auto it = cellVersion.find(k); it != cellVersion.end()) signature[w] += it->second;
+                    if (!freshCells.empty() && freshCells.contains(k)) urgent[w] = 1;
+                });
+            }
+        });
+        // Which views are worked out again on this tick (`full`); the others stand (`kept`).
+        const std::uint64_t tick = ticks;
+        std::vector<std::uint32_t> full, kept;
+        std::vector<char> cellNeeded(watcherCells.size(), 0);
+        for (const std::uint32_t i : watchers) {
+            Entity& e = *placed[i];
+            const std::uint32_t c = cellOfWatcher[i];
+            bool again = e.viewDirty || urgent[c];
+            if (!again && (tick + e.dense) % kViewTurn == 0) {
+                again = e.moving || e.viewCell != e.gridCell || e.viewSignature != signature[c] || tick - e.viewTick >= kViewRefresh;
+            }
+            if (again) {
+                full.push_back(i);
+                cellNeeded[c] = 1;
+                e.viewDirty = false;
+                e.viewTick = tick;
+                e.viewCell = e.gridCell;
+                e.viewSignature = signature[c];
+            } else {
+                kept.push_back(i);
+            }
+        }
+        // The candidates of the cells a view worked out again stands in.
         std::vector<std::vector<std::uint32_t>> candidates(watcherCells.size());
         jobs.ParallelFor(watcherCells.size(), 1, [&](std::size_t begin, std::size_t end) {
             for (std::size_t w = begin; w < end; ++w) {
-                const auto [cx, cz] = watcherCells[w];
-                const double x0 = double(cx) * cell, z0 = double(cz) * cell;
-                for (std::int64_t gx = cellOf(x0 - reachOut), gx1 = cellOf(x0 + cell + reachOut); gx <= gx1; ++gx) {
-                    for (std::int64_t gz = cellOf(z0 - reachOut), gz1 = cellOf(z0 + cell + reachOut); gz <= gz1; ++gz) {
-                        if (const auto it = grid.find(key(gx, gz)); it != grid.end()) {
-                            candidates[w].insert(candidates[w].end(), it->second.begin(), it->second.end());
-                        }
-                    }
-                }
+                if (!cellNeeded[w]) continue;
+                forReach(w, [&](std::uint64_t k) {
+                    if (const auto it = grid.find(k); it != grid.end()) candidates[w].insert(candidates[w].end(), it->second.begin(), it->second.end());
+                });
             }
         });
         // New legs encoded once each; an appearance only when someone newly sees it (encoded by the
         // job that tells it: most walkers are seen by nobody new on a tick).
-        std::vector<std::vector<std::byte>> legs(placed.size());
+        std::vector<SharedBytes> legs(placed.size());
         jobs.ParallelFor(changed.size(), 64, [&](std::size_t begin, std::size_t end) {
             for (std::size_t k = begin; k < end; ++k) legs[changed[k]] = proto::Encode(Leg(*placed[changed[k]]));
         });
         const double radius = std::max(1.0, double(config.viewRadius));
         const double keep = std::clamp(double(config.viewKeep), 0.0, 0.9);
         const double nearer = (1.0 - keep) * (1.0 - keep); // a seen one's rank: its squared distance times this
-        const std::uint64_t tick = ticks;
         const auto due = [tick](std::uint8_t tier) { return tier == 0 || tick % (tier == 1 ? 2u : 4u) == 0; };
         struct Change {
             std::uint32_t watcher = 0, other = 0;
@@ -442,13 +518,12 @@ struct World::State {
             std::uint64_t watchers = 0, seen = 0, players = 0, monsters = 0, items = 0, legsSent = 0, legsDeferred = 0;
             std::size_t seenMax = 0;
         };
-        // The views in chunks of watchers (not of everything placed: most of it is monsters, NPCs and items, seen but
-        // never told, and a chunk of those would be a job that finds nothing to do).
-        const std::size_t chunks = std::clamp<std::size_t>(watchers.size(), 1, 256);
+        // The views worked out again, in chunks of players.
+        const std::size_t chunks = std::clamp<std::size_t>(full.size(), 1, 256);
         std::vector<std::vector<WorldMessage>> told(chunks);
         std::vector<std::vector<Change>> changes(chunks);
         std::vector<Tally> tallies(chunks);
-        jobs.ParallelFor(chunks, 1, [&](std::size_t chunkBegin, std::size_t chunkEnd) {
+        jobs.ParallelFor(full.empty() ? 0 : chunks, 1, [&](std::size_t chunkBegin, std::size_t chunkEnd) {
             SR_ZONE("world: interest");
             using Candidate = std::pair<double, const Entity*>; // its rank (squared distance, nearer when seen), the entity
             const auto byRank = [](const Candidate& a, const Candidate& b) { return a.first < b.first; };
@@ -462,8 +537,8 @@ struct World::State {
             for (std::size_t c = chunkBegin; c < chunkEnd; ++c) {
                 std::vector<WorldMessage>& mine = told[c];
                 Tally& tally = tallies[c];
-                for (std::size_t k = watchers.size() * c / chunks, last = watchers.size() * (c + 1) / chunks; k < last; ++k) {
-                    const std::size_t i = watchers[k];
+                for (std::size_t k = full.size() * c / chunks, last = full.size() * (c + 1) / chunks; k < last; ++k) {
+                    const std::size_t i = full[k];
                     Entity& e = *placed[i];
                     players.clear();
                     monsters.clear();
@@ -533,9 +608,9 @@ struct World::State {
                     if (chosen.size() > t1) std::nth_element(chosen.begin(), chosen.begin() + std::ptrdiff_t(t1), chosen.end(), byRank);
                     if (chosen.size() > t2) std::nth_element(chosen.begin() + std::ptrdiff_t(t1), chosen.begin() + std::ptrdiff_t(t2), chosen.end(), byRank);
                     now.clear();
-                    for (std::size_t k = 0; k < chosen.size(); ++k) {
-                        const Entity* o = chosen[k].second;
-                        now.push_back({{o->id, std::uint8_t(k < t1 ? 0 : k < t2 ? 1 : 2), false, o->dense}, o});
+                    for (std::size_t k2 = 0; k2 < chosen.size(); ++k2) {
+                        const Entity* o = chosen[k2].second;
+                        now.push_back({{o->id, std::uint8_t(k2 < t1 ? 0 : k2 < t2 ? 1 : 2), false, o->dense}, o});
                         if (o->kind == proto::EntityKind::GroundItem) ++tally.items;
                         else if (o->kind == proto::EntityKind::Monster) ++tally.monsters;
                         else ++tally.players;
@@ -546,6 +621,7 @@ struct World::State {
                     // or held for its tier's tick).
                     next.clear();
                     std::size_t s = 0;
+                    bool held = false;
                     const auto gone = [&](std::uint32_t id) {
                         mine.push_back(Make(e.peer, proto::EntityGone{id}));
                         changes[c].push_back({e.id, id, false});
@@ -556,14 +632,15 @@ struct World::State {
                             const bool pending = e.seen[s].pending || o->legChanged;
                             ++s;
                             if (pending && due(view.tier)) {
-                                mine.push_back({e.peer, proto::EntityMoved::kId, o->legChanged ? legs[o->slot] : proto::Encode(Leg(*o)), LegKey(view.id)});
+                                mine.push_back({e.peer, proto::EntityMoved::kId, o->legChanged ? legs[o->slot] : SharedBytes(proto::Encode(Leg(*o))), LegKey(view.id)});
                                 ++tally.legsSent;
                             } else if (pending) {
                                 view.pending = true;
+                                held = true;
                                 if (o->legChanged) ++tally.legsDeferred;
                             }
                         } else {
-                            mine.push_back({e.peer, proto::EntityAppeared::kId, o->npc ? o->appearBytes : proto::Encode(Appeared(*o)), 0});
+                            mine.push_back({e.peer, proto::EntityAppeared::kId, o->npc ? o->appearBytes : SharedBytes(proto::Encode(Appeared(*o))), 0});
                             if (!o->states.empty()) mine.push_back(Make(e.peer, StatesNow(*o)));
                             if (!o->buffs.empty()) mine.push_back(Make(e.peer, proto::EntityBuffs{o->id, o->buffs}));
                             for (const auto& [id, bytes] : o->extras) mine.push_back({e.peer, id, bytes, 0});
@@ -573,6 +650,7 @@ struct World::State {
                     }
                     for (; s < e.seen.size(); ++s) gone(e.seen[s].id);
                     e.seen.swap(next);
+                    e.viewPending = held;
                     ++tally.watchers;
                     tally.seen += e.seen.size();
                     tally.seenMax = std::max(tally.seenMax, e.seen.size());
@@ -596,6 +674,80 @@ struct World::State {
                 }
             }
         }
+        // The views kept as they are: each hears of the new legs of what it holds (from the walkers' observers lists)
+        // and, on a farther tier's tick, the legs held for it.
+        std::vector<std::uint32_t> keptIndex(placed.size(), UINT32_MAX);
+        for (std::size_t k = 0; k < kept.size(); ++k) keptIndex[kept[k]] = std::uint32_t(k);
+        std::vector<std::vector<std::uint32_t>> inbox(kept.size()); // the slots of the walkers with a new leg it holds
+        for (const std::uint32_t o : changed) {
+            for (const std::uint32_t watcher : placed[o]->observers) {
+                const auto it = entities.find(watcher);
+                if (it == entities.end() || !it->second.placed) continue;
+                const std::size_t slot = it->second.slot;
+                if (slot >= placed.size() || placed[slot] != &it->second || keptIndex[slot] == UINT32_MAX) continue;
+                inbox[keptIndex[slot]].push_back(o);
+            }
+        }
+        const bool heldDue = tick % 2 == 0; // a farther tier's tick (tier 1 every 2nd, tier 2 every 4th)
+        std::vector<std::uint32_t> busy; // the kept views with something to tell
+        Tally keptTally;
+        for (std::size_t k = 0; k < kept.size(); ++k) {
+            const Entity& e = *placed[kept[k]];
+            if (!inbox[k].empty() || (heldDue && e.viewPending)) busy.push_back(std::uint32_t(k));
+            ++keptTally.watchers;
+            keptTally.seen += e.seen.size();
+            keptTally.seenMax = std::max(keptTally.seenMax, e.seen.size());
+        }
+        const std::size_t keptChunks = std::clamp<std::size_t>(busy.size(), 1, 256);
+        std::vector<std::vector<WorldMessage>> keptTold(keptChunks);
+        std::vector<Tally> keptTallies(keptChunks);
+        jobs.ParallelFor(busy.empty() ? 0 : keptChunks, 1, [&](std::size_t chunkBegin, std::size_t chunkEnd) {
+            SR_ZONE("world: interest (kept views)");
+            for (std::size_t c = chunkBegin; c < chunkEnd; ++c) {
+                std::vector<WorldMessage>& mine = keptTold[c];
+                Tally& tally = keptTallies[c];
+                for (std::size_t b = busy.size() * c / keptChunks, last = busy.size() * (c + 1) / keptChunks; b < last; ++b) {
+                    const std::uint32_t k = busy[b];
+                    Entity& e = *placed[kept[k]];
+                    for (const std::uint32_t o : inbox[k]) {
+                        const Entity& other = *placed[o];
+                        const auto it = std::lower_bound(e.seen.begin(), e.seen.end(), other.id,
+                                                         [](const Entity::Seen& s, std::uint32_t v) { return s.id < v; });
+                        if (it == e.seen.end() || it->id != other.id) continue;
+                        if (due(it->tier)) {
+                            mine.push_back({e.peer, proto::EntityMoved::kId, legs[o], LegKey(other.id)});
+                            it->pending = false;
+                            ++tally.legsSent;
+                        } else {
+                            it->pending = true;
+                            e.viewPending = true;
+                            ++tally.legsDeferred;
+                        }
+                    }
+                    if (heldDue && e.viewPending) {
+                        bool held = false;
+                        for (Entity::Seen& s : e.seen) {
+                            if (!s.pending) continue;
+                            if (!due(s.tier)) {
+                                held = true;
+                                continue;
+                            }
+                            s.pending = false;
+                            const auto it = entities.find(s.id);
+                            if (it == entities.end() || !it->second.placed) continue; // gone: told so when the view is worked out again
+                            mine.push_back({e.peer, proto::EntityMoved::kId, proto::Encode(Leg(it->second)), LegKey(s.id)});
+                            ++tally.legsSent;
+                        }
+                        e.viewPending = held;
+                    }
+                }
+            }
+        });
+        for (std::vector<WorldMessage>& mine : keptTold) {
+            out.insert(out.end(), std::make_move_iterator(mine.begin()), std::make_move_iterator(mine.end()));
+        }
+        tallies.push_back(keptTally);
+        tallies.insert(tallies.end(), keptTallies.begin(), keptTallies.end());
         for (const Tally& t : tallies) {
             stats.watcherTicks += t.watchers;
             stats.seen += t.seen;
@@ -606,6 +758,7 @@ struct World::State {
             stats.legsSent += t.legsSent;
             stats.legsDeferred += t.legsDeferred;
         }
+        stats.viewsWorkedOut += full.size();
         // A walker hears of its own new leg too (the server's word on where it goes).
         for (const std::uint32_t w : watchers) {
             const Entity* e = placed[w];
@@ -638,6 +791,8 @@ struct World::State {
             }
         }
         watcher.seen.clear();
+        watcher.viewDirty = true;
+        watcher.viewPending = false;
     }
 
     // Its states with the time each has left now (those over left out).
@@ -684,6 +839,7 @@ struct World::State {
             if (e.dropOnGround) e.position.y = PutDown(e.position);
             e.nav = {};
             e.placed = true;
+            e.viewDirty = true; // its view worked out on the next pass
             proto::WorldEntered m;
             m.entity = id;
             m.character = Shown(e);
@@ -916,25 +1072,35 @@ void World::Leave(std::uint32_t entity) {
     members.erase(std::remove(members.begin(), members.end(), entity), members.end());
     s_->DropNavigation(it->second);
     s_->ForgetViews(it->second);
+    s_->Touch(it->second); // its cell lost it: the views around it see it gone when worked out again
     s_->freedDense.push_back(it->second.dense);
-    s_->entities.erase(it); // its observers see it gone on the next update
+    s_->entities.erase(it);
 }
 
 void World::SetHidden(std::uint32_t entity, std::uint8_t mask, std::uint8_t level) {
     if (const auto it = s_->entities.find(entity); it != s_->entities.end()) {
+        if (it->second.hideMask == mask && it->second.hideLevel == level) return;
         it->second.hideMask = mask;
         it->second.hideLevel = level;
+        s_->Touch(it->second); // who may see it changed: the views around it again
     }
 }
 
 void World::SetParty(std::uint32_t entity, std::uint32_t party) {
-    if (const auto it = s_->entities.find(entity); it != s_->entities.end()) it->second.party = party;
+    // Called for every player often (the server's loop): only a change counts.
+    if (const auto it = s_->entities.find(entity); it != s_->entities.end() && it->second.party != party) {
+        it->second.party = party;
+        it->second.viewDirty = true; // a hidden party member: seen now, or no longer
+        s_->Touch(it->second);
+    }
 }
 
 void World::SetDetection(std::uint32_t entity, std::uint8_t mask, std::uint8_t level) {
     if (const auto it = s_->entities.find(entity); it != s_->entities.end()) {
+        if (it->second.detectMask == mask && it->second.detectLevel == level) return;
         it->second.detectMask = mask;
         it->second.detectLevel = level;
+        it->second.viewDirty = true; // what it detects changed
     }
 }
 
@@ -1276,6 +1442,7 @@ World::ViewLimitsApplied World::SetViewLimits(std::uint32_t entity, std::size_t 
     e.viewPlayers = players == 0 ? SIZE_MAX : std::min(players, s_->config.viewPlayers);
     e.viewMonsters = monsters == 0 ? SIZE_MAX : std::min(monsters, s_->config.viewMonsters);
     e.viewRadius = radius > 0.0f ? std::min(double(radius), double(s_->config.viewRadius)) : 0.0;
+    e.viewDirty = true;
     return {std::min(e.viewPlayers, s_->config.viewPlayers), std::min(e.viewMonsters, s_->config.viewMonsters)};
 }
 

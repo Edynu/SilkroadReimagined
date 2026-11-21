@@ -75,7 +75,7 @@ struct Harness {
             world.Update(now, out);
             for (auto& m : out) {
                 if (recording && m.peer == recordPeer)
-                    recording->messages.push_back({std::chrono::duration<double>(now - recordStart).count(), m.id, m.payload});
+                    recording->messages.push_back({std::chrono::duration<double>(now - recordStart).count(), m.id, {m.payload.Span().begin(), m.payload.Span().end()}});
                 told[m.peer].push_back(std::move(m));
             }
             now += step;
@@ -680,7 +680,7 @@ TEST_CASE("Game server: into the world, two players see each other walk, places 
     proto::EntityMoved leg;
     REQUIRE(b->Expect(leg));
     CHECK(leg.entity == ea.entity);
-    CHECK(Distance(leg.to, move.target) < 0.01);
+    CHECK(Distance(leg.to, move.target) < 0.05); // a leg's places go packed (to 1/32 of a unit)
     REQUIRE(a->Expect(leg)); // and so does Alpha
 
     // Alpha's own view (the Online options): lowered for players, the server's share for monsters
@@ -2678,9 +2678,16 @@ TEST_CASE("Game server: avatars put on and taken off, their kinds, the dress's a
     REQUIRE(a->Expect(answer));
     proto::WorldLeft left;
     REQUIRE(a->Expect(left));
-    for (int i = 0; i < 50; ++i) pump();
-    server::QueryResult kept = t.Db().Query("SELECT a.slot, it.refitemid FROM sro_vt_shard._inventoryforavatar a JOIN sro_vt_shard._items it ON it.id64 = a.itemid "
-                                    "JOIN sro_vt_shard._char c ON c.charid = a.charid WHERE c.charname16 = 'Dressy' AND a.itemid <> 0 ORDER BY a.slot");
+    // The save lands on a database thread: waited for by the clock (a count of pumps says nothing of its time).
+    const auto avatarRows = [&] {
+        return t.Db().Query("SELECT a.slot, it.refitemid FROM sro_vt_shard._inventoryforavatar a JOIN sro_vt_shard._items it ON it.id64 = a.itemid "
+                            "JOIN sro_vt_shard._char c ON c.charid = a.charid WHERE c.charname16 = 'Dressy' AND a.itemid <> 0 ORDER BY a.slot");
+    };
+    for (const auto until = std::chrono::steady_clock::now() + 5s; std::chrono::steady_clock::now() < until;) {
+        pump();
+        if (const server::QueryResult r = avatarRows(); r.Ok() && r.Rows() == 3) break;
+    }
+    server::QueryResult kept = avatarRows();
     REQUIRE(kept.Ok());
     REQUIRE(kept.Rows() == 3);
     CHECK(kept.Int(0, 0) == game::avatar::kHat);

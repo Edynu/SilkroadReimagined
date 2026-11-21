@@ -19,6 +19,7 @@
 #include <random>
 #include <set>
 #include <type_traits>
+#include <utility>
 
 #include "sr/core/Log.h"
 #include "sr/core/Trace.h"
@@ -7658,7 +7659,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     Clock::time_point nextStats = Clock::now();
     // The site's load samples (sr_server_samples): the world's ticks since the last one (the log's reading adds to it too).
     Clock::time_point nextSample = Clock::now();
-    WorldStats sampleStats;
+    WorldStats sampleStats; // since the last load sample
+    WorldStats logStats;    // since the last log line
     double deliverMsMax = 0;
 
     // _items.data holds an item's count (anything but equipment) or its durability (equipment); an
@@ -11192,13 +11194,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // Every player's place, now and then (one batch on a database thread).
     // The world's ticks since the last log (the bot benchmark, C6f).
     // The world's ticks since the last reading; the load sample's sum keeps them too.
-    WorldStats TakeWorldStats() {
+    // Each reader (the log, the load sample) keeps its own total: one taking them must not cut the other's short.
+    void TakeWorldStats() {
         const WorldStats w = world->TakeStats();
-        sampleStats.ticks += w.ticks;
-        sampleStats.overBudget += w.overBudget;
-        sampleStats.tickMsSum += w.tickMsSum;
-        sampleStats.tickMsMax = std::max(sampleStats.tickMsMax, w.tickMsMax);
-        return w;
+        sampleStats.Add(w);
+        logStats.Add(w);
     }
     // A load sample for the site: the ticks since the last, the players online, the monsters alive.
     void SampleLoad() {
@@ -11220,7 +11220,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void LogStats() {
         const double seconds = std::chrono::duration<double>(config.statsInterval).count();
         nextStats = Clock::now() + config.statsInterval;
-        const WorldStats w = TakeWorldStats();
+        TakeWorldStats();
+        const WorldStats w = std::exchange(logStats, {});
         if (w.entities == 0 && w.legs == 0) return; // nobody in the world: nothing to say
         const double budget = 1000.0 / world->TickRate();
         core::LogInfo("{}: world: {} online, {} walkers in up to {} zones; {} ticks ({} over the {:.0f} ms budget, {} dropped), tick "
@@ -11234,11 +11235,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                           config.name, w.refused, w.refusedFar, w.refusedNavigation, w.refusedFloor, w.refusedWalk);
         }
         if (w.watcherTicks > 0) {
-            const double n = double(w.watcherTicks);
-            core::LogInfo("{}: views: {:.0f} entries on average ({:.0f} players, {:.0f} monsters, {:.0f} items), {} at most; legs {:.0f}/s told "
-                          "at once, {:.0f}/s held for a farther tier's tick",
-                          config.name, double(w.seen) / n, double(w.seenPlayers) / n, double(w.seenMonsters) / n, double(w.seenItems) / n,
-                          w.seenMax, double(w.legsSent) / seconds, double(w.legsDeferred) / seconds);
+            const double n = double(w.watcherTicks), worked = double(std::max<std::uint64_t>(w.viewsWorkedOut, 1));
+            core::LogInfo("{}: views: {:.0f} entries on average ({:.0f} players, {:.0f} monsters, {:.0f} items), {} at most; {:.0f} % worked out "
+                          "again a tick; legs {:.0f}/s told at once, {:.0f}/s held for a farther tier's tick",
+                          config.name, double(w.seen) / n, double(w.seenPlayers) / worked, double(w.seenMonsters) / worked,
+                          double(w.seenItems) / worked, w.seenMax, 100.0 * double(w.viewsWorkedOut) / n, double(w.legsSent) / seconds,
+                          double(w.legsDeferred) / seconds);
         }
         deliverMsMax = 0;
         if (monsters) core::LogInfo("{}: monsters: {} alive in {} awake nests of {}", config.name, monsters->Alive(), monsters->ActiveNests(), monsters->Nests());
@@ -11275,45 +11277,71 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
 
     // What the world's ticks say, to each player.
+    // The world's messages of this pass: each player's handed to its connection at once (one lookup, one lock and one
+    // write a player, not one a message: a crowd's tick is thousands of them). Its reliable ones first, in their order,
+    // then its latest-lane ones (the moves), in theirs: the moves stand together, so the connection packs them into one
+    // frame (Framing.h). That order changes nothing a client sees: a tick's moves are of what the player already saw (a
+    // newcomer's place is in its appearance, one gone has no move). An entry's own follow-ups (EnteredWorld) right after it.
     void Deliver() {
-        for (const WorldMessage& m : outbox) {
-            Peer* peer = peers->Find(m.peer);
-            if (!peer) continue;
-            if (m.latestKey != 0) {
-                peer->connection->SendLatest(m.latestKey, m.id, m.payload);
-            } else {
-                peer->connection->Send(m.id, m.payload);
+        if (outbox.empty()) return;
+        std::vector<std::uint32_t> order(outbox.size());
+        for (std::size_t i = 0; i < order.size(); ++i) order[i] = std::uint32_t(i);
+        std::stable_sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) { return outbox[a].peer < outbox[b].peer; });
+        std::vector<net::OutgoingMessage> batch, moves;
+        const auto flush = [&](Peer& peer) {
+            batch.insert(batch.end(), moves.begin(), moves.end());
+            peer.connection->SendMany(batch);
+            batch.clear();
+            moves.clear();
+        };
+        for (std::size_t i = 0; i < order.size();) {
+            const std::uint64_t peerId = outbox[order[i]].peer;
+            std::size_t end = i;
+            while (end < order.size() && outbox[order[end]].peer == peerId) ++end;
+            if (Peer* peer = peers->Find(peerId)) {
+                for (std::size_t k = i; k < end; ++k) {
+                    const WorldMessage& m = outbox[order[k]];
+                    (m.latestKey != 0 ? moves : batch).push_back({m.id, m.payload, m.latestKey});
+                    if (m.id == proto::WorldEntered::kId) {
+                        flush(*peer);
+                        EnteredWorld(*peer);
+                    }
+                }
+                flush(*peer);
             }
-            // An entry (a teleport too) clears the client's buffs: the ones running, again.
-            if (m.id == proto::WorldEntered::kId) {
-                if (const auto it = players.find(m.peer); it != players.end()) {
-                    if (skillUnit) {
-                        for (const auto& b : it->second.combat.buffs) SendMessage(*peer->connection, skillUnit->BuffMessage(b, Clock::now()));
-                        // Its berserk goes on through a teleport: told again, as the buffs are.
-                        if (it->second.berserkUntil) {
-                            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(*it->second.berserkUntil - Clock::now()).count();
-                            if (left > 0) {
-                                const proto::EntityBerserk mode{it->second.entity, 1, game::BerserkVariant(it->second.hwanLevel), std::uint32_t(left)};
-                                SendMessage(*peer->connection, mode);
-                                world->SetExtra(mode.entity, proto::EntityBerserk::kId, proto::Encode(mode)); // a new entity: for those who see it
-                            }
-                        }
-                    }
-                    // Those it appears to are told its buffs after its appearance (World::SetBuffs);
-                    // a new entity, so nobody sees it yet to be told now.
-                    PlayerWorld& entered = it->second;
-                    // In a job's suit: its own "*Alias" and no guild line from the start (else its own name would show
-                    // until a suit change).
-                    if (entered.entity != 0 && entered.jobState != kNoJob) {
-                        SendMessage(*peer->connection, proto::EntityJob{entered.entity, entered.jobState, std::uint8_t(entered.job.level), entered.alias});
-                    }
-                    entered.toldBuffs.clear();
-                    for (const auto& b : entered.combat.buffs) entered.toldBuffs.push_back(b.skill);
-                    if (entered.entity != 0) world->SetBuffs(entered.entity, entered.toldBuffs);
+            i = end;
+        }
+        outbox.clear();
+    }
+
+    // What follows a player's entry (a teleport too) at once: an entry clears the client's buffs, so the ones running,
+    // again; its berserk; its job's look.
+    void EnteredWorld(Peer& peer) {
+        const auto it = players.find(peer.id);
+        if (it == players.end()) return;
+        PlayerWorld& entered = it->second;
+        if (skillUnit) {
+            for (const auto& b : entered.combat.buffs) SendMessage(*peer.connection, skillUnit->BuffMessage(b, Clock::now()));
+            // Its berserk goes on through a teleport: told again, as the buffs are.
+            if (entered.berserkUntil) {
+                const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(*entered.berserkUntil - Clock::now()).count();
+                if (left > 0) {
+                    const proto::EntityBerserk mode{entered.entity, 1, game::BerserkVariant(entered.hwanLevel), std::uint32_t(left)};
+                    SendMessage(*peer.connection, mode);
+                    world->SetExtra(mode.entity, proto::EntityBerserk::kId, proto::Encode(mode)); // a new entity: for those who see it
                 }
             }
         }
-        outbox.clear();
+        // Those it appears to are told its buffs after its appearance (World::SetBuffs); a new entity, so nobody sees it
+        // yet to be told now.
+        // In a job's suit: its own "*Alias" and no guild line from the start (else its own name would show until a suit
+        // change).
+        if (entered.entity != 0 && entered.jobState != kNoJob) {
+            SendMessage(*peer.connection, proto::EntityJob{entered.entity, entered.jobState, std::uint8_t(entered.job.level), entered.alias});
+        }
+        entered.toldBuffs.clear();
+        for (const auto& b : entered.combat.buffs) entered.toldBuffs.push_back(b.skill);
+        if (entered.entity != 0) world->SetBuffs(entered.entity, entered.toldBuffs);
     }
 
     void Closed(Peer& peer) {
@@ -11818,28 +11846,34 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
     }
     if (!s.whispers.empty()) s.FinishWhispers(Clock::now());
     if (!s.moves.empty() || !s.movedAway.empty()) s.FinishMoves(Clock::now());
-    if (s.guilds) s.guilds->Tick(Clock::now());
-    if (s.community) s.community->Tick(Clock::now());
-    if (s.academies) s.academies->Tick(Clock::now());
-    if (s.exchanges) s.exchanges->Tick(Clock::now());
-    if (s.alchemy) s.alchemy->Tick(Clock::now());
-    if (s.coses) s.coses->Tick(Clock::now());
-    if (s.stalls) s.stalls->Tick(Clock::now());
-    if (s.openMarket) s.openMarket->Tick(Clock::now());
-    if (s.quests && Clock::now() >= s.nextQuestTick) {
-        s.nextQuestTick = Clock::now() + std::chrono::seconds(1);
-        s.quests->Tick(Clock::now());
-        s.FollowQuestCoses();
-    }
-    if (s.summons) s.summons->Tick(Clock::now());
-    if (s.instances) s.instances->Tick(Clock::now());
-    if (s.flagWorlds) s.flagWorlds->Tick(Clock::now());
-    if (s.arenas) s.arenas->Tick(Clock::now());
-    if (s.roc) s.roc->Tick(Clock::now());
-    if (s.temples) s.temples->Tick(Clock::now());
-    s.TempleTick(Clock::now());
-    if (s.fortresses) {
-        s.fortresses->Tick(Clock::now(), std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    // The game's own turn (the features' timers, the monsters, the fights, the players' passes): once a world tick,
+    // not on every wake. A wake comes with every message a player sends, hundreds a second with many players, and each
+    // pass walks every player; the messages themselves are still taken as they come.
+    const bool turn = !s.world || WorldClock::now() >= s.world->NextTick();
+    if (turn) {
+        if (s.guilds) s.guilds->Tick(Clock::now());
+        if (s.community) s.community->Tick(Clock::now());
+        if (s.academies) s.academies->Tick(Clock::now());
+        if (s.exchanges) s.exchanges->Tick(Clock::now());
+        if (s.alchemy) s.alchemy->Tick(Clock::now());
+        if (s.coses) s.coses->Tick(Clock::now());
+        if (s.stalls) s.stalls->Tick(Clock::now());
+        if (s.openMarket) s.openMarket->Tick(Clock::now());
+        if (s.quests && Clock::now() >= s.nextQuestTick) {
+            s.nextQuestTick = Clock::now() + std::chrono::seconds(1);
+            s.quests->Tick(Clock::now());
+            s.FollowQuestCoses();
+        }
+        if (s.summons) s.summons->Tick(Clock::now());
+        if (s.instances) s.instances->Tick(Clock::now());
+        if (s.flagWorlds) s.flagWorlds->Tick(Clock::now());
+        if (s.arenas) s.arenas->Tick(Clock::now());
+        if (s.roc) s.roc->Tick(Clock::now());
+        if (s.temples) s.temples->Tick(Clock::now());
+        s.TempleTick(Clock::now());
+        if (s.fortresses) {
+            s.fortresses->Tick(Clock::now(), std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+        }
     }
     // The new items' ids kept in stock whatever takes them (a give, a quest's reward, a pickup, a purchase): not only
     // after an item's move (a bag that only fills ran it dry: every give refused, every pickup left on the ground).
@@ -11847,6 +11881,8 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
     if (s.world) {
         s.FinishReturns();
         s.FinishPickups();
+    }
+    if (s.world && turn) {
         s.ExpireGround();
         // The monsters' turn, then the players' fight (their hits, buffs and casts land on it, monsters or not).
         const auto now = Clock::now();

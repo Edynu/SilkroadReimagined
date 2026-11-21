@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "sr/game/Protocol.h"
+#include "sr/game/WorldProtocol.h"
 
 using namespace sr::game::proto;
 
@@ -202,4 +203,35 @@ TEST_CASE("Protocol: the version check") {
     REQUIRE(Decode(Encode(refused), welcomeBack));
     CHECK(welcomeBack.result == WelcomeResult::ProtocolMismatch);
     CHECK(welcomeBack.reason == refused.reason);
+}
+
+TEST_CASE("Protocol: a leg's places go packed, those out of range as floats") {
+    // In range: within 1/64 of a unit across, 1/32 up, 1/200 of the speed; 23 bytes.
+    EntityMoved leg{0x10000005, {25000, 1220.31f, -32.62f, 1123.66f}, {25000, 1300.0f, -30.0f, 1180.5f}, 47.3f};
+    const std::vector<std::byte> bytes = Encode(leg);
+    CHECK(bytes.size() == 23);
+    EntityMoved back;
+    REQUIRE(Decode(bytes, back));
+    CHECK(back.entity == leg.entity);
+    CHECK(back.from.region == 25000);
+    CHECK(std::abs(back.from.x - leg.from.x) <= 1.0f / 64);
+    CHECK(std::abs(back.from.y - leg.from.y) <= 1.0f / 32);
+    CHECK(std::abs(back.from.z - leg.from.z) <= 1.0f / 64);
+    CHECK(std::abs(back.to.x - leg.to.x) <= 1.0f / 64);
+    CHECK(std::abs(back.speed - leg.speed) <= 1.0f / 200);
+    // Out of range (a dungeon's far corner, a height under -2048, an odd speed): those go as their floats, exact.
+    EntityMoved far{7, {0x8001, -5000.25f, -2500.5f, 9000.125f}, {0x8001, 100.0f, 10.0f, 100.0f}, 900.0f};
+    EntityMoved farBack;
+    REQUIRE(Decode(Encode(far), farBack));
+    CHECK(farBack.from.x == far.from.x);
+    CHECK(farBack.from.y == far.from.y);
+    CHECK(farBack.from.z == far.from.z);
+    CHECK(farBack.speed == far.speed);
+    CHECK(std::abs(farBack.to.x - far.to.x) <= 1.0f / 64);
+    // A standing walker: from equal to, speed 0.
+    EntityMoved stand{9, {1, 0.0f, 0.0f, 2047.0f}, {1, 0.0f, 0.0f, 2047.0f}, 0.0f};
+    EntityMoved standBack;
+    REQUIRE(Decode(Encode(stand), standBack));
+    CHECK(standBack.from.z == standBack.to.z);
+    CHECK(standBack.speed == 0.0f);
 }
