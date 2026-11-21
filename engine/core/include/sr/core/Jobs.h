@@ -163,6 +163,13 @@ public:
 
     // Calls fn(begin, end) for [0, count) in batches of `batch` (Frame priority); the calling
     // thread takes part; returns when all batches ran.
+    //
+    // The batches are not queued one job each: the caller and up to one helper job per worker take
+    // the next batch from a shared counter until none is left. So a thousand small batches cost a
+    // few jobs, not a thousand trips through the queues' locks; and the call returns the moment the
+    // last batch is done, not when every helper has run: a helper the system has not given a core
+    // yet (another process's turn, a parked core) finds nothing left and does nothing, instead of
+    // holding the caller for the operating system's time slice (milliseconds; on Windows 15-30).
     template <typename Fn>
     void ParallelFor(std::size_t count, std::size_t batch, Fn&& fn) {
         if (count == 0) return;
@@ -172,15 +179,10 @@ public:
             fn(std::size_t{0}, count);
             return;
         }
-        JobCounter counter;
-        for (std::size_t b = 1; b < batches; ++b) {
-            const std::size_t begin = b * batch;
-            const std::size_t end = begin + batch < count ? begin + batch : count;
-            Push(JobFunction([&fn, begin, end] { fn(begin, end); }), JobPriority::Frame, &counter, false);
-        }
-        WakeWorkers(batches - 1);
-        fn(std::size_t{0}, batch);
-        Wait(counter);
+        using F = std::remove_reference_t<Fn>;
+        ParallelBatches(count, batch, batches,
+                        [](void* f, std::size_t begin, std::size_t end) { (*static_cast<F*>(f))(begin, end); },
+                        const_cast<void*>(static_cast<const void*>(std::addressof(fn))));
     }
 
     unsigned WorkerCount() const { return static_cast<unsigned>(workers_.size()); }
@@ -200,7 +202,11 @@ private:
     };
     struct Queue; // a locked double-ended queue (Jobs.cpp)
     struct Worker;
+    struct Batches; // one ParallelFor's shared state (Jobs.cpp)
+    using BatchFunction = void (*)(void* fn, std::size_t begin, std::size_t end);
 
+    void ParallelBatches(std::size_t count, std::size_t batch, std::size_t batches, BatchFunction call, void* fn);
+    void RunBatches(Batches& work);
     void Push(JobFunction fn, JobPriority priority, JobCounter* counter, bool wake);
     void WakeWorkers(std::size_t jobs);
     bool TakeJob(int self, int maxPriority, Job& out, bool& stolen);

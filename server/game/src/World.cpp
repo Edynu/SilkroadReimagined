@@ -363,10 +363,18 @@ struct World::State {
     // everyone told of it. Then, on this thread, each entity's observers follow the views' changes.
     void Interest(std::vector<WorldMessage>& out) {
         std::vector<Entity*> placed;
+        std::vector<std::uint32_t> watchers, changed; // their slots: the players; those with a new leg
         for (auto& [id, e] : entities) {
             if (!e.placed) continue;
             e.slot = placed.size();
+            if (e.watcher) watchers.push_back(std::uint32_t(e.slot));
+            if (e.legChanged) changed.push_back(std::uint32_t(e.slot));
             placed.push_back(&e);
+        }
+        // Nobody to tell (a server without players): no views to work out, only the pass's end.
+        if (watchers.empty()) {
+            EndInterestPass();
+            return;
         }
         // Each placed entity's place and kind, once a tick (read by every view that holds it).
         enum Class : std::uint8_t { kPlayer, kMonster, kItem, kNpc };
@@ -418,11 +426,8 @@ struct World::State {
         // New legs encoded once each; an appearance only when someone newly sees it (encoded by the
         // job that tells it: most walkers are seen by nobody new on a tick).
         std::vector<std::vector<std::byte>> legs(placed.size());
-        jobs.ParallelFor(placed.size(), 64, [&](std::size_t begin, std::size_t end) {
-            for (std::size_t i = begin; i < end; ++i) {
-                const Entity& e = *placed[i];
-                if (e.legChanged) legs[i] = proto::Encode(Leg(e));
-            }
+        jobs.ParallelFor(changed.size(), 64, [&](std::size_t begin, std::size_t end) {
+            for (std::size_t k = begin; k < end; ++k) legs[changed[k]] = proto::Encode(Leg(*placed[changed[k]]));
         });
         const double radius = std::max(1.0, double(config.viewRadius));
         const double keep = std::clamp(double(config.viewKeep), 0.0, 0.9);
@@ -437,7 +442,9 @@ struct World::State {
             std::uint64_t watchers = 0, seen = 0, players = 0, monsters = 0, items = 0, legsSent = 0, legsDeferred = 0;
             std::size_t seenMax = 0;
         };
-        const std::size_t chunks = std::clamp<std::size_t>(placed.size() / 32, 1, 256);
+        // The views in chunks of watchers (not of everything placed: most of it is monsters, NPCs and items, seen but
+        // never told, and a chunk of those would be a job that finds nothing to do).
+        const std::size_t chunks = std::clamp<std::size_t>(watchers.size(), 1, 256);
         std::vector<std::vector<WorldMessage>> told(chunks);
         std::vector<std::vector<Change>> changes(chunks);
         std::vector<Tally> tallies(chunks);
@@ -455,9 +462,9 @@ struct World::State {
             for (std::size_t c = chunkBegin; c < chunkEnd; ++c) {
                 std::vector<WorldMessage>& mine = told[c];
                 Tally& tally = tallies[c];
-                for (std::size_t i = placed.size() * c / chunks, last = placed.size() * (c + 1) / chunks; i < last; ++i) {
+                for (std::size_t k = watchers.size() * c / chunks, last = watchers.size() * (c + 1) / chunks; k < last; ++k) {
+                    const std::size_t i = watchers[k];
                     Entity& e = *placed[i];
-                    if (!e.watcher) continue; // NPCs, monsters, items: seen, never told
                     players.clear();
                     monsters.clear();
                     items.clear();
@@ -600,9 +607,15 @@ struct World::State {
             stats.legsDeferred += t.legsDeferred;
         }
         // A walker hears of its own new leg too (the server's word on where it goes).
-        for (Entity* e : placed) {
-            if (e->legChanged && e->watcher) out.push_back({e->peer, proto::EntityMoved::kId, legs[e->slot], LegKey(e->id)});
+        for (const std::uint32_t w : watchers) {
+            const Entity* e = placed[w];
+            if (e->legChanged) out.push_back({e->peer, proto::EntityMoved::kId, legs[w], LegKey(e->id)});
         }
+        EndInterestPass();
+    }
+
+    // The end of an interest pass: every new leg told (or held for its tier), the ground items seen falling are lying.
+    void EndInterestPass() {
         for (auto& [id, e] : entities) {
             e.legChanged = false;
             // A ground item seen falling on this pass: lying there for anyone who comes later.

@@ -33,6 +33,31 @@ using namespace std::chrono_literals;
 
 std::int64_t UnixNow() { return std::int64_t(std::time(nullptr)); }
 
+// The news shown, newest first, for the sitemap: "news", then a line "id day" each (the day as YYYY-MM-DD).
+std::optional<std::string> NewsList(Database& db) {
+    const QueryResult r = db.Query("SELECT id, day::text FROM sro_vt_account.sr_site_news WHERE visible ORDER BY day DESC, id DESC");
+    if (!r.Ok()) return std::nullopt;
+    std::string out = "news\n";
+    for (int i = 0; i < r.Rows(); ++i) out += r.Text(i, 0) + " " + r.Text(i, 1) + "\n";
+    return out;
+}
+
+// Text as XML character data.
+std::string XmlEscape(std::string_view text) {
+    std::string out;
+    for (const char c : text) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        case '\'': out += "&apos;"; break;
+        default: out += c;
+        }
+    }
+    return out;
+}
+
 // A JSON answer kept for `age`: the first request that finds it older asks the database pool for a new
 // one and is answered with the old one meanwhile; only the very first waits (a little) for an answer.
 // Refresh asks at once (the bus said it changed): once more after the question on its way, if there is one.
@@ -236,7 +261,8 @@ struct WebServer::State {
           uniques(pool, c.statusAge, [](Database& db) { return UniquesJson(db); }),
           site(pool, std::chrono::seconds(60), [](Database& db) { return SiteJson(db); }),
           stats(pool, std::chrono::seconds(60), [](Database& db) { return StatsJson(db); }),
-          load(pool, std::chrono::seconds(30), [](Database& db) { return LoadJson(db); }) {}
+          load(pool, std::chrono::seconds(30), [](Database& db) { return LoadJson(db); }),
+          news(pool, std::chrono::seconds(60), [](Database& db) { return NewsList(db); }) {}
 
     WebConfig config;
     std::string serverJson;
@@ -250,6 +276,58 @@ struct WebServer::State {
     Cached site; // the texts, news, images and downloads (read again at once when the administration changes them)
     Cached stats; // accounts, characters, guilds, uniques killed
     Cached load;  // the game servers' ticks, players and monsters over time (the server page's chart)
+    Cached news;  // the news shown, for the sitemap: "news" then a line "id day" each
+
+    // The site's public address: the setting, else the request's own host (https when a trusted proxy says so).
+    std::string SiteUrl(const httplib::Request& req) const {
+        if (!config.siteUrl.empty()) return config.siteUrl;
+        const bool https = config.trustProxy && IsLoopback(req.remote_addr) && req.get_header_value("X-Forwarded-Proto") == "https";
+        return (https ? "https://" : "http://") + req.get_header_value("Host");
+    }
+
+    // The sitemap (sitemaps.org): the site's pages, then each news article shown with its day.
+    void Sitemap(const httplib::Request& req, httplib::Response& res) {
+        const std::string base = XmlEscape(SiteUrl(req));
+        std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                          "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
+        const auto url = [&](const std::string& path, const std::string& day, const char* often, const char* priority) {
+            xml += "  <url><loc>" + base + path + "</loc>";
+            if (!day.empty()) xml += "<lastmod>" + day + "</lastmod>";
+            xml += std::string("<changefreq>") + often + "</changefreq><priority>" + priority + "</priority></url>\n";
+        };
+        // The newest article's day is the home page's and the news page's last change.
+        std::vector<std::pair<std::string, std::string>> articles; // id, day
+        std::istringstream lines(news.Get(3s));
+        for (std::string line; std::getline(lines, line);) {
+            const std::size_t space = line.find(' ');
+            if (space == std::string::npos) continue;
+            articles.emplace_back(line.substr(0, space), line.substr(space + 1));
+        }
+        const std::string latest = articles.empty() ? std::string() : articles.front().second;
+        url("/", latest, "daily", "1.0");
+        url("/news", latest, "daily", "0.8");
+        url("/download", "", "weekly", "0.9");
+        url("/server", "", "hourly", "0.6");
+        url("/rankings", "", "hourly", "0.6");
+        url("/about", "", "monthly", "0.5");
+        for (const auto& [id, day] : articles) url("/news/" + id, day, "monthly", "0.7");
+        xml += "</urlset>\n";
+        res.set_header("Cache-Control", "public, max-age=3600");
+        res.set_content(xml, "application/xml; charset=utf-8");
+    }
+
+    // robots.txt: everything but the administration and the developer pages (the page reads its content from /api, so a
+    // search engine that renders it must reach /api), and where the sitemap is.
+    void Robots(const httplib::Request& req, httplib::Response& res) const {
+        const std::string text = "User-agent: *\n"
+                                  "Disallow: /admin\n"
+                                  "Disallow: /dev\n"
+                                  "Disallow: /api/admin\n"
+                                  "\n"
+                                  "Sitemap: " + SiteUrl(req) + "/sitemap.xml\n";
+        res.set_header("Cache-Control", "public, max-age=3600");
+        res.set_content(text, "text/plain; charset=utf-8");
+    }
     std::shared_ptr<WebAdmin> admin;
     std::shared_ptr<WebPlayers> players;
     // The shard's bus: its game servers say when a unique came or fell (sr_uniques_<schema>).
@@ -431,6 +509,9 @@ bool WebServer::Start(const WebConfig& config, std::string& error) {
             res.set_content(all.str(), "text/html; charset=utf-8");
         };
         for (const char* path : {"/download", "/admin", "/dev", "/news", "/about", "/server", "/rankings", R"(/news/\d+)"}) http.Get(path, page);
+        // For search engines: the pages and the news (a file of the same name in the site's folder would be served instead).
+        http.Get("/sitemap.xml", [&s](const httplib::Request& req, httplib::Response& res) { s.Sitemap(req, res); });
+        http.Get("/robots.txt", [&s](const httplib::Request& req, httplib::Response& res) { s.Robots(req, res); });
     }
 
     if (config.port == 0) {

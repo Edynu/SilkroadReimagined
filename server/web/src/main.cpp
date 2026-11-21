@@ -4,6 +4,8 @@
 //   web-host (127.0.0.1), web-port (15790)    where it listens (behind the reverse proxy)
 //   web-root DIR                             also serve the built site (website\dist) at /
 //   web-trust-proxy                          the visitor's address from X-Forwarded-For (a local proxy)
+//   web-site-url URL                         the site's public address (https://example.com): /sitemap.xml and
+//                                            /robots.txt link to it (unset: the request's own host)
 //   web-registration (true)                  accounts can be made on the site
 //   web-beta-keys (false)                    an account needs a key
 //   web-register-attempts (5)                accounts tried per address an hour (0: no limit)
@@ -127,6 +129,8 @@ int main(int argc, char** argv) {
     web.host = c.GetString("web-host", "127.0.0.1");
     web.port = std::uint16_t(c.GetInt("web-port", 15790));
     web.siteRoot = c.GetString("web-root", "");
+    web.siteUrl = c.GetString("web-site-url", "");
+    while (!web.siteUrl.empty() && web.siteUrl.back() == '/') web.siteUrl.pop_back();
     web.trustProxy = c.GetBool("web-trust-proxy", false);
     web.threads = c.GetInt("web-threads", web.threads);
     web.registration = c.GetBool("web-registration", true);

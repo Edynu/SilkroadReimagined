@@ -92,6 +92,43 @@ TEST_CASE("JobSystem: ParallelFor covers the range once") {
     }
 }
 
+TEST_CASE("JobSystem: ParallelFor does not wait for helpers that never got a core") {
+    // Every worker held on a Normal job: the caller takes every batch itself and returns at once; the helper jobs it
+    // queued run afterwards, when the workers are free, find nothing left and never touch the (gone) function.
+    JobSystem jobs(3);
+    std::atomic<bool> release{false};
+    std::atomic<int> holding{0};
+    JobCounter held;
+    for (unsigned w = 0; w < jobs.WorkerCount(); ++w) {
+        jobs.Run(
+            [&] {
+                holding.fetch_add(1);
+                while (!release.load()) std::this_thread::yield();
+            },
+            JobPriority::Normal, &held);
+    }
+    while (holding.load() < int(jobs.WorkerCount())) std::this_thread::yield();
+    std::atomic<int> sum{0};
+    {
+        std::vector<int> values(1000, 1);
+        jobs.ParallelFor(values.size(), 10, [&values, &sum](std::size_t begin, std::size_t end) {
+            for (std::size_t i = begin; i < end; ++i) sum.fetch_add(values[i], std::memory_order_relaxed);
+        });
+    } // the function and what it reads are gone; its helpers may not have run yet
+    CHECK(sum.load() == 1000);
+    release.store(true);
+    jobs.Wait(held);
+}
+
+TEST_CASE("JobSystem: ParallelFor inside ParallelFor") {
+    JobSystem jobs(4);
+    std::atomic<int> cells{0};
+    jobs.ParallelFor(64, 1, [&](std::size_t, std::size_t) {
+        jobs.ParallelFor(100, 7, [&](std::size_t begin, std::size_t end) { cells.fetch_add(int(end - begin), std::memory_order_relaxed); });
+    });
+    CHECK(cells.load() == 64 * 100);
+}
+
 TEST_CASE("JobSystem: work from many threads at once") {
     JobSystem jobs(4);
     std::atomic<int> total{0};

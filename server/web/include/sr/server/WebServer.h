@@ -33,6 +33,9 @@ struct WebConfig {
     std::string host = "127.0.0.1"; // behind the reverse proxy; 0.0.0.0 to be reached directly
     std::uint16_t port = 15790;     // 0: any free port (the tests)
     std::string siteRoot;           // the built site (website/dist), served at /; empty: the API only
+    // The site's public address (scheme://host, e.g. https://example.com): the sitemap's and robots.txt's links. Empty:
+    // the request's own host (https behind a trusted proxy that says so, else http).
+    std::string siteUrl;
     bool trustProxy = false;        // take the visitor's address from X-Forwarded-For when the peer is local
     int threads = 4;                // workers answering requests
 

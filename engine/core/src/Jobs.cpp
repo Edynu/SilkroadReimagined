@@ -1,8 +1,10 @@
 #include "sr/core/Jobs.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -71,6 +73,17 @@ struct JobSystem::Queue {
 struct JobSystem::Worker {
     std::thread thread;
     Queue queues[kJobPriorityCount];
+};
+
+// One ParallelFor: the next batch to take and the batches not yet done. Shared by the caller and
+// its helper jobs; a helper that runs after the caller returned still holds it, finds no batch
+// left and never touches `fn` (which lived on the caller's stack).
+struct JobSystem::Batches {
+    std::atomic<std::size_t> next{0};
+    JobCounter left; // the batches not finished (the caller waits on it)
+    std::size_t count = 0, batch = 0, batches = 0;
+    BatchFunction call = nullptr;
+    void* fn = nullptr;
 };
 
 JobSystem::JobSystem(int requested) {
@@ -152,12 +165,51 @@ void JobSystem::Push(JobFunction fn, JobPriority priority, JobCounter* counter, 
     if (wake) WakeWorkers(1);
 }
 
+void JobSystem::ParallelBatches(std::size_t count, std::size_t batch, std::size_t batches, BatchFunction call, void* fn) {
+    auto work = std::make_shared<Batches>();
+    work->count = count;
+    work->batch = batch;
+    work->batches = batches;
+    work->call = call;
+    work->fn = fn;
+    work->left.pending_.store(static_cast<std::int32_t>(batches), std::memory_order_relaxed);
+    // One helper a worker at most (the caller is one more taker): more would only wake threads to
+    // find the batches gone.
+    const std::size_t helpers = std::min(batches - 1, workers_.size());
+    for (std::size_t h = 0; h < helpers; ++h) {
+        Push(JobFunction([this, work] { RunBatches(*work); }), JobPriority::Frame, nullptr, false);
+    }
+    WakeWorkers(helpers);
+    RunBatches(*work);
+    // Only batches a helper took and is still running are left: wait for those (running other
+    // Frame jobs meanwhile, our own spare helpers among them: they find nothing and return).
+    Wait(work->left);
+}
+
+void JobSystem::RunBatches(Batches& work) {
+    for (;;) {
+        const std::size_t b = work.next.fetch_add(1, std::memory_order_relaxed);
+        if (b >= work.batches) return;
+        const std::size_t begin = b * work.batch;
+        const std::size_t end = std::min(begin + work.batch, work.count);
+        work.call(work.fn, begin, end);
+        // The last batch done: the caller may return now (and `fn` with it).
+        if (work.left.pending_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            completions_.fetch_add(1, std::memory_order_release);
+            completions_.notify_all();
+        }
+    }
+}
+
 void JobSystem::WakeWorkers(std::size_t jobs) {
+    if (jobs == 0) return;
     wake_.fetch_add(1, std::memory_order_release);
-    if (jobs == 1) {
-        wake_.notify_one();
-    } else {
+    // As many workers as there are jobs: waking all of them for a few jobs only has the rest find
+    // nothing, after taking cores from the threads that had work.
+    if (jobs >= workers_.size()) {
         wake_.notify_all();
+    } else {
+        for (std::size_t i = 0; i < jobs; ++i) wake_.notify_one();
     }
 }
 

@@ -206,6 +206,11 @@ private:
                                     return self->ConnectTo(results, attempt + 1);
                                 }
                                 if (ec) return self->CloseNow(std::format("cannot connect: {}", ec.message()));
+                                // Every message goes out at once: no waiting to gather small writes (Nagle's
+                                // algorithm), which with the peer's delayed acknowledgements holds a click for up to
+                                // 200 ms.
+                                asio::error_code noDelay;
+                                self->stream_.lowest_layer().set_option(Tcp::no_delay(true), noDelay);
                                 self->stream_.async_handshake(asio::ssl::stream_base::client, [self](const asio::error_code& ec) {
                                     if (ec) return self->CloseNow(std::format("TLS handshake failed: {}", ec.message()));
                                     self->OnOpen();
@@ -368,7 +373,13 @@ public:
     void StartAccept() {
         acceptor_.async_accept(asio::make_strand(service_->io), [self = shared_from_this()](const asio::error_code& ec, Tcp::socket socket) {
             if (ec == asio::error::operation_aborted || !self->acceptor_.is_open()) return;
-            if (!ec) self->OnAccept(std::move(socket));
+            if (!ec) {
+                // Every message goes out at once (no Nagle's algorithm): the world's updates are small and must not
+                // wait for the client's acknowledgements.
+                asio::error_code noDelay;
+                socket.set_option(Tcp::no_delay(true), noDelay);
+                self->OnAccept(std::move(socket));
+            }
             self->StartAccept();
         });
     }
