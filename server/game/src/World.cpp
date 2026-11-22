@@ -899,8 +899,8 @@ std::uint32_t World::AddNpc(std::uint32_t model, const proto::WorldPosition& pos
 }
 
 std::uint32_t World::AddGroundItem(std::uint32_t item, const proto::WorldPosition& position, float yaw, std::uint32_t amount,
-                                   std::uint8_t plus, std::uint8_t state) {
-    const std::uint32_t id = AddNpc(item, position, yaw);
+                                   std::uint8_t plus, std::uint8_t state, std::string_view name) {
+    const std::uint32_t id = AddNpc(item, position, yaw, name);
     State::Entity& e = s_->entities[id];
     e.kind = proto::EntityKind::GroundItem;
     e.fresh = true; // it falls now: the next pass tells it so (Interest)

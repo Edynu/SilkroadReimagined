@@ -35,6 +35,12 @@ namespace sr::client {
 
 namespace proto = game::proto;
 
+const assets::SkillRow& PlayScreen::Shown(const assets::SkillRow& skill) const {
+    if (skill.original == 0 || !tables_) return skill;
+    const assets::SkillRow* copied = tables_->skills.Find(skill.original);
+    return copied != nullptr ? *copied : skill;
+}
+
 std::size_t PlayScreen::SlotOf(std::uint32_t entity) const {
     const auto slot = slots_.find(entity);
     return slot == slots_.end() ? StageEffects::kNone : slot->second;
@@ -78,7 +84,8 @@ void PlayScreen::SkillEffects(bool clipSounds, const assets::SkillRow& skill, st
     const bool hasBase = !skill.baseName.empty() && skill.baseName != "xxx";
     const double second = events.size() >= 2 ? events.back() : !events.empty() ? events.front() : 0.3 * (swing.end - swing.shot);
     if (!clipSounds) secondSwings_.push_back({caster, hasBase ? skill.baseName : skill.codename, now + swing.shot + second});
-    const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, skill);
+    const assets::SkillRow& shown = Shown(skill); // the stages of the skill it copies, if any
+    const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, shown);
     // Its hits wait for its damage moments (HandleEvent), the caster shown or not.
     strikeTimes_.erase(caster);
     resultsAt_.erase(caster);
@@ -92,14 +99,13 @@ void PlayScreen::SkillEffects(bool clipSounds, const assets::SkillRow& skill, st
         }
     }
     if (stages == nullptr || from == StageEffects::kNone) return; // the caster not shown
-    const bool named = !skill.baseName.empty() && skill.baseName != "xxx";
     // A skill's ACT_S shows on whom it takes hold: a buff's with the buff (BuffAdded, EntityBuffs), a
     // heal's, a cure's and a resurrection's with proto::SkillTook, a link's with its copy (EntityBuffs on its
     // holder, a monster too); the rest's with the swing, at its shot.
     const game::SkillTraits traits = game::TraitsOf(skill);
     const game::ThreatSpec threat = game::ThreatOf(skill);
     const bool actStart = !(traits.buff || traits.toggle || traits.imbue || traits.heal || traits.cure || traits.resurrect || threat.raise || threat.cut || traits.link);
-    const auto* animation = tables_->skillAnimations.Find(named ? skill.baseName : skill.codename);
+    const auto* animation = tables_->skillAnimations.Find(AnimationKey(shown));
     const std::uint32_t castNo = stageEffects_.Skill(*world_, *stages, from, target == 0 ? StageEffects::kNone : SlotOf(target), now, swing, actStart, animation,
                                                      cast, deferShot ? StageEffects::Part::BeforeShot : StageEffects::Part::All);
     if (deferShot) {
@@ -125,8 +131,9 @@ void PlayScreen::StartShot(std::uint32_t caster, double at) {
     pendingShots_.erase(it);
     const double delay = at - p.planned;
     const double now = p.start + delay; // the swing's start as if its shot had been planned for `at`
-    const assets::SkillRow* skill = tables_ ? tables_->skills.Find(p.skill) : nullptr;
-    const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr;
+    const assets::SkillRow* own = tables_ ? tables_->skills.Find(p.skill) : nullptr;
+    const assets::SkillRow* skill = own != nullptr ? &Shown(*own) : nullptr; // its presentation's
+    const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr;
     std::vector<double> events;
     const StageEffects::Cast cast = CastOf(caster, p.target, p.set, p.state, p.weapon, events);
     // Its hits' moments from its shot now.
@@ -139,9 +146,8 @@ void PlayScreen::StartShot(std::uint32_t caster, double at) {
     // Its shot's stages.
     if (world_ && stages != nullptr && skill != nullptr) {
         if (const std::size_t from = SlotOf(caster); from != StageEffects::kNone) {
-            const bool named = !skill->baseName.empty() && skill->baseName != "xxx";
             stageEffects_.Skill(*world_, *stages, from, p.target == 0 ? StageEffects::kNone : SlotOf(p.target), now, p.swing, p.actStart,
-                                tables_->skillAnimations.Find(named ? skill->baseName : skill->codename), cast, StageEffects::Part::Shot, p.castNo, at);
+                                tables_->skillAnimations.Find(AnimationKey(*skill)), cast, StageEffects::Part::Shot, p.castNo, at);
         }
     }
     // Its body: the steps before the shot end at `at`, the shot's moves with it.
@@ -192,8 +198,7 @@ void PlayScreen::HitEffects(const proto::EntityDamaged& hit) {
         }
         for (const std::uint32_t id : held) {
             const assets::SkillRow* s = tables_->skills.Find(id);
-            const bool named = s != nullptr && !s->baseName.empty() && s->baseName != "xxx";
-            const assets::SkillAnimation* anim = s != nullptr ? tables_->skillAnimations.Find(named ? s->baseName : s->codename) : nullptr;
+            const assets::SkillAnimation* anim = s != nullptr ? tables_->skillAnimations.Find(AnimationKey(Shown(*s))) : nullptr;
             if (anim != nullptr && !anim->defenseEffect.empty()) {
                 defence = anim->defenseEffect;
                 break;
@@ -212,8 +217,7 @@ void PlayScreen::HitEffects(const proto::EntityDamaged& hit) {
         const auto consider = [&](std::uint32_t id) {
             const assets::SkillRow* s = id != 0 ? tables_->skills.Find(id) : nullptr;
             if (s == nullptr) return;
-            const bool named = !s->baseName.empty() && s->baseName != "xxx";
-            const assets::SkillAnimation* anim = tables_->skillAnimations.Find(named ? s->baseName : s->codename);
+            const assets::SkillAnimation* anim = tables_->skillAnimations.Find(AnimationKey(Shown(*s)));
             if (anim != nullptr && !anim->damageEffect.empty() && (best == nullptr || anim->priority > best->priority)) best = anim;
         };
         if (const auto skill = lastSkill_.find(hit.attacker); skill != lastSkill_.end()) consider(skill->second);
@@ -242,7 +246,7 @@ void PlayScreen::HitEffects(const proto::EntityDamaged& hit) {
     // at its source, the holder.
     const bool burst = (hit.flags & proto::kDamageBurst) != 0;
     if (const assets::SkillRow* returned = (hit.flags & proto::kDamageReturn) != 0 || burst ? tables_->skills.Find(hit.imbue) : nullptr) {
-        if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, *returned)) {
+        if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, Shown(*returned))) {
             stageEffects_.ReturnHit(*world_, *stages, slot, SlotOf(hit.attacker), cameraNow_, burst);
         }
     }
@@ -259,7 +263,7 @@ void PlayScreen::BuffEffects(std::uint32_t token, std::uint32_t skillId, bool ad
         if (const auto known = buffSkills_.find(token); known != buffSkills_.end()) {
             const assets::SkillRow* skill = tables_->skills.Find(known->second);
             const std::size_t slot = SlotOf(view_.Self());
-            const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr;
+            const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr;
             if (stages != nullptr && slot != StageEffects::kNone) stageEffects_.StateEnd(*world_, *stages, slot);
             buffSkills_.erase(known);
         }
@@ -271,7 +275,7 @@ void PlayScreen::BuffEffects(std::uint32_t token, std::uint32_t skillId, bool ad
     const std::size_t slot = SlotOf(view_.Self());
     if (!shown_ || slot == StageEffects::kNone) return;
     const assets::SkillRow* skill = tables_->skills.Find(skillId);
-    if (const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr) {
+    if (const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr) {
         stageEffects_.BuffStart(*world_, *stages, slot);
     }
 }
@@ -315,7 +319,7 @@ void PlayScreen::TakeBuffs(const proto::EntityBuffs& message, double now) {
     const std::size_t slot = SlotOf(message.entity);
     const auto stagesOf = [&](std::uint32_t id) -> const StageEffects::Stages* {
         const assets::SkillRow* skill = tables_ && tables_->Usable() ? tables_->skills.Find(id) : nullptr;
-        return skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr;
+        return skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr;
     };
     // Those gone: their loops fade, their end shows (DEACT).
     for (const std::uint32_t id : b.skills) {
@@ -363,7 +367,7 @@ void PlayScreen::OthersBuffLoops() {
                 if (b.loops.contains(id)) continue;
                 std::vector<StageEffects::Handle>& loops = b.loops[id];
                 const assets::SkillRow* skill = tables_->skills.Find(id);
-                if (const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr) {
+                if (const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr) {
                     loops = stageEffects_.BuffLoops(*world_, *stages, slot);
                 }
             }
@@ -415,7 +419,7 @@ void PlayScreen::ObjectStruck(const proto::SkillObjectStruck& message, double no
     if (!world_ || !tables_ || !tables_->Usable()) return;
     const game::WorldView::Entity* e = view_.Find(message.object);
     const assets::SkillRow* skill = tables_->skills.Find(message.skill);
-    const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr;
+    const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr;
     if (e == nullptr || stages == nullptr) return;
     stageEffects_.ObjectStruck(*world_, *stages, ObjectPoint(*e), SlotOf(e->amount), now);
 }
@@ -555,7 +559,7 @@ void PlayScreen::BuffLoops() {
         if (a.kind != game::ActiveEffect::Kind::Skill || buffEffects_.contains(a.token)) continue;
         std::vector<gfx::EffectSystem::Handle>& loops = buffEffects_[a.token]; // tried once, even with no loop
         const assets::SkillRow* skill = tables_->skills.Find(a.id);
-        if (const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr) {
+        if (const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr) {
             loops = stageEffects_.BuffLoops(*world_, *stages, slot);
         }
     }

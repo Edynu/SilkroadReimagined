@@ -689,7 +689,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
     } else if (const auto* revived = std::get_if<proto::SkillTook>(&event)) {
         // A skill taking hold (a heal, a cure, a resurrection's rise): its ACT_S (effect, sound) on whom it took.
         const assets::SkillRow* skill = tables_ && tables_->Usable() ? tables_->skills.Find(revived->skill) : nullptr;
-        const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, *skill) : nullptr;
+        const auto* stages = skill != nullptr ? StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill)) : nullptr;
         const std::size_t slot = SlotOf(revived->entity);
         if (world_ && stages != nullptr && slot != StageEffects::kNone) stageEffects_.BuffStart(*world_, *stages, slot);
     } else if (const auto* states = std::get_if<proto::EntityStates>(&event)) {
@@ -1524,8 +1524,22 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         const assets::SkillRow* skill = tables_->skills.Find(swing->skill);
         if (skill == nullptr) return;
         const bool named = !skill->baseName.empty() && skill->baseName != "xxx";
-        const assets::SkillAnimation* anim = tables_->skillAnimations.Find(named ? skill->baseName : skill->codename);
+        // Its clips and stages are those of the skill it copies when it names one (Shown: a bandit's attack plays its
+        // player skill's), its times its own.
+        const assets::SkillAnimation* anim = tables_->skillAnimations.Find(AnimationKey(Shown(*skill)));
+        // A shot still waiting for its impact (P7) was fired all the same: a bolt's hit comes after its flight, and the
+        // caster's next swing may come first. It goes now, the rest of its presentation ending (the user's report
+        // 2026-11-22: a fire nuke sometimes showed no fireball).
+        std::optional<PendingShot> fired;
+        if (const auto p = pendingShots_.find(swing->attacker); p != pendingShots_.end()) {
+            fired = std::move(p->second);
+            pendingShots_.erase(p);
+        }
         EndPresentation(swing->attacker, context.time); // the one running ends (a new B070 of its caster)
+        if (fired) {
+            pendingShots_[swing->attacker] = std::move(*fired);
+            StartShot(swing->attacker, context.time);
+        }
         swingTargets_[swing->attacker].clear(); // a new swing: its struck targets afresh
         // Its shot clip (one of its row's by a random byte of the cast, the ready and wait clips by
         // the same byte; ATTACK1 when it names none).
@@ -1638,7 +1652,7 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         motion.locks = anim != nullptr && (!anim->ready.empty() || !anim->wait.empty() || !anim->shot.empty());
         motion.dash = dash > 0.0;
         if (motion.dash) {
-            if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, *skill)) {
+            if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill))) {
                 for (const StageEffects::Stage& s : *stages) {
                     if (s.phase == StageEffects::kWait && s.action == "AT_LOOP" && s.object.ends_with(".efp")) motion.dashEffect = s.object;
                 }
@@ -1648,7 +1662,7 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         if (clip <= 0.0 && dash <= 0.0) motion.shotFrom = context.time + times.shot;
         // Its weapon hidden: from the cast (hide weapon 1), or as a WEAPON flight leaves the hand.
         if (anim != nullptr && anim->hideWeapon == 1) motion.hideFrom = context.time;
-        if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, *skill)) {
+        if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill))) {
             const std::vector<double> events = slot != StageEffects::kNone ? world_->StageEvents(slot, set, state) : std::vector<double>{};
             for (const StageEffects::Stage& s : *stages) {
                 if (core::NormalizeAssetPath(s.object) != "weapon" || !s.action.starts_with("AT_MOV")) continue;
@@ -3154,6 +3168,16 @@ void PlayScreen::HudRequests(ScreenContext& context) {
                                      if (yes && !replay_ && shared_ && shared_->session) shared_->session->SendGuild(proto::TimedPause{category, std::uint8_t(!paused)});
                                  });
                 }
+                // A bonus scroll's run (experience, skill points, ...): "Will you cancel the use of the selected item?" /
+                // "... its effect will be lost.", then TimedCancel (ours: the original's message not traced).
+                if (e.kind == game::ActiveEffect::Kind::TimedJob && (e.token & 0xFFFF0000u) == game::PlayerState::kTimedServiceToken &&
+                    game::IsBonusCategory(category)) {
+                    hud_.Confirm("UIIT_STT_CONFIRM_BOX",
+                                 {gui_.data().Text("UIIT_MSG_QUESTION_SILKMALL_ITEM_USE_CANCLE_1"), gui_.data().Text("UIIT_MSG_QUESTION_SILKMALL_ITEM_USE_CANCLE_2")},
+                                 [this, category](bool yes) {
+                                     if (yes && !replay_ && shared_ && shared_->session) shared_->session->SendGuild(proto::TimedCancel{category});
+                                 });
+                }
                 // The academy's accumulation: "Are you sure to transfer cumulated experience points to the Guardian?",
                 // then the original's 0x7483.
                 if (e.kind == game::ActiveEffect::Kind::TimedJob && e.token == game::PlayerState::kAcademyToken) {
@@ -3372,6 +3396,8 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
             name = gold ? GoldText(e.amount) + " " + gui_.data().Text("UIIT_STT_GOLD") : gui_.data().Text(row->nameKey);
             colour = e.rarity == 1 ? ui::Argb(0xFF72BFFF) : ui::Argb(0xFFFFFFFF);
             lift = 5.0f;
+            // Specialty goods: their owner's alias under the name (ours: the original's line for it not traced).
+            if (!e.look.name.empty()) petLine = e.look.name;
         } else if (name.empty() && IsNpc(e)) {
             if (const assets::ObjectRow* row = tables_->characters.Find(e.look.model)) name = gui_.data().Text(row->nameKey);
             colour = ui::Argb(0xFFEFDAA4);

@@ -6,6 +6,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -23,6 +24,8 @@
 #include "sr/game/Potions.h"
 #include "sr/game/SpecialItems.h"
 #include "sr/game/States.h"
+#include "sr/game/MallProtocol.h"
+#include "sr/game/TimedServices.h"
 #include "sr/server/GameServer.h"
 #include "sr/server/ServiceStore.h"
 #include "sr/server/Store.h"
@@ -357,6 +360,38 @@ TEST_CASE("Game server: the special items' uses") {
         auto again = s.Relog(p);
         for (int i = 0; i < 200; ++i) s.game.Poll(2ms); // its services read
         CHECK(Use(s, again, kExpScroll) == game::kBonusRunning); // still running after the relog
+    }
+    SUBCASE("a bonus scroll on the buff board (its time service entry), ended by its player: its key free again (2026-11-22)") {
+        CHECK(Use(s, p, kExpScroll) == 0);
+        // Told among the time services, by its item, with its time left.
+        bool shown = false;
+        proto::TimedServices told;
+        for (int i = 0; i < 10 && !shown && p.client->Expect(told); ++i) {
+            for (const proto::TimedService& service : told.services) {
+                if (service.category == game::kTimedBonusFirst && service.item == kExpScroll && service.secondsLeft > 0) shown = true;
+            }
+        }
+        CHECK(shown);
+        // Ended: answered, told again without it, and a second scroll of its key taken at once.
+        p.client->Send(proto::TimedCancel{game::kTimedBonusFirst});
+        proto::ServiceAnswer answer;
+        REQUIRE(p.client->Expect(answer));
+        CHECK(answer.request == proto::ServiceRequest::Cancel);
+        CHECK(answer.code == 0);
+        // (Those told before the end may still wait in the inbox: the newest is without it.)
+        bool gone = false;
+        for (int i = 0; i < 10 && !gone && p.client->Expect(told, 2s); ++i) {
+            gone = std::none_of(told.services.begin(), told.services.end(), [](const proto::TimedService& t) { return t.category == game::kTimedBonusFirst; });
+        }
+        CHECK(gone);
+        CHECK(Use(s, p, kExpScroll) == 0);
+        // Nothing of that kind running, or not a bonus's category: refused.
+        p.client->Send(proto::TimedCancel{game::kTimedBonusFirst + 1});
+        REQUIRE(p.client->Expect(answer));
+        CHECK(answer.code == 2);
+        p.client->Send(proto::TimedCancel{game::kTimedGoldSilver});
+        REQUIRE(p.client->Expect(answer));
+        CHECK(answer.code == 2);
     }
     SUBCASE("the uses the original refuses: its codes, the items kept") {
         CHECK(Use(s, p, kStatReset) == 2);

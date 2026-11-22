@@ -103,6 +103,8 @@ struct Monsters::State {
         game::CombatStats stats;
         Mode mode = Mode::Idle;
         std::uint32_t target = 0;
+        int slot = -1;                 // its place about its target (State::approach; -1: none, it goes for the target itself)
+        std::uint32_t slotTarget = 0;  // whom that place is about
         proto::WorldPosition aim; // where its chase last headed
         Clock::time_point nextThink, nextSwing, goneAt;
         Clock::time_point swingEnds; // it stands through its swing's clip: no chase before then
@@ -157,6 +159,46 @@ struct Monsters::State {
     std::vector<MonsterNest> summons;   // raised by hits this update, added at the next
     std::unordered_map<std::uint16_t, std::vector<std::size_t>> byRegion; // the nests of each region
     std::unordered_map<std::uint32_t, Monster> monsters;
+    // The places about a target its attackers take, as the original's positioner keeps them: eight, one each 45 degrees
+    // (from 22.5), each held by one monster; one comes to the place on the side it comes from, else the nearest free one
+    // to either side; with all eight held it goes for the target's own place. A place is held while its monster chases
+    // that target from it (an entry left by one gone or turned to another is free: HeldBy).
+    static constexpr int kApproachPlaces = 8;
+    std::unordered_map<std::uint32_t, std::array<std::uint32_t, kApproachPlaces>> approach;
+    bool HeldBy(std::uint32_t target, int place, std::uint32_t entity) const {
+        const auto a = approach.find(target);
+        if (a == approach.end() || a->second[std::size_t(place)] != entity || entity == 0) return false;
+        const auto m = monsters.find(entity);
+        return m != monsters.end() && m->second.mode == Mode::Chase && m->second.target == target && m->second.slot == place &&
+               m->second.slotTarget == target;
+    }
+    // Its place about its target (taken now when it has none about this one); -1: all eight held.
+    int ApproachPlace(Monster& m, const proto::WorldPosition& self, const proto::WorldPosition& target) {
+        if (m.slot >= 0 && m.slotTarget == m.target && HeldBy(m.target, m.slot, m.entity)) return m.slot;
+        m.slot = -1;
+        m.slotTarget = 0;
+        const proto::FlatPosition a = proto::ToFlat(self), b = proto::ToFlat(target);
+        // The side it comes from (inferred: the place nearest its bearing from the target).
+        const double bearing = std::atan2(double(a.z - b.z), double(a.x - b.x)) * 180.0 / std::numbers::pi;
+        const int preferred = int(std::floor(std::fmod(bearing + 360.0, 360.0) / 45.0)) % kApproachPlaces;
+        auto& places = approach[m.target];
+        for (int k = 0; k < kApproachPlaces; ++k) {
+            // preferred, then one to each side, then two, ...
+            const int step = (k + 1) / 2, place = ((k % 2 == 1 ? preferred + step : preferred - step) % kApproachPlaces + kApproachPlaces) % kApproachPlaces;
+            if (HeldBy(m.target, place, places[std::size_t(place)])) continue;
+            places[std::size_t(place)] = m.entity;
+            m.slot = place;
+            m.slotTarget = m.target;
+            return place;
+        }
+        return -1;
+    }
+    // The point of place `place` about `target`, `distance` out (the original's: 0.8 of the attacker's reach).
+    static proto::WorldPosition ApproachPoint(const proto::WorldPosition& target, int place, float distance) {
+        const double angle = (22.5 + 45.0 * place) * std::numbers::pi / 180.0;
+        const proto::FlatPosition b = proto::ToFlat(target);
+        return proto::FromFlat({float(b.x + distance * std::cos(angle)), float(b.z + distance * std::sin(angle))}, target.y);
+    }
     std::size_t activeNests = 0;
     std::mt19937 random;
     Clock::time_point nextWake, nextThink;
@@ -706,7 +748,8 @@ struct Monsters::State {
         const Nest& nest = nests[m.nest];
         const auto place = world.Where(m.entity);
         if (!place) return;
-        if (Static(nest)) {
+        // A bandit idles where it stands (no circle of its own to wander back into).
+        if (Static(nest) || nest.spec.bandit != 0) {
             m.nextThink = now + Seconds(Uniform(2.0f, 6.0f));
             return;
         }
@@ -782,8 +825,15 @@ struct Monsters::State {
         }
         const proto::WorldPosition& there = who->second->position;
         const float distance = Distance(place->position, there);
-        const float leash = std::max(nest.spec.radius * 1.5f, kMinLeash);
-        if (distance > kGiveUpDistance || Distance(place->position, nest.spec.position) > leash) return GoHome(m, now, out);
+        // A bandit has no home to go back to (its nest is only where its wave put it): led beyond the trace it lets its
+        // target be where it stands, unhealed, and looks about again (ours; the user's report 2026-11-22: thieves walked
+        // back to their spawn point like a nest's monsters). It leaves 20 s after its last hit.
+        if (nest.spec.bandit != 0) {
+            if (distance > kGiveUpDistance) return DropFight(m, now);
+        } else {
+            const float leash = std::max(nest.spec.radius * 1.5f, kMinLeash);
+            if (distance > kGiveUpDistance || Distance(place->position, nest.spec.position) > leash) return GoHome(m, now, out);
+        }
         // Feared by its target, or confused: it drops the fight where it stands.
         if (m.states.Idles(m.target)) return DropFight(m, now);
         // The skill it uses next: one of its attacks at random; myopia shortens its reach.
@@ -803,7 +853,11 @@ struct Monsters::State {
             // short of it; the user's clip 2026-11-14: aimed at the target's leg's end, thieves between a player and
             // his click ran on to the click and never fought). Turned again when the way is more than 15 degrees off
             // (0.2618 rad), or when the target moved 30 from the aim, so a chaser never stops at a stale spot.
-            const proto::WorldPosition goal = there;
+            // Its place about the target (the original's eight): it heads for that point, 0.8 of its reach out from the
+            // target on its side, so a crowd stands round its target instead of in one heap (the user's report
+            // 2026-11-22); with all eight held it heads for the target itself.
+            const int spot = ApproachPlace(m, place->position, there);
+            const proto::WorldPosition goal = spot >= 0 ? ApproachPoint(there, spot, reach * 0.8f) : there;
             m.nextThink = now + std::chrono::milliseconds(100);
             bool turn = !world.Moving(m.entity) || Distance(m.aim, goal) > 30.0f;
             if (!turn) {
@@ -818,7 +872,7 @@ struct Monsters::State {
                 if (length > kChaseLeg) { // a far end: a leg's worth toward it (one walk's reach, never refused)
                     world.MoveTo(m.entity, proto::FromFlat({a.x + (b.x - a.x) / length * kChaseLeg, a.z + (b.z - a.z) / length * kChaseLeg}, goal.y));
                 } else {
-                    const double stop = std::min(double(reach) * 0.7, length);
+                    const double stop = spot >= 0 ? 0.0 : std::min(double(reach) * 0.7, length); // onto its place's point
                     world.MoveTo(m.entity, proto::FromFlat({b.x + (a.x - b.x) / length * stop, b.z + (a.z - b.z) / length * stop}, goal.y));
                 }
                 m.aim = goal;

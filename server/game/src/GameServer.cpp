@@ -439,7 +439,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             const float angle = turn(groundRandom), radius = i == 0 ? 0.0f : 6.0f + 2.0f * float(i / 6);
             const proto::WorldPosition there = proto::FromFlat({centre.x + radius * std::sin(angle), centre.z + radius * std::cos(angle)}, at.y);
             const std::uint32_t amount = d.item.refId != 0 ? d.item.count : std::uint32_t(std::min<std::uint64_t>(d.gold, 0xFFFFFFFFu));
-            const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, d.item.plus, GroundState(d.item));
+            // Specialty goods carry their owner's name, the alias they were bought under (the user's account of the
+            // original, 2026-11-22: its owner's name shown on them).
+            const assets::ItemRow* row = d.item.refId != 0 && config.rules->items ? config.rules->items->Find(d.item.refId) : nullptr;
+            const std::string_view name = row != nullptr && game::IsSpecialtyGood(*row) ? std::string_view(d.item.creator) : std::string_view();
+            const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, d.item.plus, GroundState(d.item), name);
             GroundItem g{std::move(d.item), d.gold, owner, Clock::now() + kDropOwned, Clock::now() + kGroundLifetime};
             groundExpiry.push({g.expires, id});
             ground[id] = std::move(g);
@@ -2638,8 +2642,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
         return seconds;
     }
-    // The `_timedjob` category a bonus scroll's key is kept in (ours: one row a key; the original keeps them all in its
-    // category 10 by key, which our layout gives the premium).
+    // The `_timedjob` category a bonus scroll's key is kept in (game::kTimedBonusFirst..), also its TimedService's.
     static std::uint8_t BonusCategory(std::uint32_t key) {
         switch (key) {
         case game::kBonusExperienceKey: return kTimedBonusFirst;
@@ -2649,7 +2652,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         default: return 0;
         }
     }
-    static constexpr std::uint8_t kTimedBonusFirst = 116;
+    static constexpr std::uint8_t kTimedBonusFirst = game::kTimedBonusFirst;
 
     void TellServices(PlayerWorld& player) {
         Peer* peer = peers->Find(world->PeerOf(player.entity));
@@ -2658,6 +2661,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         proto::TimedServices m;
         for (const game::TimedService& s : player.services) {
             m.services.push_back({s.category, s.item, s.SecondsLeft(now), s.Bonus(), std::uint8_t(s.paused)});
+        }
+        // The bonus scrolls running, each on the buff board by its item (ours: the original's icon for them not traced),
+        // where a right click ends one (TimedCancel).
+        for (const PlayerWorld::BonusRun& b : player.bonuses) {
+            const std::uint8_t category = BonusCategory(b.key);
+            if (category != 0 && b.until > now) m.services.push_back({category, b.item, std::uint32_t(b.until - now), 0, 0});
         }
         if (player.premium.Running(now)) {
             m.services.push_back({game::kTimedPremium, player.premium.item, std::uint32_t(player.premium.SecondsLeft(now)), 0, 0});
@@ -2897,7 +2906,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 core::LogInfo("{}: {}'s bonus scroll {} ends", config.name, player.name, b.item);
                 return true;
             });
-            if (player.bonuses.size() != bonuses) changed = true;
+            if (player.bonuses.size() != bonuses) changed = tell = true;
             if (changed || now - player.servicesSaved >= std::chrono::seconds(600)) {
                 player.servicesSaved = now;
                 SaveServices(player);
@@ -3235,6 +3244,20 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (it == player.services.end()) return answer(2);
         if (Clock::now() < player.combat.battleUntil) return answer(0x18FB);
         it->Pause(m.on != 0, ServiceNow());
+        SaveServices(player);
+        TellServices(player);
+        answer(0);
+    }
+
+    // A bonus scroll's run ended by its player (TimedCancel; ours, its effect lost as the box says): its key free for
+    // another scroll at once.
+    void CancelBonus(Peer& peer, PlayerWorld& player, const proto::TimedCancel& m) {
+        const auto answer = [&](std::uint16_t code) { ServiceAnswerTo(peer, proto::ServiceRequest::Cancel, code, m.category); };
+        if (!game::IsBonusCategory(m.category)) return answer(2);
+        const auto it = std::find_if(player.bonuses.begin(), player.bonuses.end(), [&](const PlayerWorld::BonusRun& b) { return BonusCategory(b.key) == m.category; });
+        if (it == player.bonuses.end()) return answer(2);
+        core::LogInfo("{}: {} ends the bonus scroll {}", config.name, player.name, it->item);
+        player.bonuses.erase(it);
         SaveServices(player);
         TellServices(player);
         answer(0);
@@ -3914,6 +3937,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         for (const auto& [entity, g] : ground) {
             // As its own pick-up decides (TakeFromGround): not a quest item of another's, not kept for another.
             if (g.ownerOnly && g.owner != p->selected) continue;
+            // Specialty goods go only into a transport, by its trader or a thief's own hand (TakeFromGround's rules):
+            // never a pet's (inferred: the original's pickup of them needs a transport; the user's report 2026-11-22).
+            if (const assets::ItemRow* good = g.item.refId != 0 && config.rules->items ? config.rules->items->Find(g.item.refId) : nullptr;
+                good != nullptr && game::IsSpecialtyGood(*good)) {
+                continue;
+            }
             if (g.owner != 0 && g.owner != p->selected && now < g.ownerUntil &&
                 !(parties && parties->SharesItems(std::uint32_t(g.owner), std::uint32_t(p->selected)))) {
                 continue;
@@ -3939,6 +3968,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto it = ground.find(entity);
         if (p == nullptr || peer == nullptr || it == ground.end()) return Picked::Gone;
         GroundItem& g = it->second;
+        if (const assets::ItemRow* good = g.item.refId != 0 && config.rules->items ? config.rules->items->Find(g.item.refId) : nullptr;
+            good != nullptr && game::IsSpecialtyGood(*good)) {
+            return Picked::Gone; // specialty goods: never a pet's (CosGroundNear)
+        }
         if (g.item.refId == 0) {
             p->inventory.gold += g.gold; // gold to its owner
             SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
@@ -5186,7 +5219,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
     // Takes a player somewhere: on this server a teleport, in another's part of the world a move there.
     // `withTransport`: its transport comes along (the thieves' town scroll, a gate's or a ferry's link that allows one, a
-    // teleport zone's; on this server only: a move to another game server leaves it, its goods with it).
+    // teleport zone's; on this server only: a move to another game server leaves it). A transport left behind drops its
+    // goods where it stands (Coses::Dismiss).
     void TravelTo(std::uint64_t peerId, PlayerWorld& player, const proto::WorldPosition& to, bool withTransport = false) {
         if (exchanges) exchanges->End(player.entity); // a teleport ends its exchange (ours: the original's busy player takes no gate)
         if (alchemy) alchemy->End(player.entity);
@@ -5710,7 +5744,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (alchemy) alchemy->End(player.entity);     // a death stops it at the next tick
         if (quests) quests->Died(player.entity);      // a caught COS runs away
         if (stalls) stalls->Leave(player.entity);
-        if (coses) coses->OwnerDied(player.entity); // the COS it rides goes; its pets stay out (the original's)
+        if (coses) coses->OwnerDied(player.entity); // the ride it is on goes, a transport stays; its pets stay out
         if (player.freePvpAt) {
             player.freePvpAt.reset();
             ShowFreePvp(player);
@@ -8287,6 +8321,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             std::erase_if(player.bonuses, [&](const PlayerWorld::BonusRun& b) { return b.key == bonus.key; });
             player.bonuses.push_back({bonus.kind, bonus.key, row.refObjId, bonus.value, unix + bonus.seconds});
             SaveServices(player);
+            TellServices(player); // its buff board entry
         }
         if (cool.ms != 0) {
             player.coolTimes[cool.group] = now + std::chrono::milliseconds(cool.ms);
@@ -10495,6 +10530,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 return;
             case proto::TimedPause::kId:
                 if (proto::TimedPause t; decode(t) && player.entity != 0) PauseService(peer, player, t);
+                return;
+            case proto::TimedCancel::kId:
+                if (proto::TimedCancel t; decode(t) && player.entity != 0) CancelBonus(peer, player, t);
                 return;
             case proto::UseItemOn::kId:
                 // The Extension Gear and the potion of growth (the mall's items), else the gender switch tool (its services).

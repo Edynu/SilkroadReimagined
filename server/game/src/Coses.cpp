@@ -462,11 +462,7 @@ void Coses::Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult
     const std::span<const std::uint32_t> mobExp = host_.CosMonsterExperience();
     if (c.row.id == 0) { // a scroll's COS (a ride, a transport: the bandits' hits): no row, no experience
         if (const auto o = host_.CosOwner(c.owner)) core::LogInfo("cos: {}'s COS {} dies", o->name, pet);
-        // A transport's cargo: every slot on the ground where it fell.
-        if (c.kind == game::CosKind::Transport && !c.bag.empty()) {
-            if (const auto at = host_.CosWorld().Where(pet)) host_.CosCargoDropped(c.owner, at->position, std::exchange(c.bag, {}));
-        }
-        Dismiss(pet, false, true);
+        Dismiss(pet, false, true); // a transport's cargo: every slot on the ground where it fell (Dismiss)
         return;
     }
     if (const std::size_t level = std::size_t(std::max(1, c.row.level)); level < levels.size() && level < mobExp.size()) {
@@ -1090,6 +1086,12 @@ void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead) {
         if (comesBack && !dead) returning_[owner].push_back({c.row.id, c.serial});
         if (!comesBack || dead) SendPetItem(owner, c.row);
     }
+    // A transport's goods never go with it: whatever ends it (killed, terminated, left behind by its owner's return or
+    // travel without it, its owner leaving), every slot drops whole where it stands (the user's account of the original,
+    // 2026-11-22; the original's own drop is traced only for its death).
+    if (Cos& c = it->second; c.kind == game::CosKind::Transport && !c.bag.empty()) {
+        if (const auto at = host_.CosWorld().Where(entity)) host_.CosCargoDropped(owner, at->position, std::exchange(c.bag, {}));
+    }
     host_.CosWorld().Leave(entity);
     Send(owner, proto::CosDismissed{entity});
     const bool transport = it->second.kind == game::CosKind::Transport;
@@ -1151,7 +1153,15 @@ void Coses::OwnerDied(std::uint32_t owner) {
     if (it == owned_.end()) return;
     const std::vector<std::uint32_t> list = it->second;
     for (std::uint32_t entity : list) {
-        if (const auto c = coses_.find(entity); c != coses_.end() && c->second.ridden) Dismiss(entity, false);
+        const auto c = coses_.find(entity);
+        if (c == coses_.end() || !c->second.ridden) continue;
+        // A transport stays where its rider fell, its goods aboard (the user's account of the original, 2026-11-22):
+        // only its rider comes off. A ride goes (the original's release of the ridden COS).
+        if (c->second.kind == game::CosKind::Transport) {
+            Ride(owner, entity, false, Clock::now());
+        } else {
+            Dismiss(entity, false);
+        }
     }
 }
 
@@ -1303,8 +1313,12 @@ bool Coses::Follow(Cos& c, double far) {
         return relocate();
     }
     // A transport follows at its run pace; others walk the last stretch.
-    const bool walk = c.kind != game::CosKind::Transport && d < game::kCosFollowFar * 2.0;
-    if (world.MoveTo(c.entity, to, walk) != World::MoveRefused::None) return relocate();
+    const bool transport = c.kind == game::CosKind::Transport;
+    const bool walk = !transport && d < game::kCosFollowFar * 2.0;
+    // A transport never jumps over what stops it (the user's report 2026-11-22: a wall between it and its trader brought
+    // it to him, a way to shake off the bandits and to cross what a transport cannot): it stays where its walk ends, and
+    // the leash keeps its owner within 100 m of it (Leashed) until he comes back for it.
+    if (world.MoveTo(c.entity, to, walk) != World::MoveRefused::None) return transport ? true : relocate();
     // Stuck: its walk stopped well short of the one asked for (a wall, a cliff; a walk is at most one region less 40, the
     // world's own cap, game::kNavRegionSize), and so short of its owner.
     const proto::FlatPosition wanted = proto::ToFlat(to);
@@ -1314,7 +1328,7 @@ bool Coses::Follow(Cos& c, double far) {
         const proto::FlatPosition e = proto::ToFlat(*end);
         walked = std::hypot(e.x - b.x, e.z - b.z);
     }
-    if (walked < asked - game::kCosFollowNear) return relocate();
+    if (walked < asked - game::kCosFollowNear && !transport) return relocate();
     return true;
 }
 

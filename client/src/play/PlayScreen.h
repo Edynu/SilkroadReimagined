@@ -821,6 +821,14 @@ private:
     // Its shot from `at`: its stages, its body's shot clip, its clip sounds, its trail and its hit moments moved by the
     // impact's delay (an early impact cuts its READY or WAIT short).
     void StartShot(std::uint32_t caster, double at);
+    // The skill whose presentation (skilleffect.txt's stages, skillaniset's clips) a skill shows: the one it copies
+    // (skilldata col 6, Basic_Original) when it names one, as the 1.188 client looks it up; else itself. The monsters'
+    // and the bandits' rows copy a kin's or a player's (MOB_EU_* bandits a wizard's bolt, a warrior's strike). Its own
+    // row keeps its times and its hits.
+    const assets::SkillRow& Shown(const assets::SkillRow& skill) const;
+    static std::string AnimationKey(const assets::SkillRow& skill) {
+        return !skill.baseName.empty() && skill.baseName != "xxx" ? skill.baseName : skill.codename;
+    }
     std::size_t shotsAtImpact_ = 0, shotsLate_ = 0; // the shots its hit started, and those the fallback did (the bench says)
     void HitEffects(const game::proto::EntityDamaged& hit);
     void BuffEffects(std::uint32_t token, std::uint32_t skill, bool added);

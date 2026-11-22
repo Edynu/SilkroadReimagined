@@ -338,10 +338,16 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
             if (!s) continue;
             const ui::Rect box{std::floor(s->x - 16.0f), std::floor(s->y - 16.0f), 32.0f, 32.0f};
             const bool over = mouse.x >= box.x && mouse.y >= box.y && mouse.x < box.Right() && mouse.y < box.Bottom();
-            const char* art = r->id == listFor_ ? "interface\\worldmap\\map\\xy_returnicon_press.ddj"
-                              : over            ? "interface\\worldmap\\map\\xy_returnicon_focus.ddj"
-                                                : "interface\\worldmap\\map\\xy_returnicon.ddj";
-            frame.paint.Image(art, box);
+            // The plain form is a strip of two 32 x 32 frames (64 x 32, the second brighter): its first drawn, never the
+            // strip squeezed into one marker (the user's report 2026-11-22: the points showed split in half until
+            // hovered). Inferred: whether the original alternates the two, and how fast, is not traced.
+            if (r->id == listFor_) {
+                frame.paint.Image("interface\\worldmap\\map\\xy_returnicon_press.ddj", box);
+            } else if (over) {
+                frame.paint.Image("interface\\worldmap\\map\\xy_returnicon_focus.ddj", box);
+            } else {
+                frame.paint.Image("interface\\worldmap\\map\\xy_returnicon.ddj", box, {0.0f, 0.0f}, {0.5f, 1.0f});
+            }
         }
         for (const assets::ReturnPointRow* r : Markers()) {
             if (r->id != listFor_) continue;

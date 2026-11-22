@@ -2097,6 +2097,41 @@ TEST_CASE("the fortress hammer: held in its race's sword set, its swing (ANI_HAM
     }
 }
 
+TEST_CASE("the bandits' skills shown as the skills they copy (Basic_Original): every one has clips and stages there, none of its own (2026-11-22)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    SkillTable skills;
+    REQUIRE_MESSAGE(skills.Load(fs, error), error);
+    SkillAnimationTable animations;
+    REQUIRE_MESSAGE(animations.Load(fs, error), error);
+    const auto key = [](const SkillRow& s) { return !s.baseName.empty() && s.baseName != "xxx" ? s.baseName : s.codename; };
+    int bandits = 0, ownEntry = 0, shown = 0;
+    std::set<std::string> copied;
+    for (const auto& [id, s] : skills.rows()) {
+        if (!s.codename.starts_with("TSKILL_") && !s.codename.starts_with("HSKILL_")) continue;
+        ++bandits;
+        if (animations.Find(key(s)) != nullptr) ++ownEntry;
+        const SkillRow* original = s.original != 0 ? skills.Find(s.original) : nullptr;
+        const SkillAnimation* anim = original != nullptr ? animations.Find(key(*original)) : nullptr;
+        if (anim != nullptr && !anim->shot.empty()) {
+            ++shown;
+            copied.insert(original->codename);
+        }
+    }
+    MESSAGE(bandits << " bandit skills, " << ownEntry << " with an entry of their own, " << shown << " shown through " << copied.size() << " copied skills");
+    CHECK(bandits > 8000);
+    CHECK(ownEntry == 0);
+    CHECK(shown == bandits);
+    CHECK(copied.contains("SKILL_CH_SWORD_BASE_01"));
+    CHECK(copied.contains("SKILL_EU_WIZARD_FIREA_POINT_A_01"));
+}
+
 TEST_CASE("the skills' clips from their row's group: their lengths against the skill's times (K10)") {
     const auto dir = GameDir();
     if (dir.empty()) {
@@ -2710,4 +2745,53 @@ TEST_CASE("The body under worn pieces: only a mode 1 piece's cover table hides i
     // A European woman's first heavy top ends above the waist and does not list it: her lower torso stays (Mage, 2026-11-18).
     const auto mage = hidden("CHAR_EU_WOMAN_NOBLE", {"ITEM_EU_W_HEAVY_01_BA_A_DEF", "ITEM_EU_W_HEAVY_01_LA_A_DEF", "ITEM_EU_W_HEAVY_01_FA_A_DEF"});
     CHECK_FALSE(mage.contains("woman_torso_lower.bms"));
+}
+
+TEST_CASE("An avatar dress worn over armour: drawn, the armour it covers left out (2026-11-22)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    sr::assets::FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(sr::assets::MountGameArchives(fs, dir, error), error);
+    sr::assets::VisualChangeTable visuals;
+    REQUIRE_MESSAGE(visuals.Load(fs, error), error);
+    sr::assets::CharacterTable characters;
+    sr::assets::ItemTable items;
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    REQUIRE_MESSAGE(items.Load(fs, error), error);
+    const sr::assets::ObjectRow* man = characters.Find(std::string_view("CHAR_CH_MAN_ADVENTURER"));
+    REQUIRE(man != nullptr);
+    std::vector<std::uint32_t> ids;
+    for (const char* w : {"ITEM_CH_M_CLOTHES_01_BA_A", "ITEM_CH_M_CLOTHES_01_LA_A", "ITEM_MALL_AVATAR_M_KNIGHT"}) {
+        const sr::assets::ItemRow* r = items.Find(std::string_view(w));
+        REQUIRE_MESSAGE(r != nullptr, w);
+        ids.push_back(r->refObjId);
+    }
+    const sr::assets::ItemRow* dress = items.Find(std::string_view("ITEM_MALL_AVATAR_M_KNIGHT"));
+    REQUIRE(visuals.ForItem(*dress) != nullptr);
+    MESSAGE("the dress's visual: slots " << visuals.ForItem(*dress)->slots << ", priority " << visuals.ForItem(*dress)->priority);
+    sr::assets::DressedCharacter d;
+    REQUIRE_MESSAGE(sr::assets::Dress(fs, characters, items, man->refObjId, ids, sr::assets::kNeutralShape, d, error, {}, nullptr, &visuals), error);
+    for (const std::string& p : d.items) MESSAGE("worn: " << p);
+    const std::string path = items.ResolveModel(fs, *dress);
+    CHECK_FALSE(path.empty());
+    CHECK(std::find(d.items.begin(), d.items.end(), path) != d.items.end());
+    sr::assets::ModelData model;
+    sr::assets::OutfitReport report;
+    REQUIRE_MESSAGE(sr::assets::AssembleOutfit(fs, d.body, d.items, model, report, error), error);
+    for (const std::string& h : report.hiddenMeshes) MESSAGE("hidden: " << h);
+    for (const std::string& w : report.warnings) MESSAGE("warning: " << w);
+    // The dress's own meshes are in the model.
+    std::size_t dressMeshes = 0;
+    for (const sr::assets::ModelPart& part : model.parts) {
+        std::string lower = part.meshPath;
+        for (char& ch : lower) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        if (lower.find("avatar") != std::string::npos) ++dressMeshes;
+        MESSAGE("part: " << part.meshPath);
+    }
+    MESSAGE(dressMeshes << " avatar meshes of " << model.parts.size());
+    CHECK(dressMeshes > 0);
 }

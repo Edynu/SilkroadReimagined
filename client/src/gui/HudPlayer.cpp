@@ -416,7 +416,7 @@ void BuffBoard::Mouse(ui::Frame& frame) {
     if (e.kind == game::ActiveEffect::Kind::Skill && !e.debuff && context_.hud != nullptr) {
         context_.hud->Request({HudRequest::Kind::CancelBuff, hovered_});
     }
-    // A time service's entry: its pause asked (the premium list's confirm box).
+    // A time service's entry: its pause asked (the premium list's confirm box); a bonus scroll's: its end asked.
     if (e.kind == game::ActiveEffect::Kind::TimedJob && (e.token & 0xFFFF0000u) == game::PlayerState::kTimedServiceToken && context_.hud != nullptr) {
         context_.hud->Request({HudRequest::Kind::CancelBuff, hovered_});
     }

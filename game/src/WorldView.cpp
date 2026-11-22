@@ -128,8 +128,10 @@ void WorldView::Apply(const TitleEvent& event) {
             // Another walker already on its way, re-aimed (a monster's chase, a pet following): on from where it is drawn
             // when the server's start is within half a second of its walk, not pulled back to it (the leg comes late by
             // the network's delay; the user's report 2026-11-14: chasers stopped and started). Farther: the server's word.
+            // The player's own walk too: a click while running re-aims it from where it is drawn (the user's report
+            // 2026-11-22: clicking on and on stuttered, each answer's start a step off the drawn place).
             const proto::FlatPosition here = proto::ToFlat(e.position), said = proto::ToFlat(m->from);
-            const bool carryOn = m->entity != self_ && e.moving && m->speed > 0.0f && e.position.region == m->from.region &&
+            const bool carryOn = e.moving && m->speed > 0.0f && e.position.region == m->from.region &&
                                  std::hypot(here.x - said.x, here.z - said.z) <= std::max(10.0, double(m->speed) * 0.5);
             if (carryOn) {
                 const proto::WorldPosition previous = e.previous;

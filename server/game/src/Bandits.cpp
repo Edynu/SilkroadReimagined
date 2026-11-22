@@ -82,7 +82,7 @@ int Bandits::Wave(std::uint32_t player) {
         const auto ground = host_.BanditGround(c->at, nest.position);
         if (!ground) continue;
         nest.position = *ground;
-        nest.radius = game::kBanditTrace / 1.5f; // led away up to its trace
+        nest.radius = game::kBanditTrace / 1.5f; // (a bandit has no leash to its nest: Monsters' Fight)
         nest.spawnRadius = 0.0f;
         nest.maxCount = 1;
         nest.aggressive = true;

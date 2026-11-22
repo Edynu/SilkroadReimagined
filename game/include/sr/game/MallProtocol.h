@@ -351,9 +351,21 @@ struct SkinChange {
         v("scale", scale);
     }
 };
+// A bonus scroll's run ended before its time (its buff board entry's right click, the box UIIT_MSG_QUESTION_SILKMALL_ITEM_USE_CANCLE_1
+// / _2 answered; ours: the original's message for it is not traced): `category` the run's TimedService category.
+// ServiceAnswer (kCancel); TimedServices.
+struct TimedCancel {
+    static constexpr MessageId kId = 0x13F7;
+    std::uint8_t category = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("category", category);
+    }
+};
 
 // The time services running (the original's 0x3206 {category, 1, item, seconds left, bonus, paused} per service; a
-// service gone is left out): category 3 gold / silver, 9 skill, 10 the premium package.
+// service gone is left out): category 3 gold / silver, 9 skill, 10 the premium package; ours: 116..119 a bonus scroll's
+// run (game::kTimedBonusFirst: experience, skill points, skill experience, berserk time).
 struct TimedService {
     std::uint8_t category = 0;
     std::uint32_t item = 0;
@@ -394,6 +406,7 @@ struct TimedServices {
 // What a ServiceAnswer answers.
 enum class ServiceRequest : std::uint8_t {
     PremiumUse = 1, PremiumBooth = 2, Pause = 3, Withdraw = 4, Repair = 5, UseOn = 6, Skin = 7, Expansion = 8, Hammer = 9, Resurrect = 10, Cube = 11,
+    Cancel = 12,
 };
 // A service's answer: `code` 0 done, else the original's code; `a`, `b` what was done (the skill or mastery and its
 // level now, the item's new reference, ...).
@@ -530,6 +543,7 @@ inline const char* MallMessageName(MessageId id) {
     case Repair::kId: return "Repair";
     case UseItemOn::kId: return "UseItemOn";
     case SkinChange::kId: return "SkinChange";
+    case TimedCancel::kId: return "TimedCancel";
     case TimedServices::kId: return "TimedServices";
     case ServiceAnswer::kId: return "ServiceAnswer";
     case DurabilityChanged::kId: return "DurabilityChanged";

@@ -24,6 +24,10 @@ namespace sr::game {
 
 // The `_TimedJob` categories the mall's items use.
 constexpr std::uint8_t kTimedGoldSilver = 3, kTimedSkill = 9, kTimedPremium = 10;
+// Ours: the bonus scrolls' runs, one category a key (experience, skill points, skill experience, berserk time; the
+// original keeps them all in its category 10 by key, which our layout gives the premium).
+constexpr std::uint8_t kTimedBonusFirst = 116, kTimedBonusCount = 4;
+constexpr bool IsBonusCategory(std::uint8_t category) { return category >= kTimedBonusFirst && category < kTimedBonusFirst + kTimedBonusCount; }
 constexpr std::int64_t kSecondsPerDay = 86400;
 
 // Which category a ticket goes in (0: not a ticket): 3/3/13/4 gold or silver, 3/3/13/5 the skill ones.

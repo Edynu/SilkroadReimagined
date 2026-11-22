@@ -1877,10 +1877,13 @@ TEST_CASE("Game server: the cargo: a killed transport drops its goods; the trade
     assets::ObjectRow frail = Cos(kCart, "COS_T_TEST_CART", 2);
     frail.maxHp = 40;
     characters->Add(frail);
+    auto teleports = std::make_shared<assets::TeleportTable>(); // the return points (a revival in town)
+    REQUIRE_MESSAGE(teleports->Load(fs, error), error);
     CosServer s(t);
     s.config.files = &fs;
     s.config.characters = characters;
     s.config.skills = skills;
+    s.config.teleports = teleports;
     constexpr std::uint32_t kThiefSuit = 900140, kGood = 900300, kSpecial = 2010;
     auto items = std::make_shared<assets::ItemTable>(*s.config.rules->items);
     items->Add(Suit(kThiefSuit, "ITEM_CH_M_TRADE_THIEF_TEST", 2));
@@ -1968,6 +1971,24 @@ TEST_CASE("Game server: the cargo: a killed transport drops its goods; the trade
     CHECK(bag.items[0].item == kGood);
     CHECK(bag.items[0].quantity == 40);
     CHECK(bag.items[0].creator == "Hauler1");
+    // The thief dies riding it: he comes off, the transport stays with the goods (the user's account, 2026-11-22).
+    thief.client->Send(proto::DevDie{});
+    proto::CosRiding off;
+    for (int i = 0; i < 20 && (off.mount != own.entity || off.riding); ++i) off = Next<proto::CosRiding>(thief);
+    CHECK(off.mount == own.entity);
+    CHECK_FALSE(off.riding);
+    proto::CosDismissed gone;
+    CHECK_FALSE(thief.client->Expect(gone, 1500ms));
+    // Back to life at his return point: the transport left behind, its goods on the ground where it stood.
+    thief.client->Send(proto::Resurrect{1});
+    REQUIRE(thief.client->Expect(gone, 10s));
+    CHECK(gone.entity == own.entity);
+    std::uint32_t again = 0;
+    for (int i = 0; i < 1500 && again == 0; ++i) {
+        proto::EntityAppeared seen;
+        if (trader.client->Expect(seen, 10ms) && seen.kind == proto::EntityKind::GroundItem && seen.character.model == kGood) again = seen.entity;
+    }
+    CHECK(again != 0);
     s.game.Stop();
 }
 
