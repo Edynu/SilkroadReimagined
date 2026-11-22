@@ -301,6 +301,13 @@ TEST_CASE("Web admin: the client's download is SroDeploy's zip, its VirusTotal l
                     {"unpacked", 21753678}, {"files", 12}, {"sha256", sha}, {"created", "2026-11-22T02:43:21Z"}}
                    .dump();
     }
+    const std::string launcherSha(64, 'c');
+    {
+        std::ofstream out(patch / "windows-x64" / "launcher.json");
+        out << json{{"version", "0.1.0"}, {"file", "launcher-0123456789abcdef/SroLauncher.exe"}, {"size", 6302720}, {"sha256", launcherSha},
+                    {"manifest", "{}"}, {"signature", "00"}}
+                   .dump();
+    }
     server::WebConfig c;
     c.databaseUrl = t.Url();
     c.port = 0;
@@ -318,6 +325,12 @@ TEST_CASE("Web admin: the client's download is SroDeploy's zip, its VirusTotal l
     CHECK(site["client"]["sha256"] == sha);
     CHECK(site["client"]["virustotal"] == "https://www.virustotal.com/gui/file/" + sha);
     CHECK(site["client"]["virustotalAuto"] == true);
+    // The launcher: its own download, its own VirusTotal link; the signed parts are the launchers', not the site's.
+    REQUIRE(site["launcher"].is_object());
+    CHECK(site["launcher"]["url"] == "/patch/windows-x64/launcher-0123456789abcdef/SroLauncher.exe");
+    CHECK(site["launcher"]["file"] == "SroLauncher.exe");
+    CHECK(site["launcher"]["virustotal"] == "https://www.virustotal.com/gui/file/" + launcherSha);
+    CHECK_FALSE(site["launcher"].contains("signature"));
 
     Browser b;
     REQUIRE(Login(client, boss, Code(boss), &b).first == 200);
@@ -332,6 +345,17 @@ TEST_CASE("Web admin: the client's download is SroDeploy's zip, its VirusTotal l
     CHECK(site["client"]["virustotal"] == link);
     CHECK(site["client"]["virustotalAuto"] == false);
     CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["client"]["virustotal"] == link);
+    const std::string launcherLink = "https://www.virustotal.com/gui/file-analysis/def";
+    CHECK(b.Send("PUT", "/api/admin/client", {{"virustotal", launcherLink}, {"which", "launcher"}})->status == 200);
+    CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["launcher"]["virustotal"] == launcherLink);
+    CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["client"]["virustotal"] == link); // each its own
+    CHECK(b.Send("PUT", "/api/admin/client", {{"virustotal", ""}, {"which", "other"}})->status == 400);
+    // A launcher's name that is not launcher-<16 hex>/SroLauncher.exe: no download.
+    {
+        std::ofstream out(patch / "windows-x64" / "launcher.json");
+        out << json{{"version", "0.1.0"}, {"file", "../../shard.cfg"}, {"size", 1}, {"sha256", launcherSha}}.dump();
+    }
+    CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["launcher"].is_null());
 
     // A new version: the link set by hand was for the file before, so the new one's is automatic again.
     {

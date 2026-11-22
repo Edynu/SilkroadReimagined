@@ -71,6 +71,11 @@ struct WebConfig {
     // Support's attachments (screenshots, videos): never served to the public (the administration reads them).
     std::string supportDir = "web-support";
     int supportAttempts = 5; // tickets sent per address an hour (0: no limit)
+    std::int64_t supportMaxBytes = std::int64_t(4096) << 20;   // all support files together (the disk's guard)
+    std::int64_t supportTicketMaxBytes = std::int64_t(200) << 20; // one ticket's files together
+    // Requests to /api an address may make a minute (0: no limit; SroWeb's setting web-api-per-minute is 300 unless set):
+    // a page asks a few, a script hammering it is answered 429 before it costs the database anything.
+    int apiPerMinute = 0;
     std::string labDir = "web-lab";      // the skill lab's videos (videos/; served to the developer pages alone)
     std::int64_t imageMaxBytes = std::int64_t(8) << 20;   // an image's largest (8 MB)
 

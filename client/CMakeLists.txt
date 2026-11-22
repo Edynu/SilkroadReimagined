@@ -162,6 +162,8 @@ if(SR_PLAYER_BUILD)
         list(GET sr_version_parts 2 SR_VERSION_PATCH)
         configure_file(res/SroReimagined.rc.in ${CMAKE_CURRENT_BINARY_DIR}/SroReimagined.rc @ONLY)
         target_sources(SroReimagined PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/SroReimagined.rc res/SroReimagined.manifest)
+        # The resource compiler does not see its icon as an input: a new icon must rebuild it.
+        set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/SroReimagined.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/SroReimagined.ico)
         set_target_properties(SroReimagined PROPERTIES WIN32_EXECUTABLE TRUE)
         # A window program that still starts at main().
         if(MSVC)

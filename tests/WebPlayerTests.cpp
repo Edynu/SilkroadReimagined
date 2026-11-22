@@ -345,6 +345,11 @@ TEST_CASE("Web support: a message and a bug report with a screenshot; the staff'
     // The attachments are not under the public files.
     CHECK(client.Get("/files/" + std::to_string(id))->status != 200);
 
+    // The caps: a ticket's files together (200 MB), the folder's whole (web-support-max-mb).
+    CHECK(client.Post("/api/support/" + std::to_string(id) + "/files?name=big.mp4&token=" + token,
+                      std::string("\0\0\0\x18" "ftypmp42", 12) + std::string(300, 'v'), "application/octet-stream")
+              ->status == 409); // (five already: the count comes first)
+
     // The limit per address: three tickets an hour here (two sent).
     CHECK(send(contact) == 201);
     CHECK(send(contact) == 429);
@@ -401,6 +406,53 @@ TEST_CASE("Web support: a message and a bug report with a screenshot; the staff'
     CHECK(json::parse(admin("GET", ticket)->body)["ticket"]["status"] == "open");
     CHECK(admin("PUT", ticket, {{"status", "closed"}})->status == 200);
     CHECK(reply(id, "Again") == 404);
+    web.Stop();
+    std::filesystem::remove_all(c.supportDir);
+}
+
+TEST_CASE("Web: the API's limit per address a minute; the support folder's cap") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    server::Database& db = t.Db();
+    REQUIRE_MESSAGE(server::MigrateSchema(db, error), error);
+    server::WebConfig c;
+    c.databaseUrl = t.Url();
+    c.port = 0;
+    c.filesDir = (std::filesystem::temp_directory_path() / "sr-web-files-limits").string();
+    c.supportDir = (std::filesystem::temp_directory_path() / "sr-web-support-limits").string();
+    std::filesystem::remove_all(c.supportDir);
+    c.secureCookie = false;
+    c.apiPerMinute = 6;
+    c.supportMaxBytes = 1000; // the whole folder: 1000 bytes
+    server::WebServer web;
+    REQUIRE_MESSAGE(web.Start(c, error), error);
+    httplib::Client client("127.0.0.1", web.Port());
+    client.set_read_timeout(30s);
+
+    // A ticket, then a screenshot larger than the folder's room: refused, nothing kept.
+    const auto made = client.Post("/api/support", json{{"kind", "bug"}, {"category", "other"}, {"subject", "Something odd"}, {"text", "It happened twice today."},
+                                                       {"email", "a@example.com"}}.dump(), "application/json");
+    REQUIRE(made->status == 201);
+    const json ticket = json::parse(made->body);
+    const std::string png = std::string("\x89PNG\r\n\x1A\n", 8) + std::string(2000, 'p');
+    const auto big = client.Post("/api/support/" + std::to_string(ticket["id"].get<std::int64_t>()) + "/files?name=a.png&token=" + ticket["uploadToken"].get<std::string>(),
+                                 png, "application/octet-stream");
+    CHECK(big->status == 507);
+    CHECK(db.Query("SELECT count(*) FROM sro_vt_account.sr_support_files").Int(0, 0) == 0);
+
+    // Six requests to /api a minute from this address (two above), then 429 with Retry-After; the pages are not counted.
+    int ok = 0, refused = 0;
+    for (int i = 0; i < 8; ++i) {
+        const auto r = client.Get("/api/server");
+        if (r->status == 200) ++ok;
+        if (r->status == 429) {
+            ++refused;
+            CHECK(r->get_header_value("Retry-After") == "60");
+        }
+    }
+    CHECK(ok == 4);
+    CHECK(refused == 4);
     web.Stop();
     std::filesystem::remove_all(c.supportDir);
 }

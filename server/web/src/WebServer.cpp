@@ -257,7 +257,7 @@ std::optional<std::string> LoadJson(Database& db) {
 
 struct WebServer::State {
     explicit State(const WebConfig& c)
-        : config(c), limiter(std::max(1, c.registerAttempts), c.registerWindow),
+        : config(c), limiter(std::max(1, c.registerAttempts), c.registerWindow), apiLimiter(std::max(1, c.apiPerMinute), std::chrono::seconds(60)),
           status(pool, c.statusAge, [this](Database& db) { return StatusJson(db, config); }),
           rankings(pool, c.rankingAge, [this](Database& db) { return RankingsJson(db, config.rankingCount); }),
           uniques(pool, c.statusAge, [](Database& db) { return UniquesJson(db); }),
@@ -274,6 +274,8 @@ struct WebServer::State {
     std::uint16_t port = 0;
     std::mutex limiterMutex;
     AttemptLimiter limiter;
+    std::mutex apiMutex;
+    AttemptLimiter apiLimiter; // requests to /api per address a minute
     Cached status, rankings, uniques;
     Cached site; // the texts, news, images and downloads (read again at once when the administration changes them)
     Cached stats; // accounts, characters, guilds, uniques killed
@@ -439,7 +441,21 @@ bool WebServer::Start(const WebConfig& config, std::string& error) {
     // Only an upload may be large (an admin's image, a support ticket's file, the developer pages' video); every other body
     // stays under 64 KB, refused before a byte is read.
     http.set_payload_max_length(std::size_t(std::max(config.imageMaxBytes, web::kSupportVideoMax)));
-    http.set_pre_routing_handler([admin = config.admin](const httplib::Request& req, httplib::Response& res) {
+    http.set_pre_routing_handler([admin = config.admin, &s](const httplib::Request& req, httplib::Response& res) {
+        // The API's limit per address (the pages' files are not counted).
+        if (s.config.apiPerMinute > 0 && req.path.starts_with("/api/")) {
+            const std::string address = s.Visitor(req);
+            bool allowed = true;
+            {
+                std::lock_guard lock(s.apiMutex);
+                allowed = s.apiLimiter.Allow(address);
+            }
+            if (!allowed) {
+                res.set_header("Retry-After", "60");
+                Refuse(res, 429, "too-many", "Too many requests from this address; wait a minute.");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        }
         const bool upload = (admin && ((req.path == "/api/admin/files" && req.method == "POST") || web::DevUploadPath(req.method, req.path))) ||
                             web::SupportUploadPath(req.method, req.path);
         if (upload) return httplib::Server::HandlerResponse::Unhandled;
@@ -456,6 +472,8 @@ bool WebServer::Start(const WebConfig& config, std::string& error) {
     http.set_default_headers({{"X-Content-Type-Options", "nosniff"},
                               {"Referrer-Policy", "same-origin"},
                               {"X-Frame-Options", "DENY"},
+                              {"Cross-Origin-Opener-Policy", "same-origin"},
+                              {"Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()"},
                               {"Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
                                                           "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"}});
     http.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr) {

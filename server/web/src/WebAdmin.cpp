@@ -204,45 +204,52 @@ bool AddressAllowed(const std::vector<std::string>& allow, const std::string& ad
 
 namespace {
 
-// The players' zip SroDeploy made (<patch>/windows-x64/client.json), or null. Its VirusTotal link: the file's own page
-// there (by its SHA-256), unless the admin gave another for this very file (sr_site_content "client-virustotal").
-json ClientJson(Database& db, const WebConfig& config) {
-    if (config.patchDir.empty()) return nullptr;
+// A download SroDeploy published, from its description in the patch folder (<patch>/windows-x64/<name>.json), or null:
+// "client" (client.json: the players' zip) or "launcher" (launcher.json: the launcher alone, launcher-<hash>/SroLauncher.exe).
+// Its VirusTotal link: the file's own page there (by its SHA-256), unless the admin gave another for this very file
+// (sr_site_content "<kind>-virustotal").
+json DownloadJson(Database& db, const WebConfig& config, const std::string& kind) {
+    if (config.patchDir.empty() || (kind != "client" && kind != "launcher")) return nullptr;
     const std::string channel = "windows-x64";
-    std::ifstream in(fs::path(config.patchDir) / channel / "client.json", std::ios::binary);
+    std::ifstream in(fs::path(config.patchDir) / channel / (kind + ".json"), std::ios::binary);
     if (!in) return nullptr;
     std::stringstream text;
     text << in.rdbuf();
     const json j = json::parse(text.str(), nullptr, false);
     if (!j.is_object()) return nullptr;
     const std::string file = j.value("file", ""), sha = j.value("sha256", "");
-    const bool safeName = !file.empty() && file.size() < 100 && std::all_of(file.begin(), file.end(), [](char c) {
-        return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_';
-    });
-    if (!safeName || sha.size() != 64) return nullptr;
+    // Its name a plain file's (the zip) or launcher-<16 hex>/SroLauncher.exe: never an address elsewhere.
+    const auto plain = [](const std::string& s) {
+        return !s.empty() && s.size() < 100 && std::all_of(s.begin(), s.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_'; });
+    };
+    bool safeName = kind == "client" ? plain(file) : false;
+    if (kind == "launcher" && file.size() == 9 + 16 + 1 + 15 && file.starts_with("launcher-") && file.ends_with("/SroLauncher.exe"))
+        safeName = std::all_of(file.begin() + 9, file.begin() + 25, [](char c) { return std::isxdigit(static_cast<unsigned char>(c)); });
+    if (!safeName || sha.size() != 64 || !std::all_of(sha.begin(), sha.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)); })) return nullptr;
     json out = {{"version", j.value("version", "")},
                 {"channel", channel},
                 {"url", config.patchUrl + "/" + channel + "/" + file},
-                {"file", file},
+                {"file", file.substr(file.rfind('/') + 1)},
                 {"size", j.value("size", std::int64_t(0))},
-                {"unpacked", j.value("unpacked", std::int64_t(0))},
-                {"files", j.value("files", 0)},
                 {"sha256", sha},
                 {"created", j.value("created", "")},
                 {"virustotal", "https://www.virustotal.com/gui/file/" + sha},
                 {"virustotalAuto", true}};
-    const QueryResult r = db.Query("SELECT value FROM sro_vt_account.sr_site_content WHERE key = 'client-virustotal'");
+    if (kind == "client") out["unpacked"] = j.value("unpacked", std::int64_t(0)), out["files"] = j.value("files", 0);
+    const QueryResult r = db.Query("SELECT value FROM sro_vt_account.sr_site_content WHERE key = $1", {kind + "-virustotal"});
     if (r.Ok() && r.Rows() == 1) {
         const json v = json::parse(r.Text(0, 0), nullptr, false);
         if (v.is_object() && v.value("sha256", "") == sha && !v.value("url", "").empty()) out["virustotal"] = v["url"], out["virustotalAuto"] = false;
     }
     return out;
 }
+json ClientJson(Database& db, const WebConfig& config) { return DownloadJson(db, config, "client"); }
 
 } // namespace
 
 std::optional<std::string> SiteJson(Database& db, const WebConfig& config) {
-    json out = {{"content", json::object()}, {"news", json::array()}, {"images", json::array()}, {"client", ClientJson(db, config)}};
+    json out = {{"content", json::object()}, {"news", json::array()}, {"images", json::array()}, {"client", ClientJson(db, config)},
+                {"launcher", DownloadJson(db, config, "launcher")}};
     const QueryResult content = db.Query("SELECT value FROM sro_vt_account.sr_site_content WHERE key = 'site'");
     if (!content.Ok()) return std::nullopt;
     if (content.Rows() == 1) {
@@ -872,9 +879,9 @@ void WebAdmin::Register(httplib::Server& http) {
     http.Get("/api/admin/client", [this](const httplib::Request& req, httplib::Response& res) {
         if (!Guard(req, res, false, true)) return;
         const WebConfig& config = Config();
-        const auto client = OnPool<json>(Pool(), [&config](Database& db) { return ClientJson(db, config); });
-        if (!client) return Refuse(res, 503, "busy", "The server is busy; try again.");
-        Answer(res, 200, {{"client", *client}, {"patchDir", !config.patchDir.empty()}});
+        const auto both = OnPool<json>(Pool(), [&config](Database& db) { return json{{"client", ClientJson(db, config)}, {"launcher", DownloadJson(db, config, "launcher")}}; });
+        if (!both) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        Answer(res, 200, {{"client", (*both)["client"]}, {"launcher", (*both)["launcher"]}, {"patchDir", !config.patchDir.empty()}});
     });
     http.Put("/api/admin/client", [this](const httplib::Request& req, httplib::Response& res) {
         const auto who = Guard(req, res, true, true);
@@ -882,21 +889,23 @@ void WebAdmin::Register(httplib::Server& http) {
         const auto body = Body(req, res);
         if (!body) return;
         const std::string url = Field(*body, "virustotal");
+        const std::string kind = Field(*body, "which").empty() ? std::string("client") : Field(*body, "which");
+        if (kind != "client" && kind != "launcher") return Refuse(res, 400, "which", "Which download: client or launcher.");
         if (!url.empty() && (url.size() > 300 || !url.starts_with("https://www.virustotal.com/")))
             return Refuse(res, 400, "virustotal", "The link must be a https://www.virustotal.com/ address (or empty for the automatic one).");
         const WebConfig& config = Config();
         const std::string by = who->name;
-        const auto ok = OnPool<bool>(Pool(), [&config, url, by](Database& db) {
-            const json client = ClientJson(db, config);
-            if (!client.is_object()) return false;
-            const std::string value = json{{"sha256", client["sha256"]}, {"url", url}}.dump();
-            return db.Query("INSERT INTO sro_vt_account.sr_site_content (key, value, updated_by) VALUES ('client-virustotal', $1, $2) "
+        const auto ok = OnPool<bool>(Pool(), [&config, url, by, kind](Database& db) {
+            const json download = DownloadJson(db, config, kind);
+            if (!download.is_object()) return false;
+            const std::string value = json{{"sha256", download["sha256"]}, {"url", url}}.dump();
+            return db.Query("INSERT INTO sro_vt_account.sr_site_content (key, value, updated_by) VALUES ($3, $1, $2) "
                             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()",
-                            {value, by})
+                            {value, by, kind + "-virustotal"})
                 .Ok();
         });
-        if (!ok || !*ok) return Refuse(res, 404, "client", "There is no client download yet (publish one with SroRelease).");
-        Audit(&*who, who->name, host_.visitor(req), "client-virustotal", url.empty() ? std::string("automatic") : url);
+        if (!ok || !*ok) return Refuse(res, 404, "client", "There is no such download yet (publish it with SroRelease).");
+        Audit(&*who, who->name, host_.visitor(req), kind + "-virustotal", url.empty() ? std::string("automatic") : url);
         host_.siteChanged();
         Answer(res, 200, {{"ok", true}});
     });

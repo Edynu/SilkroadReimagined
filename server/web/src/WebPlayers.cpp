@@ -221,19 +221,31 @@ void WebPlayers::SupportFile(const httplib::Request& req, httplib::Response& res
     if (length <= 0) return Refuse(res, 411, "length", "The upload must say its size.");
     if (length > kSupportVideoMax) return Refuse(res, 413, "too-big", std::format("A file is up to {} MB.", kSupportVideoMax >> 20));
     if (token.size() != 32) return Refuse(res, 403, "token", "This upload is not allowed.");
-    // The ticket's token, still good, and room for one more.
-    const auto room = OnPool<int>(Pool(), [id, hash = Sha256(token)](Database& db) {
-        const QueryResult r = db.Query(std::format("SELECT (SELECT count(*) FROM sro_vt_account.sr_support_files f WHERE f.ticket_id = t.id) "
+    // The ticket's token, still good, and room for one more: its count, its bytes and the folder's whole.
+    struct Room {
+        int files = -1;
+        std::int64_t ticketBytes = 0, allBytes = 0;
+    };
+    const auto room = OnPool<Room>(Pool(), [id, hash = Sha256(token)](Database& db) {
+        const QueryResult r = db.Query(std::format("SELECT (SELECT count(*) FROM sro_vt_account.sr_support_files f WHERE f.ticket_id = t.id), "
+                                                   "(SELECT coalesce(sum(bytes), 0) FROM sro_vt_account.sr_support_files f WHERE f.ticket_id = t.id), "
+                                                   "(SELECT coalesce(sum(bytes), 0) FROM sro_vt_account.sr_support_files) "
                                                    "FROM sro_vt_account.sr_support_tickets t WHERE t.id = $1 AND t.upload_token = $2 "
                                                    "AND t.created_at > now() - make_interval(hours => {})",
                                                    kSupportUploadHours),
                                        {id, Param::Bytes(hash)});
-        if (!r.Ok() || r.Rows() != 1) return -1;
-        return kSupportFilesMax - int(r.Int(0, 0));
+        if (!r.Ok() || r.Rows() != 1) return Room{};
+        return Room{kSupportFilesMax - int(r.Int(0, 0)), r.Int(0, 1), r.Int(0, 2)};
     });
     if (!room) return Refuse(res, 503, "busy", "The server is busy; try again.");
-    if (*room < 0) return Refuse(res, 403, "token", "This upload is not allowed (or its time is over).");
-    if (*room == 0) return Refuse(res, 409, "full", std::format("A ticket takes {} files.", kSupportFilesMax));
+    if (room->files < 0) return Refuse(res, 403, "token", "This upload is not allowed (or its time is over).");
+    if (room->files == 0) return Refuse(res, 409, "full", std::format("A ticket takes {} files.", kSupportFilesMax));
+    if (room->ticketBytes + length > Config().supportTicketMaxBytes)
+        return Refuse(res, 413, "too-big", std::format("A ticket's files are {} MB at most together.", Config().supportTicketMaxBytes >> 20));
+    if (room->allBytes + length > Config().supportMaxBytes) {
+        core::LogWarning("SroWeb: support's files are full ({} MB, web-support-max-mb): an upload refused", room->allBytes >> 20);
+        return Refuse(res, 507, "storage", "Attachments cannot be taken right now; send the text, and add a link to the video instead.");
+    }
 
     std::error_code ec;
     const fs::path dir = fs::absolute(Config().supportDir) / std::to_string(id);

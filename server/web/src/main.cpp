@@ -31,6 +31,8 @@
 //   web-files (web-files)                    the uploads' folder (images/; served at /files/)
 //   web-support (web-support)                support's attachments (screenshots, videos; never public)
 //   web-support-attempts (5)                 support tickets sent per address an hour (0: no limit)
+//   web-support-max-mb (4096)                support's files together at most (then new ones are refused)
+//   web-api-per-minute (300)                 requests to /api an address may make a minute (0: no limit)
 //   web-patch-dir DIR                        SroDeploy's patch folder: the client's download (<channel>/client.json)
 //   web-patch-url (/patch)                   where the web server (nginx) serves that folder
 
@@ -167,6 +169,8 @@ int main(int argc, char** argv) {
     web.labDir = c.GetString("web-lab", "web-lab");
     web.supportDir = c.GetString("web-support", "web-support");
     web.supportAttempts = c.GetInt("web-support-attempts", web.supportAttempts);
+    web.supportMaxBytes = std::int64_t(std::clamp(c.GetInt("web-support-max-mb", 4096), 1, 1 << 20)) << 20;
+    web.apiPerMinute = c.GetInt("web-api-per-minute", 300);
     web.patchDir = c.GetString("web-patch-dir", "");
     web.patchUrl = c.GetString("web-patch-url", "/patch");
     while (!web.patchUrl.empty() && web.patchUrl.back() == '/') web.patchUrl.pop_back();
