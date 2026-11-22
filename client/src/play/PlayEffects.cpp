@@ -341,10 +341,26 @@ void PlayScreen::TakeBuffs(const proto::EntityBuffs& message, double now) {
         if (const auto* stages = stagesOf(id); world_ && shown_ && stages != nullptr && slot != StageEffects::kNone) stageEffects_.BuffStart(*world_, *stages, slot);
     }
     b.skills = message.skills;
+    // A bandit's imbue stays on it (it is its look, not one of the server's buffs).
+    if (const auto imbue = banditImbues_.find(message.entity);
+        imbue != banditImbues_.end() && std::find(b.skills.begin(), b.skills.end(), imbue->second) == b.skills.end()) {
+        b.skills.push_back(imbue->second);
+    }
     if (b.skills.empty() && b.loops.empty()) buffed_.erase(message.entity);
 }
 
 void PlayScreen::OthersBuffLoops() {
+    // The bandits' imbues (the 1.188 client's look: the dresser starts the imbue's buff presentation on the bandit):
+    // among their buffs while they are in view, so their loops show and their hits take the imbue's effect.
+    for (auto it = banditImbues_.begin(); it != banditImbues_.end();) {
+        if (view_.Find(it->first) == nullptr) {
+            it = banditImbues_.erase(it);
+            continue;
+        }
+        std::vector<std::uint32_t>& skills = buffed_[it->first].skills;
+        if (std::find(skills.begin(), skills.end(), it->second) == skills.end()) skills.push_back(it->second);
+        ++it;
+    }
     for (auto it = buffed_.begin(); it != buffed_.end();) {
         Buffed& b = it->second;
         // Gone from view, or shown in another slot: its loops go (they come again on the new slot).

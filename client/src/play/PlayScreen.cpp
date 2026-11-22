@@ -3789,6 +3789,8 @@ const WorldScreen::StageLook* PlayScreen::LookOf(ScreenContext& context, const g
     if (e.kind == proto::EntityKind::Monster && shape != nullptr && assets::IsBandit(*shape) && !tables_->banditBodies.Empty()) {
         const assets::SkillRow* skill = shape->skills[0] != 0 ? tables_->skills.Find(shape->skills[0]) : nullptr;
         const int weaponKind = skill != nullptr && skill->weaponKinds[0] != 255 ? skill->weaponKinds[0] : 2;
+        // The imbue its first skill shows (a "magic" thief's cold or fire): worn as a buff while it is in view.
+        if (const std::uint32_t imbue = skill != nullptr ? tables_->banditImbues.For(*skill) : 0u; imbue != 0) banditImbues_[e.id] = imbue;
         const assets::BanditOutfit outfit =
             assets::OutfitOfBandit(*shape, std::uint8_t(e.amount), weaponKind, tables_->banditBodies, tables_->characters, tables_->items);
         assets::DressedCharacter dressed;

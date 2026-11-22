@@ -905,6 +905,9 @@ private:
         std::unordered_map<std::uint32_t, std::vector<StageEffects::Handle>> loops;
     };
     std::unordered_map<std::uint32_t, Buffed> buffed_;
+    // The bandits shown and the imbue each wears (game::BanditImbues: its first skill's), kept among its buffs while it
+    // is in view (OthersBuffLoops), whatever its buff list says (TakeBuffs).
+    std::unordered_map<std::uint32_t, std::uint32_t> banditImbues_;
     void TakeBuffs(const game::proto::EntityBuffs& message, double now);
     void OthersBuffLoops();
     // The skill objects in view (proto::EntityKind::SkillObject): their effects by entity, matched every

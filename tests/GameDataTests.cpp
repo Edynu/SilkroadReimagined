@@ -2132,6 +2132,55 @@ TEST_CASE("the bandits' skills shown as the skills they copy (Basic_Original): e
     CHECK(copied.contains("SKILL_EU_WIZARD_FIREA_POINT_A_01"));
 }
 
+TEST_CASE("the bandits' imbues: a magic thief's freeze or burn shows the nearest cold or fire imbue, the rest none (2026-11-22)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    SkillTable skills;
+    REQUIRE_MESSAGE(skills.Load(fs, error), error);
+    SkillAnimationTable animations;
+    REQUIRE_MESSAGE(animations.Load(fs, error), error);
+    sr::game::BanditImbues imbues;
+    imbues.Build(skills);
+    REQUIRE_FALSE(imbues.Empty());
+    const auto shown = [&](const char* code) {
+        const SkillRow* s = skills.Find(std::string_view(code));
+        REQUIRE_MESSAGE(s != nullptr, code);
+        const std::uint32_t id = imbues.For(*s);
+        const SkillRow* imbue = id != 0 ? skills.Find(id) : nullptr;
+        return imbue != nullptr ? imbue->codename : std::string();
+    };
+    // A burn of 24: the fire imbues' burns run 30, 34, ...: the first (30) is nearest.
+    CHECK(shown("TSKILL_SWORD_MAGIC_0011") == "SKILL_CH_FIRE_GIGONGTA_A_01");
+    // A freeze of 22: the first cold imbue (30).
+    CHECK(shown("TSKILL_SWORD_MAGIC_0009") == "SKILL_CH_COLD_GIGONGTA_A_01");
+    // A physical one, a European one: none.
+    CHECK(shown("TSKILL_SWORD_PHYSICAL_0050").empty());
+    CHECK(shown("TSKILL_EU_FIRE_0008").empty());
+    // A player's own imbue is no bandit's: none.
+    CHECK(shown("SKILL_CH_FIRE_GIGONGTA_A_01").empty());
+    // Every bandit skill that shows one shows an imbue with a loop to wear.
+    int withImbue = 0;
+    for (const auto& [id, s] : skills.rows()) {
+        const std::uint32_t imbue = imbues.For(s);
+        if (imbue == 0) continue;
+        ++withImbue;
+        const SkillRow* row = skills.Find(imbue);
+        REQUIRE(row != nullptr);
+        CHECK(sr::game::IsImbue(*row));
+        const bool named = !row->baseName.empty() && row->baseName != "xxx";
+        const SkillAnimation* anim = animations.Find(named ? row->baseName : row->codename);
+        CHECK_MESSAGE(anim != nullptr, row->codename);
+    }
+    MESSAGE(withImbue << " bandit skills show an imbue");
+    CHECK(withImbue > 1000);
+}
+
 TEST_CASE("the skills' clips from their row's group: their lengths against the skill's times (K10)") {
     const auto dir = GameDir();
     if (dir.empty()) {
@@ -2576,6 +2625,29 @@ TEST_CASE("The jobs' bandits' look: usableresobjiddata.txt's figures, a thief's 
     }
     CHECK(thieves > 0);
     CHECK(hunters > 0);
+    // The European region's (MOB_EU_..., their Country 3 too): a European figure, its European weapon, the job's suit.
+    int europeans = 0, armed = 0;
+    std::string missing;
+    for (const auto& [code, row] : characters.rows()) {
+        if (!sr::assets::IsBandit(row) || !code.starts_with("MOB_EU_")) continue;
+        const sr::assets::SkillRow* skill = row.skills[0] != 0 ? skills.Find(row.skills[0]) : nullptr;
+        const int kind = skill != nullptr && skill->weaponKinds[0] != 255 ? skill->weaponKinds[0] : 2;
+        const sr::assets::BanditOutfit o = sr::assets::OutfitOfBandit(row, 13, kind, bodies, characters, items);
+        REQUIRE(o.body == bodies.lists[1][13]);
+        const std::vector<std::string> worn = codes(o);
+        CHECK_MESSAGE(has(worn, std::string("ITEM_EU_F_TRADE_") + (row.typeId[3] == 3 ? "HUNTER_" : "THIEF_")), code);
+        CHECK_FALSE(has(worn, "ITEM_CH_"));
+        // A weapon: one of the European kinds' names (none for the kinds without a European name).
+        const bool weapon = std::any_of(worn.begin(), worn.end(), [](const std::string& c) {
+            return c.starts_with("ITEM_EU_") && c.find("_TRADE_") == std::string::npos && c.find("_SHIELD_") == std::string::npos &&
+                   (c.find("_M_") == std::string::npos && c.find("_W_") == std::string::npos);
+        });
+        if (weapon) ++armed;
+        else if (missing.size() < 200) missing += code + "(" + std::to_string(kind) + ") ";
+        ++europeans;
+    }
+    CHECK(europeans > 0);
+    CHECK_MESSAGE(armed == europeans, armed << " of " << europeans << " armed; unarmed: " << missing);
 }
 
 TEST_CASE("the item mall's catalogue: 5 shops, 21 tabs, 235 goods, each priced in silk with an item of itemdata") {

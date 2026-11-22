@@ -119,7 +119,8 @@ struct BanditBodies {
 };
 bool IsBandit(const ObjectRow& row);
 // The figure and what it wears for `bandit` with the spawn's `appearance` byte, `weaponKind` its first skill's weapon
-// (skilldata col 50; 2 for none): the race by the row's Country (0 or 3 China, 1 Europe), the body list[appearance %
+// (skilldata col 50; 2 for none): the race Europe for a row of Country 1 or a MOB_EU_ codename (every bandit row's
+// Country is 3, and the original 1.188 client dresses them all Chinese; ours as the European ones look), else China; the body list[appearance %
 // size], the weapon `ITEM_<race>_<kind>_<dd>_A` and a shield for kinds 2, 3, 7, 15, a hunter's armour by the weapon,
 // the job suit; `dd` the degree by its level, each piece at that degree or the next lower one there is. The rolls the
 // original leaves to each client (the suit's tier, the helm) drawn from the byte, so every viewer agrees (ours). A

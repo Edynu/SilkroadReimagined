@@ -1,6 +1,8 @@
 #include "sr/game/Skills.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 
 #include "sr/assets/GameData.h"
 
@@ -89,6 +91,59 @@ SkillTraits TraitsOf(const assets::SkillRow& skill) {
 }
 
 bool IsImbue(const assets::SkillRow& skill) { return skill.activity == 1 && skill.attack && skill.hasDuration; }
+
+namespace {
+// A state tag's first value (0: the skill has none of it).
+int FirstValue(const assets::SkillRow& skill, const char* tag) { return assets::FindSkillParam(skill, assets::SkillTag(tag)).Int(0); }
+} // namespace
+
+void BanditImbues::Build(const assets::SkillTable& skills) {
+    cold_.clear();
+    fire_.clear();
+    lightning_.clear();
+    // By id, the first imbue of a value keeping it (the tables' order as they load).
+    std::vector<const assets::SkillRow*> rows;
+    rows.reserve(skills.rows().size());
+    for (const auto& [id, row] : skills.rows()) rows.push_back(&row);
+    std::sort(rows.begin(), rows.end(), [](const assets::SkillRow* a, const assets::SkillRow* b) { return a->id < b->id; });
+    const auto keep = [](std::map<int, std::uint32_t>& table, int value, std::uint32_t id) {
+        if (value != 0) table.emplace(value, id);
+    };
+    for (const assets::SkillRow* s : rows) {
+        if (s->codename.find("COLD_GIGONGTA") != std::string::npos) {
+            keep(cold_, FirstValue(*s, "fz"), s->id);
+            keep(cold_, FirstValue(*s, "fb"), s->id);
+        } else if (s->codename.find("FIRE_GIGONGTA") != std::string::npos) {
+            keep(fire_, FirstValue(*s, "bu"), s->id);
+        } else if (s->codename.find("LIGHTNING_GIGONGTA") != std::string::npos) {
+            keep(lightning_, FirstValue(*s, "es"), s->id);
+        }
+    }
+}
+
+std::uint32_t BanditImbues::For(const assets::SkillRow& skill) const {
+    const std::string& code = skill.codename;
+    if (code.size() < 5 || (code[0] != 'T' && code[0] != 'H') || code.compare(1, 4, "SKIL") != 0) return 0;
+    // The nearest of every table its states name, the first nearest kept (fz, fb, bu, es; within a table by value);
+    // none nearer than 1,000 away.
+    int best = 1000;
+    std::uint32_t chosen = 0;
+    const auto scan = [&](const std::map<int, std::uint32_t>& table, int value) {
+        if (value == 0) return;
+        for (const auto& [key, id] : table) {
+            const int distance = std::abs(key - value);
+            if (distance < best) {
+                best = distance;
+                chosen = id;
+            }
+        }
+    };
+    scan(cold_, FirstValue(skill, "fz"));
+    scan(cold_, FirstValue(skill, "fb"));
+    scan(fire_, FirstValue(skill, "bu"));
+    scan(lightning_, FirstValue(skill, "es"));
+    return chosen;
+}
 
 std::vector<std::uint32_t> SkillBook::Skills(const assets::SkillTable& table) const {
     std::vector<std::uint32_t> out;

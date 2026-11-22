@@ -439,6 +439,81 @@ void Coses::OwnerHurt(std::uint32_t owner, std::uint32_t monster) {
     if (Cos* c = AttackPetOf(owner); c != nullptr && c->aggressive && c->target == 0) Engage(*c, monster);
 }
 
+namespace {
+std::vector<proto::StateRecord> RecordsOf(const game::StateSet& states, Coses::Clock::time_point now) {
+    std::vector<proto::StateRecord> records;
+    for (const game::ActiveState& a : states.All()) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(a.Ends() - now).count();
+        records.push_back({std::uint8_t(a.kind), std::uint8_t(std::clamp(a.level, 0, 255)), std::uint32_t(std::max<long long>(0, left))});
+    }
+    return records;
+}
+} // namespace
+
+std::optional<game::StateDefence> Coses::StateDefenceOf(std::uint32_t entity) const {
+    const auto it = coses_.find(entity);
+    if (it == coses_.end() || it->second.hp == 0) return std::nullopt;
+    const Cos& c = it->second;
+    // Its level: its row's (a pet's), else its character row's (a scroll's ride or transport).
+    int level = c.row.id != 0 ? c.row.level : 1;
+    if (c.row.id == 0) {
+        if (const assets::CharacterTable* characters = host_.CosCharacters()) {
+            if (const assets::ObjectRow* row = characters->Find(c.model)) level = std::max(1, int(row->level));
+        }
+    }
+    return MonsterStateDefence(level, {});
+}
+
+int Coses::SusceptibilityOf(std::uint32_t entity) const {
+    const auto it = coses_.find(entity);
+    return it != coses_.end() ? it->second.states.Susceptibility() : 0;
+}
+
+bool Coses::Afflict(std::uint32_t entity, const std::vector<game::ActiveState>& states, Clock::time_point now) {
+    const auto it = coses_.find(entity);
+    if (it == coses_.end() || it->second.hp == 0 || states.empty()) return false;
+    Cos& c = it->second;
+    bool took = false;
+    for (const game::ActiveState& s : states) took = c.states.Apply(s) || took;
+    if (!took) return false;
+    StatesChanged(c, now);
+    return true;
+}
+
+void Coses::StatesChanged(Cos& c, Clock::time_point now) {
+    World& world = host_.CosWorld();
+    // Frozen, asleep or stunned it stands; frostbite and slow slow its walk.
+    if (c.states.Locked() || c.states.Rooted()) {
+        if (const auto at = world.Where(c.entity); at && world.Moving(c.entity)) world.MoveTo(c.entity, at->position);
+    }
+    if (const int speed = c.states.SpeedPercent(); speed != c.speedPercent) {
+        c.speedPercent = speed;
+        world.SetSpeedFactor(c.entity, float(speed) / 100.0f);
+    }
+    host_.CosStates(c.entity, RecordsOf(c.states, now));
+}
+
+void Coses::TickStates(Clock::time_point now) {
+    // By entity: a burn's last tick may end a COS (Hurt, Dismiss).
+    std::vector<std::uint32_t> afflicted;
+    for (const auto& [entity, c] : coses_) {
+        if (c.states.Mask() != 0 && c.hp > 0) afflicted.push_back(entity);
+    }
+    for (const std::uint32_t entity : afflicted) {
+        auto it = coses_.find(entity);
+        if (it == coses_.end()) continue;
+        for (const game::StateTick& t : it->second.states.Ticks(now, it->second.hp, 0, it->second.stats.magAbsorption)) {
+            game::HitResult hit;
+            hit.damage = t.hp;
+            Hurt(entity, t.source, hit);
+            it = coses_.find(entity);
+            if (it == coses_.end() || it->second.hp == 0) break;
+        }
+        if (it == coses_.end() || it->second.hp == 0) continue;
+        if (!it->second.states.Expire(now).empty()) StatesChanged(it->second, now);
+    }
+}
+
 void Coses::Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult& hit) {
     const auto it = coses_.find(pet);
     if (it == coses_.end() || it->second.hp == 0) return;
@@ -1295,6 +1370,8 @@ bool Coses::Follow(Cos& c, double far) {
     const proto::FlatPosition a = proto::ToFlat(owner->position), b = proto::ToFlat(self->position);
     const double dx = a.x - b.x, dz = a.z - b.z, d = std::hypot(dx, dz);
     if (d <= far) return true;
+    // Frozen, asleep, stunned or rooted: it stays where it is (a teleport's relocation below still takes it).
+    const bool held = c.states.Locked() || c.states.Rooted();
     // Back to kCosFollowNear short of its owner, on the line between them.
     const double k = std::max(0.0, d - game::kCosFollowNear) / std::max(d, 1e-6);
     const proto::WorldPosition to = proto::FromFlat({b.x + dx * k, b.z + dz * k}, owner->position.y);
@@ -1312,6 +1389,7 @@ bool Coses::Follow(Cos& c, double far) {
         std::abs(rz) > 1) {
         return relocate();
     }
+    if (held) return true;
     // A transport follows at its run pace; others walk the last stretch.
     const bool transport = c.kind == game::CosKind::Transport;
     const bool walk = !transport && d < game::kCosFollowFar * 2.0;
@@ -1342,6 +1420,7 @@ void Coses::Tick(Clock::time_point now) {
         if (const auto it = coses_.find(entity); it != coses_.end()) Fight(it->second, now);
     }
     for (auto& [entity, c] : coses_) Recover(c, now);
+    TickStates(now);
     Arrived();
     if (now < nextFollow_) return;
     const double elapsed = lastFollow_ == Clock::time_point{} ? 0.0 : std::chrono::duration<double>(now - lastFollow_).count();

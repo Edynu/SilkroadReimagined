@@ -398,7 +398,8 @@ int BanditDegree(int level) {
 BanditOutfit OutfitOfBandit(const ObjectRow& bandit, std::uint8_t appearance, int weaponKind, const BanditBodies& bodies, const CharacterTable& characters,
                             const ItemTable& items) {
     BanditOutfit out;
-    const bool europe = bandit.country == 1;
+    // Every bandit row's Country is 3 (China), the European ones' too: those go by their codename (MOB_EU_...).
+    const bool europe = bandit.country == 1 || bandit.codename.starts_with("MOB_EU_");
     const auto& list = bodies.lists[europe ? 1 : 0];
     if (list.empty()) return out;
     out.body = list[appearance % list.size()];

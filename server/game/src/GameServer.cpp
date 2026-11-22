@@ -2192,6 +2192,19 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         coses->Hurt(cos, attacker, hit);
         if (PlayerWorld* owner = PlayerByEntity(coses->OwnerOf(cos))) owner->combat.battleUntil = Clock::now() + std::chrono::seconds(20);
     }
+    // A monster's skill's states on a COS it struck (the "magic" thieves' freeze and burn on a transport, the user's
+    // report 2026-11-22), as on a player: none on a blocked hit or a dead COS, through the monster's chance history,
+    // against the COS's level (Coses::StateDefenceOf).
+    void AfflictCos(std::uint32_t cos, std::uint32_t monster, const game::HitResult& hit, const assets::SkillRow* skill, Clock::time_point now) {
+        if (!coses || hit.blocked || skill == nullptr || coses->HpOf(cos) == 0) return;
+        const std::vector<game::StateGift> gifts = game::StateGiftsOf(*skill);
+        const auto defence = coses->StateDefenceOf(cos);
+        if (gifts.empty() || !defence) return;
+        const int pulse = assets::FindSkillParam(*skill, assets::SkillTag("puls")).Int(0);
+        coses->Afflict(cos, game::RollStates(gifts, *defence, coses->SusceptibilityOf(cos), monsterStateRolls[monster], fightRandom, monster, skill->id, pulse, now),
+                       now);
+    }
+    void CosStates(std::uint32_t entity, std::vector<proto::StateRecord> states) override { TellStates(entity, std::move(states), Clock::now()); }
     Monsters::Damaged HitCos(std::uint32_t cos, std::uint32_t attacker, std::uint32_t damage) {
         Monsters::Damaged d;
         if (!coses) return d;
@@ -5636,9 +5649,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 HurtQuestCos(h.target, h.monster, h.hit);
                 continue;
             }
-            // A hit on an attack pet (Coses.h): its own health.
+            // A hit on a COS (a pet, a ride, a transport: Coses.h): its own health, and its skill's states on it.
             if (coses && coses->OwnerOf(h.target) != 0) {
                 HurtCos(h.target, h.monster, h.hit);
+                AfflictCos(h.target, h.monster, h.hit, h.skill, now);
                 continue;
             }
             const auto who = byEntity.find(h.target);
@@ -5649,6 +5663,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (coses && player.riding) {
                 if (const std::uint32_t mount = coses->MountOf(player.entity); mount != 0) {
                     HurtCos(mount, h.monster, h.hit);
+                    AfflictCos(mount, h.monster, h.hit, h.skill, now);
                     continue;
                 }
             }

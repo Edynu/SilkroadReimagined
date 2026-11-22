@@ -23,6 +23,7 @@
 #include "sr/core/Log.h"
 #include "sr/core/Text.h"
 #include "sr/game/CharacterRules.h"
+#include "sr/game/Skills.h"
 #include "sr/game/TitleSession.h"
 #include "sr/net/Connection.h"
 #include "title/UiKit.h"
@@ -50,6 +51,7 @@ struct CharacterData {
     assets::EquipGlowTable equipGlows; // itemoption.txt, itemtypenumber.txt: the plus glow (empty when it failed to load)
     assets::VisualChangeTable visuals; // charactervisualchange.txt: what a worn visual hides (a job suit; empty when it failed to load)
     assets::BanditBodies banditBodies; // usableresobjiddata.txt: the figures the jobs' bandits take
+    game::BanditImbues banditImbues;   // the imbue each bandit skill shows (from the skills, once they are in)
     std::vector<std::uint32_t> monsterExperience; // leveldata.txt: a general monster's experience by level (how many orbs a kill sends)
     std::vector<std::uint64_t> levels; // leveldata.txt: the EXP each level needs (the HUD; empty when missing)
     std::vector<std::uint32_t> masteryCosts; // leveldata.txt col 2: a mastery's next level's skill points
@@ -153,6 +155,7 @@ inline std::shared_ptr<CharacterData> LoadCharacterData(core::JobSystem& jobs, c
         },
         [](CharacterData& d, const assets::FileSystem& fs) {
             if (std::string e; !d.skills.Load(fs, e)) core::LogWarning("title: skills: {}", e);
+            d.banditImbues.Build(d.skills); // the imbues the bandits' skills show (game::BanditImbues)
         },
         [](CharacterData& d, const assets::FileSystem& fs) {
             if (std::string e; !d.shops.Load(fs, e)) core::LogWarning("title: shops: {}", e);

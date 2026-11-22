@@ -72,6 +72,7 @@
 #include "sr/game/Combat.h"
 #include "sr/game/Cos.h"
 #include "sr/game/CosProtocol.h"
+#include "sr/game/States.h"
 #include "sr/game/WorldProtocol.h"
 #include "sr/server/Monsters.h"
 #include "sr/server/Store.h"
@@ -181,6 +182,11 @@ public:
     // (and its saves still waiting), in one transaction after everything before it (SaveCosItems).
     virtual void CosSaveBag(std::uint32_t owner, std::int64_t cos, const std::map<std::uint8_t, game::ItemInstance>& bag,
                             const std::vector<std::uint8_t>& bagTouched, const std::vector<std::uint8_t>& inventoryTouched) = 0;
+    // The states a COS is in now (Afflict, their ends), for those who see it (proto::EntityStates).
+    virtual void CosStates(std::uint32_t entity, std::vector<game::proto::StateRecord> states) {
+        (void)entity;
+        (void)states;
+    }
     // A transport's trade bag: its row's _RefObjChar.InventorySize (0: none).
     virtual int CosTransportBagSize(std::uint32_t model) const { (void)model; return 0; }
     // `owner`'s transport went (dismissed, dead, its owner gone): its goods with it (their drop
@@ -284,6 +290,13 @@ public:
     // A monster's hit on a pet (its entity): its health less the damage, everyone who sees it told; at none it is
     // dead (its row Dead, back into its item). Alive, it fights back.
     void Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult& hit);
+    // States a monster's hit rolled on a COS (a transport, a ride, a pet: a character as its owner is), as a monster's
+    // are kept: put on it and told to those who see it; frozen, asleep or stunned it stands, frostbite and slow slow
+    // it, a burn or a poison takes its health at its ticks (Tick). False: none took. Its state defence: a monster's of
+    // its level (StateDefenceOf; no resistances of its own: the COS rows carry none).
+    bool Afflict(std::uint32_t entity, const std::vector<game::ActiveState>& states, Clock::time_point now);
+    std::optional<game::StateDefence> StateDefenceOf(std::uint32_t entity) const;
+    int SusceptibilityOf(std::uint32_t entity) const;
     // Its owner hit `monster` (an aggressive pet joins in), or was hit by it (the pet defends it).
     void OwnerFights(std::uint32_t owner, std::uint32_t monster);
     void OwnerHurt(std::uint32_t owner, std::uint32_t monster);
@@ -349,6 +362,9 @@ private:
         std::vector<Pending> pending;
         bool aggressive = true;
         game::ChanceRolls rolls;
+        // The states on it (Afflict) and the speed they leave it (percent; 100: none).
+        game::StateSet states;
+        int speedPercent = 100;
         // Its hunger: its row's numbers (stats halved from them when hungry), its HGP eaten a second, the fraction left.
         game::CombatStats baseStats;
         double hgpRate = 0, hgpCarry = 0;
@@ -363,6 +379,10 @@ private:
         std::vector<Job> jobs;
         int bagMost = 0; // a grab pet's places allocated (its row's InventorySize): the bag never grows past them
     };
+    // Its states changed: its stand and its speed from them, those who see it told.
+    void StatesChanged(Cos& c, Clock::time_point now);
+    // The states' ticks due (a burn's, a poison's: its health) and their ends, each update.
+    void TickStates(Clock::time_point now);
     // A job of the pet's started (`tell`: its owner told the bag's new size) or ended (its row taken away, its owner told).
     void StartJob(Cos& c, const PetJobRow& row, bool tell);
     void EndJob(Cos& c, std::size_t index);

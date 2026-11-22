@@ -88,6 +88,24 @@ SkillTraits TraitsOf(const assets::SkillRow& skill);
 // 'att' of the magical lane too, but Activity 2) are attacks, the Wizard's fire traps traps.
 bool IsImbue(const assets::SkillRow& skill);
 
+// The imbue a job bandit's skill shows on its bandit, as the 1.188 client links them when its tables load: a skill
+// whose codename begins TSKILL or HSKILL (a thief's or a hunter's) takes, of the Chinese imbues (codenames with
+// COLD_GIGONGTA, FIRE_GIGONGTA, LIGHTNING_GIGONGTA), the one whose state's first value is nearest its own: its freeze
+// ('fz') and frostbite ('fb') against the cold imbues', its burn ('bu') against the fire ones', its shock ('es')
+// against the lightning ones' (each table one imbue a value, the lowest id first; on a tie the lower value). The
+// "magic" thieves carry those states, so they show the cold or fire glow; the rest none. The bandit wears it as a
+// buff's look (its loops on the weapon, its hits' effect) for as long as it is shown.
+class BanditImbues {
+public:
+    void Build(const assets::SkillTable& skills);
+    // The imbue `skill` shows (0: none: not a bandit's, or none of the states).
+    std::uint32_t For(const assets::SkillRow& skill) const;
+    bool Empty() const { return cold_.empty() && fire_.empty() && lightning_.empty(); }
+
+private:
+    std::map<int, std::uint32_t> cold_, fire_, lightning_; // a state's first value -> the imbue
+};
+
 // The most all masteries may add up to. country: 0 China, 1 Europe. China 330 (the 1.188 server refuses a total past
 // it with 0x3805; v1.150's client showed 300); Europe twice the level, at most 240.
 int MasteryAllowance(int country, int level);
