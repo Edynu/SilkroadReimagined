@@ -1,6 +1,6 @@
 // which COS a scroll summons, and the rides and transports through the game server:
 // summoned beside their owner, a ride boarded at once, a rider at its mount's speeds with its mount walking its
-// legs, one of a kind, Ride and Dismiss, and the owner's death taking them away (set SR_DB_URL; otherwise skipped).
+// legs, one of a kind, Ride and Dismiss, and the owner's death (only the COS ridden goes) (set SR_DB_URL; otherwise skipped).
 
 #include <doctest/doctest.h>
 
@@ -636,7 +636,7 @@ TEST_CASE("Game server: a ride summoned, ridden, left and sent away") {
     s.game.Stop();
 }
 
-TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and boarded through Ride, leashed, gone with its owner's death") {
+TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and boarded through Ride, leashed, kept through its owner's death beside it") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
     CosServer s(t);
@@ -701,13 +701,14 @@ TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and
         }
     }
 
-    // Its owner's death: gone.
+    // Its owner's death: walking beside it, not riding it, it stays (the original's death takes only the COS ridden).
     a.client->Send(proto::DevDie{});
-    CHECK(Next<proto::CosDismissed>(a).entity == summoned.entity);
+    proto::CosDismissed gone;
+    CHECK_FALSE(a.client->Expect(gone, 1500ms));
     s.game.Stop();
 }
 
-TEST_CASE("Game server: pets: their rows made at the first summon, kept through unsummons, back in their items at death") {
+TEST_CASE("Game server: pets: their rows made at the first summon, kept through unsummons, back in their items when unsummoned") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
     CosServer s(t);
@@ -904,8 +905,9 @@ TEST_CASE("Game server: pets: their rows made at the first summon, kept through 
     CHECK(used.changed[0].quantity == 2);
     CHECK(eventually([&] { return t.Db().Query("SELECT hp FROM _charcos WHERE id = $1", {wolfRow}).Int(0, 0) >= std::int64_t(healed); }));
 
-    // Its owner's death: the wolf back in its item, inactive.
-    a.client->Send(proto::DevDie{});
+    // Unsummoned: the wolf back in its item, inactive (its owner's death would leave it out: the original's takes only
+    // the COS ridden).
+    a.client->Send(proto::CosDismiss{hungry.entity});
     CHECK(Next<proto::CosDismissed>(a).entity == hungry.entity);
     CHECK(eventually([&] { return state(wolfRow) == std::int64_t(game::CosState::Inactive); }));
 
@@ -1390,7 +1392,8 @@ TEST_CASE("Game server: a job suit's rules: the refusals' codes, the 10 s change
     // Within the lock it stays on.
     r = wear(a, game::slot::kJobSuit, place);
     CHECK(r.code == 0x1847);
-    for (int i = 0; i < 300; ++i) s.game.Poll(2ms);
+    // Past the (test's 1 s) lock by the clock: a poll returns early whenever something happens.
+    for (const auto until = std::chrono::steady_clock::now() + 1200ms; std::chrono::steady_clock::now() < until;) s.game.Poll(2ms);
     // Past it: off in its turn.
     r = wear(a, game::slot::kJobSuit, place);
     CHECK(r.status == proto::ItemStatus::JobChange);

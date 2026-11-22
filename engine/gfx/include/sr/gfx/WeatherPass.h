@@ -21,6 +21,8 @@ struct WeatherView {
     std::vector<glm::vec4> snow[2]; // cluster centres, weather\snow1 and snow2
     std::vector<glm::vec4> ripples; // xyz, w: age in seconds (1.2 s each)
     glm::vec4 flash{1.0f, 1.0f, 1.0f, 0.0f}; // the flash's colour and alpha (none at (1, 1, 1, 0))
+    // The ground under the weather (the Modern look's): x wetness, y snow lying, z rain falling now (0..1 each).
+    glm::vec4 ground{0.0f};
     bool Empty() const {
         return rain.empty() && snow[0].empty() && snow[1].empty() && ripples.empty() && !Flashing();
     }

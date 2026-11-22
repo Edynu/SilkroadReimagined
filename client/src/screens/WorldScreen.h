@@ -208,6 +208,8 @@ public:
     void SetStage(std::size_t slot, const StageLook& look, float x, float y, float z, float yaw);
     // How much of a stage character shows (1 whole, 0 gone): fading in as it appears, out as it goes.
     void SetStageOpacity(std::size_t slot, float opacity);
+    // The weather (the server's, where the player stands): eased into over game::Weather::kRampSeconds.
+    void SetWeather(game::WeatherKind kind, int amount) { weather_.Set(kind, amount); }
     // Its model's material colour now (a skill's SCT_MAT: every light on it times the colour; null: none).
     void SetStageTint(std::size_t slot, const glm::vec3* colour);
     void SetStage(std::size_t slot, const std::string& model, float x, float y, float z, float yaw) {
@@ -359,6 +361,7 @@ private:
     bool captureLoading_ = false;
     // Weather (C4c).
     game::Weather weather_;
+    float wetness_ = 0.0f, snowLying_ = 0.0f; // the ground under the weather (UpdateWeather)
     WeatherEffect weatherEffect_;
     double lightningAt_ = -1.0;
 

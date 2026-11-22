@@ -115,11 +115,16 @@ bool AssembleOutfit(const FileSystem& fs, const std::string& bodyPath, const std
         const std::vector<BindPose> itemBind = BindWorld(item.skeleton);
         const std::string& attachName = item.resource.skeletonAttachBone;
         const int attach = attachName.empty() ? -1 : out.skeleton.Find(attachName);
-        // The item's own bones become sockets on the attach bone (an arrow is held at a bow's).
+        // The item's own bones become sockets on the attach bone (an arrow is held at a bow's). One the
+        // wearer has by name is a socket too unless it is the same bone: a woman's body has a Bone01 of
+        // its own, not the bow's, where the bow's glow hangs.
         if (attach >= 0) {
             for (std::size_t b = 0; b < item.skeleton.bones.size(); ++b) {
                 const std::string& name = item.skeleton.bones[b].name;
-                if (out.skeleton.Find(name) >= 0) continue;
+                if (const int wearer = out.skeleton.Find(name);
+                    wearer >= 0 && SamePose(itemBind[b], wearerBind[static_cast<std::size_t>(wearer)])) {
+                    continue;
+                }
                 ModelData::Socket socket;
                 socket.name = name;
                 socket.parentBone = attachName;

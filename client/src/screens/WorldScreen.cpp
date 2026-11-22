@@ -930,6 +930,11 @@ bool WorldScreen::StageBone(std::size_t slot, std::string_view bone, glm::mat4& 
             out = out * world[static_cast<std::size_t>(s.parent)] * glm::make_mat4(s.local.data());
             return true;
         }
+        // No socket: the item's bone is the wearer's own (the same bone, AssembleOutfit), posed with it.
+        if (const int own = m.info->skeleton->Find(std::string(name)); own >= 0 && static_cast<std::size_t>(own) < world.size()) {
+            out = out * world[static_cast<std::size_t>(own)];
+            return true;
+        }
         return false;
     }
     auto it = m.bones.find(std::string(bone));
@@ -1716,6 +1721,18 @@ void WorldScreen::UpdateWeather(ScreenContext& context, FrameSnapshot& snapshot)
     weatherEffect_.Update(weather_.Kind(), weather_.Effective(), glm::vec3(camera_.targetX, camera_.targetY, camera_.targetZ), dt,
                           waterAt);
     weatherEffect_.Fill(snapshot.scene.weather);
+    // The ground under it (ours, the Modern look): wet within about 30 s of rain (its strength: the amount over 150), dry
+    // again over 2 minutes; snow (the climates' 3..10 a light fall, 8 and more a full one) lies within 90 s and melts
+    // over 3 minutes.
+    const int amount = weather_.Effective();
+    const float rain = weather_.Kind() == game::WeatherKind::Rain ? std::min(1.0f, float(amount) / 150.0f) : 0.0f;
+    const float snow = weather_.Kind() == game::WeatherKind::Snow ? std::min(1.0f, float(amount) / 8.0f) : 0.0f;
+    const auto towards = [&](float& value, float target, float upSeconds, float downSeconds) {
+        value = value < target ? std::min(target, value + dt / upSeconds) : std::max(target, value - dt / downSeconds);
+    };
+    towards(wetness_, rain, 30.0f, 120.0f);
+    towards(snowLying_, snow, 90.0f, 180.0f);
+    snapshot.scene.weather.ground = glm::vec4(wetness_, snowLying_, rain, 0.0f);
 }
 
 void WorldScreen::DrawHud(ScreenContext& context, FrameSnapshot& snapshot) {

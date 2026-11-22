@@ -1218,4 +1218,14 @@ bool ParseQuest(std::string_view text, QuestDef& out, std::string& error) {
     return true;
 }
 
+bool QuestFinishesAt(const QuestDef& q, std::string_view npc) {
+    const auto named = [&](const std::vector<std::string>& list) { return std::find(list.begin(), list.end(), npc) != list.end(); };
+    if (!q.tiers.empty() && named(q.givers)) return true;
+    if (!q.finisher.empty()) return q.finisher == npc;
+    return std::any_of(q.goals.begin(), q.goals.end(), [&](const QuestGoal& g) {
+        if (g.kind != QuestGoalKind::Deliver && g.kind != QuestGoalKind::Talk && g.kind != QuestGoalKind::Capture) return false;
+        return g.npc == npc || named(g.alsoAt);
+    });
+}
+
 } // namespace sr::game

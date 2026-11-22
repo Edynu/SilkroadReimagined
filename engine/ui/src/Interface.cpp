@@ -310,6 +310,9 @@ void Interface::PullOntoScreen(Vec2 screen) {
         Widget& w = *t.window;
         if (w.rect.x >= screen.x - 24.0f) w.rect.x = screen.x - w.rect.w;
         if (w.rect.y >= screen.y - 24.0f) w.rect.y = screen.y - w.rect.h;
+        // Lost off the left or the top (no more than 24 of it on the screen): back at the edge.
+        if (w.rect.x + w.rect.w <= 24.0f) w.rect.x = 0.0f;
+        if (w.rect.y + w.rect.h <= 24.0f) w.rect.y = 0.0f;
     }
 }
 

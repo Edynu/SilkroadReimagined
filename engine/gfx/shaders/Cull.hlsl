@@ -6,8 +6,10 @@
 // job (instance, mesh, arena base); the skinning pass (Skin.hlsl) runs one group per job, and the
 // draw reads the part's vertices from the arena.
 // The lists come in two phases, as the original draws ("Water"): what stands below
-// the water level draws before the water, the rest (and every skinned instance: the entities)
-// after it. A list is bucket + phase * 3 (buckets: culled, two-sided, translucent).
+// the water level, and every skinned instance (the entities), draws before the water, the rest
+// after it: a character wading shows under the surface through the water, tinted by it (the
+// original's, the user's screenshot 2026-11-21). A list is bucket + phase * 3 (buckets: culled,
+// two-sided, translucent).
 // Several views (the sun's shadow cascades) are culled in one pass: a part goes to each view's
 // lists it touches (list + view * 6), and a skinned part is skinned once for all of them. The
 // counts of view 0 are at 0, those of views 1..3 at 64 + ((view - 1) * 6 + list) * 4.
@@ -39,6 +41,9 @@ struct PushData {
 //   float3 eye, minAngle   496 static parts whose radius / distance from the eye is below minAngle
 //                              are left out (a few pixels on screen: ours, levels of detail)
 //   uint staticViews       492 static instances go to views below this only (shadow casters)
+//   uint foliageViews      512 a bit per view a static instance's foliage parts (kMaterialFoliage: they sway) go to,
+//                              in place of staticViews: the sun's shadows draw them every frame into the near
+//                              cascades and keep them out of the cached ones there (a cached sway would stand still)
 //   uint cutoutBucket      484 1: the bucket is 1 for cut-out or fading parts, 0 for solid ones
 //                              (shadow casters: the solid ones draw without a fragment shader);
 //                              translucent parts (bucket 2) are left out: they cast no shadow
@@ -47,6 +52,7 @@ static const uint kBuckets = 3; // MeshTable's kBucketCount
 static const uint kBucketBlended = 2;
 static const uint kInstanceSkinned = 1;
 static const uint kVertexSkinned = 2;
+static const uint kMaterialFoliage = 8;
 static const uint kListsPerView = kBuckets * 2;
 
 uint CountOffset(uint view, uint list) { return view == 0 ? list * 4 : 64 + ((view - 1) * kListsPerView + list) * 4; }
@@ -76,8 +82,8 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const uint64_t draws = vk::RawBufferLoad<uint64_t>(c + 136, 8);
     const uint64_t jobs = vk::RawBufferLoad<uint64_t>(c + 144, 8);
     const uint arenaVertices = vk::RawBufferLoad<uint>(c + 152, 4);
-    const uint phase = (skinned || (vk::RawBufferLoad<uint>(record + 52, 4) & kInstanceSkinned) != 0 ||
-                        r1.w >= vk::RawBufferLoad<float>(c + 156, 4)) ? 1 : 0;
+    const bool entity = skinned || (vk::RawBufferLoad<uint>(record + 52, 4) & kInstanceSkinned) != 0;
+    const uint phase = (!entity && r1.w >= vk::RawBufferLoad<float>(c + 156, 4)) ? 1 : 0;
 
     const bool shadowCasters = vk::RawBufferLoad<uint>(c + 484, 4) != 0;
     for (uint i = 0; i < meshCount; ++i) {
@@ -93,10 +99,16 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         uint seen = 0; // a bit per view whose frustum the part touches
         const uint skinnedViews = vk::RawBufferLoad<uint>(c + 480, 4);
         const bool anySkinned = (vk::RawBufferLoad<uint>(record + 52, 4) & kInstanceSkinned) != 0;
+        const bool foliage = !anySkinned && (vk::RawBufferLoad<uint>(m + 20, 4) & kMaterialFoliage) != 0;
+        const uint foliageViews = vk::RawBufferLoad<uint>(c + 512, 4);
         for (uint v = 0; v < views; ++v) {
             if (radius < vk::RawBufferLoad<float>(c + 464 + v * 4, 4)) continue;
             if (anySkinned && v >= skinnedViews) continue;
-            if (!anySkinned && v >= vk::RawBufferLoad<uint>(c + 492, 4)) continue;
+            if (foliage) {
+                if (((foliageViews >> v) & 1u) == 0) continue;
+            } else if (!anySkinned && v >= vk::RawBufferLoad<uint>(c + 492, 4)) {
+                continue;
+            }
             const uint64_t planes = c + (v == 0 ? 0 : 176 + (v - 1) * 96);
             bool visible = true;
             for (uint p = 0; p < 6; ++p) {

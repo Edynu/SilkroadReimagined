@@ -412,6 +412,8 @@ public:
     std::size_t limit = 512; // characters
     bool password = false;   // the layout's style 2: one '*' a character
     bool numeric = false;
+    // A numeric box left empty when its digits are all deleted (else it reads 0): a count typed afresh.
+    bool emptyAllowed = false;
     bool passKeys = false;   // Enter and Escape go to the window (Submitted, Cancelled: the chat input)
     bool multiline = false;  // rows wrapped at its width, Enter a new line, the wheel scrolls it (a guild notice)
     bool readOnly = false;   // shown, never typed in

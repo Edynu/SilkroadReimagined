@@ -217,6 +217,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // The temples' board icon (proto::TempleIcon): shown (1), hidden (0), not decided yet (-1); in the temples last seen.
         std::int8_t templeIcon = -1;
         bool inTemples = false;
+        // The weather it was last told (proto::WeatherNow, as game::ClimateWeather::Packed); 0 none yet.
+        std::uint16_t weatherSent = 0;
         // The system menu's Restart / Exit: counting down until it leaves.
         bool loggingOut = false;
         proto::LogoutKind logoutKind = proto::LogoutKind::Restart;
@@ -5706,7 +5708,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (alchemy) alchemy->End(player.entity);     // a death stops it at the next tick
         if (quests) quests->Died(player.entity);      // a caught COS runs away
         if (stalls) stalls->Leave(player.entity);
-        if (coses) coses->DismissAll(player.entity); // ours: a scroll's COS goes with its owner's death, its pets back into their items
+        if (coses) coses->OwnerDied(player.entity); // the COS it rides goes; its pets stay out (the original's)
         if (player.freePvpAt) {
             player.freePvpAt.reset();
             ShowFreePvp(player);
@@ -9427,6 +9429,39 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     bool bargainOn = false;
     std::int64_t bargainReadyFor = 0; // the period whose 30 minutes' notice was given
     Clock::time_point nextBargainCheck{};
+
+    // The weather (game::ClimateWeather): each climate run on the wall clock (the same on every server of the shard),
+    // each player told its region's when it differs from what it was told (entering, a region of another climate, a change).
+    std::unordered_map<std::uint16_t, std::int32_t> regionClimate;
+    std::map<std::int32_t, game::ClimateWeather> climates;
+    Clock::time_point nextWeather{};
+    std::int64_t WeatherClockMs() const {
+        const double ms = double(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+        return std::int64_t(ms * std::max(config.weatherSpeed, 0.001));
+    }
+    std::uint16_t WeatherAt(std::uint16_t region) const {
+        const auto climate = regionClimate.find(region);
+        if (climate == regionClimate.end()) return 1; // clear where no climate is named
+        const auto w = climates.find(climate->second);
+        return w != climates.end() ? w->second.Packed() : std::uint16_t(1);
+    }
+    void TickWeather(Clock::time_point now) {
+        if (now < nextWeather) return;
+        nextWeather = now + std::chrono::seconds(1);
+        const std::int64_t ms = WeatherClockMs();
+        for (auto& [id, w] : climates) w.Advance(ms);
+        for (auto& [peerId, p] : players) {
+            if (p.entity == 0 || !world) continue;
+            const auto place = world->Where(p.entity);
+            if (!place) continue;
+            const std::uint16_t weather = WeatherAt(place->position.region);
+            if (weather == p.weatherSent) continue;
+            p.weatherSent = weather;
+            if (Peer* peer = peers->Find(peerId)) {
+                peer->connection->Send(proto::WeatherNow::kId, proto::Encode(proto::WeatherNow{std::uint8_t(weather & 0xFF), std::uint8_t(weather >> 8)}));
+            }
+        }
+    }
     void TickBargain(Clock::time_point now) {
         if (!trades || now < nextBargainCheck) return;
         nextBargainCheck = now + std::chrono::seconds(1);
@@ -11385,6 +11420,17 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
             return false;
         }
         if (!MigrateSchema(*db, config.shardSchema, error)) return false;
+        {
+            // The weather's climates (the original's _RefClimate, _RefRegion.Climate), started on the shared clock.
+            bool ok = false;
+            ClimateData climates = LoadClimates(*db, ok);
+            if (!ok) core::LogWarning("{}: the climates could not be read: the weather stays clear", config.name);
+            const std::int64_t ms = state->WeatherClockMs();
+            for (const game::ClimateRow& row : climates.climates) state->climates[row.id].Start(row, ms, 0x5EA50E1Bull);
+            state->regionClimate = std::move(climates.regionClimate);
+            core::LogInfo("{}: weather: {} climates over {} regions{}", config.name, state->climates.size(), state->regionClimate.size(),
+                          config.weatherSpeed != 1.0 ? std::format(" ({}x speed)", config.weatherSpeed) : std::string());
+        }
         if (config.layout) {
             // Every area of the game's table has one owner, or nobody would serve part of the world.
             bool ok = false;
@@ -11903,6 +11949,7 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
         if (s.bandits) s.bandits->Tick(Clock::now());
         s.TickTax(Clock::now());
         s.TickBargain(Clock::now());
+        s.TickWeather(Clock::now());
         s.TickPvp(Clock::now());
         s.parties->Tick(Clock::now());
     }

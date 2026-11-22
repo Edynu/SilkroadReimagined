@@ -60,6 +60,7 @@ struct World::State {
         double length = 0, travelled = 0;
         float speed = 0;
         float speedFactor = 1.0f; // buffs
+        bool legWalk = false;     // the leg under way is a walk (MoveTo's `walk`), not a run
         bool walkMode = false;    // SetWalking
         float walkSpeed = 0, runSpeed = 0; // its own (monsters); 0: the configured player speeds
         bool watcher = false;      // a player: sees the others, holds the navigation around it
@@ -1014,10 +1015,11 @@ void World::SetName(std::uint32_t entity, std::string name) {
 }
 
 void World::SetSpeeds(std::uint32_t entity, float walkSpeed, float runSpeed) {
-    if (const auto it = s_->entities.find(entity); it != s_->entities.end()) {
-        it->second.walkSpeed = walkSpeed;
-        it->second.runSpeed = runSpeed;
-    }
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end() || (it->second.walkSpeed == walkSpeed && it->second.runSpeed == runSpeed)) return;
+    it->second.walkSpeed = walkSpeed;
+    it->second.runSpeed = runSpeed;
+    Resume(entity);
 }
 
 void World::Carry(std::uint32_t rider, std::uint32_t mount) {
@@ -1105,7 +1107,24 @@ void World::SetDetection(std::uint32_t entity, std::uint8_t mask, std::uint8_t l
 }
 
 void World::SetSpeedFactor(std::uint32_t entity, float factor) {
-    if (const auto it = s_->entities.find(entity); it != s_->entities.end()) it->second.speedFactor = factor;
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end() || it->second.speedFactor == factor) return;
+    it->second.speedFactor = factor;
+    Resume(entity);
+}
+
+void World::Resume(std::uint32_t entity) {
+    // A walk under way goes on at the new speed from where it stands (the original's speed change shows at once,
+    // not from the next click): its leg again to the same end, told as any new leg.
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end() || !it->second.placed || !it->second.moving) return;
+    State::Entity& e = it->second;
+    if (e.heading) {
+        WalkHeading(entity);
+        return;
+    }
+    const proto::WorldPosition to = e.legTo;
+    MoveTo(entity, to, e.legWalk);
 }
 
 World::MoveRefused World::MoveTo(std::uint32_t entity, const proto::WorldPosition& targetIn, bool walk) {
@@ -1165,6 +1184,7 @@ World::MoveRefused World::MoveTo(std::uint32_t entity, const proto::WorldPositio
     const float run = e.runSpeed > 0 ? e.runSpeed : s_->config.runSpeed;
     const float walkSpeed = e.walkSpeed > 0 ? e.walkSpeed : s_->config.walkSpeed;
     e.speed = (walk || e.walkMode ? walkSpeed : run) * e.speedFactor;
+    e.legWalk = walk;
     e.moving = e.length > 0.01;
     if (e.moving) e.yaw = float(std::atan2(to.x - from.x, to.z - from.z));
     e.legChanged = true;
@@ -1259,7 +1279,10 @@ void World::SetNavZone(std::uint32_t key, const std::string& name, bool blocks, 
 }
 
 void World::SetWalking(std::uint32_t entity, bool walking) {
-    if (const auto it = s_->entities.find(entity); it != s_->entities.end()) it->second.walkMode = walking;
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end() || it->second.walkMode == walking) return;
+    it->second.walkMode = walking;
+    Resume(entity);
 }
 
 std::vector<World::ZoneEntered> World::TakeZonesEntered() {

@@ -151,6 +151,8 @@ struct GameServerConfig {
     // The job temples: their switch (the shard's event-temples, on), their schedule (`_Schedule` 9..11,
     // or --temple-cycle P).
     TempleConfig temples;
+    // The weather's clock against the wall clock (tries: 60 runs an hour's weather in a minute); every server of a shard alike.
+    double weatherSpeed = 1.0;
     // The bargain goods' sale hours (`_Schedule` rows of game::kScheduleSpecialGoods; none: never).
     std::vector<game::ScheduleRow> bargainSchedule;
     // The merchants' shops (refshop* tables); null: no NPC sells anything.

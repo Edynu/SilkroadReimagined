@@ -5,6 +5,7 @@
 //   --group N --group-name NAME
 //   --public-host HOST    the address players are sent to (default 127.0.0.1)
 //   --capacity N          players this game server takes at most (default: the shard's capacity, 3000)
+//   --weather-speed X     the weather's clock X times the wall clock (tries; every server of a shard alike; default 1)
 //   --shard-capacity N    the shard's players, all its game servers together (default: the settings' shard-capacity, 3000)
 //   --max-characters N    per account (default 3, the v1.150 client's)
 //   --delete-days N       how long a deleted character can be restored (default 7)
@@ -53,7 +54,7 @@
 //   P s), --roc-time-scale N (the Peak's times N times faster); --dev-commands also takes /ROC OPEN|SHUT|END|BREAK
 // The job temples: --event-temples (on: `_Schedule` 9..11), --temple-cycle P ours for tries (each pair's
 //   period P s, the opening a quarter in); --dev-commands also takes /TEMPLE OPEN|CLOSE 9|10|11, /TEMPLE REP ANUBIS|HAROERIS TRADER|THIEF N
-//   --seed-teams "Guild:Name,Name;Guild:Name,Name" [--seed-level N] [--seed-gold N] [--seed-sp N] [--password P] [--seed-kit archer]
+//   --seed-teams "Guild:Name,Name;Guild:Name,Name" [--seed-level N] [--seed-gold N] [--seed-sp N] [--password P] [--seed-kit archer] [--seed-woman]
 //   --seed-character "ACCOUNT:NAME[:thief|hunter|trader],..." [--seed-level N] [--seed-gold N] [--seed-sp N]: characters for
 //     trying things on an existing account (the job's league, an alias and its suit in the bag); then it exits
 //     [--seed-owner GUILD] [--seed-fortress N]  accounts, characters and guilds for a try of the war; then it exits
@@ -215,8 +216,10 @@ int GiveSilk(const sr::core::Config& c, const sr::server::ProgramOptions& option
         core::LogError("SroGame: --seed-teams: {}: {}", what, detail);
         return 1;
     };
-    const std::vector<std::uint32_t> figures = rules.creation.FiguresOf(game::CreationRules::Race::China, true);
-    const auto armour = rules.creation.ArmourOf(game::CreationRules::Race::China, true);
+    // --seed-woman: women (a woman's body has a Bone01 of its own: the seal bow's glow test).
+    const bool man = !c.GetBool("seed-woman", false);
+    const std::vector<std::uint32_t> figures = rules.creation.FiguresOf(game::CreationRules::Race::China, man);
+    const auto armour = rules.creation.ArmourOf(game::CreationRules::Race::China, man);
     const std::vector<std::uint32_t> weapons = rules.creation.WeaponsOf(game::CreationRules::Race::China);
     if (figures.empty() || armour.empty() || weapons.empty()) return fail("creation rules", "no Chinese figure, armour or weapon");
 
@@ -256,7 +259,7 @@ int GiveSilk(const sr::core::Config& c, const sr::server::ProgramOptions& option
             return code("01", "C");
         };
         const auto clothes = [&](const char* part) {
-            return best([&](const std::string& t, const std::string& s) { return "ITEM_CH_M_CLOTHES_" + t + "_" + part + "_" + s; });
+            return best([&](const std::string& t, const std::string& s) { return std::string(man ? "ITEM_CH_M_CLOTHES_" : "ITEM_CH_W_CLOTHES_") + t + "_" + part + "_" + s; });
         };
         const std::string codes[] = {best([&](const std::string& t, const std::string& s) { return std::string(bow ? "ITEM_CH_BOW_" : "ITEM_CH_BLADE_") + t + "_" + s; }),
                                      bow ? std::string("ITEM_ETC_AMMO_ARROW_01")
@@ -1100,6 +1103,7 @@ int main(int argc, char** argv) {
     config.groupName = c.GetString("group-name", "Silkroad");
     config.publicHost = c.GetString("public-host", "127.0.0.1");
     config.capacity = std::uint32_t(c.GetInt("capacity", int(server::ShardLayout::kDefaultShardCapacity)));
+    config.weatherSpeed = c.GetDouble("weather-speed", 1.0);
     config.shardCapacity = std::uint32_t(c.GetInt("shard-capacity", int(server::ShardLayout::kDefaultShardCapacity)));
     // The shard's settings (ShardLayout.h): this server's row of them; the command line still wins.
     auto layout = std::make_shared<server::ShardLayout>();

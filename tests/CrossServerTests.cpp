@@ -1434,12 +1434,20 @@ TEST_CASE("Two game servers: silk is the account's: a grant from outside reaches
     mall->Add(shop);
     Pair pair(t, nullptr, [mall](server::GameServerConfig& c) { c.mall = mall; });
     Player west = pair.b.Join("Westy"), east = pair.a.Join("Easty");
-    CHECK(Next<proto::SilkBalanceMessage>(west).own == 10000); // every account's starting silk
-    CHECK(Next<proto::SilkBalanceMessage>(east).own == 10000);
-
-    // The site (a test standing in for it) grants 100: the West player hears it within a second.
+    CHECK(Next<proto::SilkBalanceMessage>(west).own == 0); // no starting silk
+    CHECK(Next<proto::SilkBalanceMessage>(east).own == 0);
+    // 10,000 each from the site first (the old starting silk).
     const std::int64_t westAccount = t.Db().Query("SELECT userjid FROM _user WHERE charid = $1", {west.character}).Int(0, 0);
     server::SilkBalance after;
+    for (Player* who : {&west, &east}) {
+        const std::int64_t account = t.Db().Query("SELECT userjid FROM _user WHERE charid = $1", {who->character}).Int(0, 0);
+        REQUIRE(server::GrantSilk(t.Db(), account, 10000, server::SilkKind::Own, server::SilkReason::GiftReceived, "WEB-0-" + who->name, "the site", after,
+                                  pair.a.error) == server::SilkGrant::Done);
+        CHECK(Next<proto::SilkBalanceMessage>(*who).own == 10000);
+        CHECK(Next<proto::SilkLine>(*who).value == 10000);
+    }
+
+    // The site (a test standing in for it) grants 100: the West player hears it within a second.
     const auto granted = std::chrono::steady_clock::now();
     REQUIRE(server::GrantSilk(t.Db(), westAccount, 100, server::SilkKind::Own, server::SilkReason::GiftReceived, "WEB-1", "the site", after, pair.a.error) ==
             server::SilkGrant::Done);

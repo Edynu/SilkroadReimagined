@@ -163,7 +163,7 @@ RenderGraph::Resource ModernPass::AddPasses(RenderGraph& graph, RenderGraph::Res
 
     // Sun shafts: only while the sun is above the horizon and near the screen.
     RenderGraph::Resource shafts = 0;
-    if (s.shafts && frame.sunUp) {
+    if (s.shafts && frame.sunWeight > 0.0f) {
         const glm::vec4 clip = frame.viewProj * glm::vec4(frame.eye + glm::normalize(frame.sunDirection) * 10000.0f, 1.0f);
         if (clip.w > 0.0f) {
             const glm::vec2 uv = glm::vec2(clip.x, clip.y) / clip.w * 0.5f + 0.5f;
@@ -171,7 +171,7 @@ RenderGraph::Resource ModernPass::AddPasses(RenderGraph& graph, RenderGraph::Res
             if (off < 0.6f) {
                 shafts = graph.ImportTexture(shafts_, "modern: sun shafts");
                 ModernConstants c = base;
-                c.params[1] = glm::vec4(uv, 1.0f - off / 0.6f, float(frame.width) / float(std::max(1u, frame.height)));
+                c.params[1] = glm::vec4(uv, (1.0f - off / 0.6f) * frame.sunWeight, float(frame.width) / float(std::max(1u, frame.height)));
                 c.params[2] = glm::vec4(frame.sunColour, 0.0f);
                 graph.AddPass("modern: sun shafts", PassKind::Graphics,
                               [&](RenderGraph::Builder& b) { b.Read(sceneResource, Use::Sampled).Read(depthResource, Use::Sampled).Write(shafts, Use::ColorWrite); },
@@ -231,9 +231,10 @@ RenderGraph::Resource ModernPass::AddPasses(RenderGraph& graph, RenderGraph::Res
         // Density at the ground, then the height it halves over; the ground about the camera's
         // foot (60 below the eye, as the follow camera stands).
         c.params[6] = glm::vec4(frame.fogColour, s.heightFog >= 2 ? 0.00035f : 0.0002f);
-        const glm::vec3 toSun = frame.sunUp ? glm::normalize(frame.sunDirection) : glm::vec3(0.0f);
+        // The sun's light in the fog toward it, weighed by its height (fading with the sunset, not switched off).
+        const glm::vec3 toSun = frame.sunWeight > 0.0f ? glm::normalize(frame.sunDirection) : glm::vec3(0.0f);
         c.params[7] = glm::vec4(toSun, frame.eye.y - 60.0f);
-        c.params[2] = glm::vec4(frame.sunColour, 0.0f);
+        c.params[2] = glm::vec4(frame.sunColour * frame.sunWeight, 0.0f);
         c.textures[1] = device.BindlessIndex(frame.depth);
     }
     const rhi::TextureHandle finalTarget = s.fxaa ? fxaaSource_ : frame.output;

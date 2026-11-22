@@ -105,6 +105,59 @@ TEST_CASE("the weather's effective amount moves linearly to a new amount over 5 
     CHECK(w.Amount() == 255);
 }
 
+TEST_CASE("a climate's weather: the original shard manager's rolls, spells and 3-second steps") {
+    using sr::game::ClimateRow;
+    using sr::game::ClimateWeather;
+    using sr::game::WeatherKind;
+    // _RefClimate 1001 with rain certain: Division 4 (a roll every 52.5 minutes), 240 +- 80 s of rain 100 + 0..30.
+    ClimateRow rainy{1001, 1, 180, true, 4, 240000, 80000, 0, 0, 0, 100, 30, 100};
+    const std::int64_t period = ClimateWeather::kDayMs / 4;
+    const std::int64_t start = period * 1000 + 5; // just past a roll's mark
+    ClimateWeather w;
+    w.Start(rainy, start, 42);
+    CHECK(w.Kind() == WeatherKind::Clear);
+    CHECK(w.Amount() == 180);
+    // Nothing before the next mark.
+    CHECK_FALSE(w.Advance(start + period - 10));
+    // The roll: the clear thins by a tenth of (180 + the rain's) every 3 s, then the rain grows.
+    std::int64_t t = start + period;
+    int steps = 0;
+    while (w.Kind() != WeatherKind::Rain && steps < 100) {
+        w.Advance(t);
+        t += ClimateWeather::kStepMs;
+        ++steps;
+    }
+    CHECK(w.Kind() == WeatherKind::Rain);
+    CHECK(steps <= 12);
+    int amount = 0;
+    for (int i = 0; i < 20; ++i, t += ClimateWeather::kStepMs) {
+        w.Advance(t);
+        amount = w.Amount();
+    }
+    CHECK(amount >= 100);
+    CHECK(amount <= 130);
+    // The spell over (at most 320 s): back to the initial clear.
+    for (int i = 0; i < 200; ++i, t += ClimateWeather::kStepMs) w.Advance(t);
+    CHECK(w.Kind() == WeatherKind::Clear);
+    CHECK(w.Amount() == 180);
+
+    // Every server of a shard alike: the same seed and clock, the same weather, whenever it started.
+    ClimateWeather a, b;
+    a.Start(rainy, start, 7);
+    b.Start(rainy, start + 40'000, 7);
+    for (std::int64_t at = start + 60'000; at < start + 3 * period; at += 1000) {
+        a.Advance(at);
+        b.Advance(at);
+        CHECK(a.Packed() == b.Packed());
+    }
+    // ChangeWeather 0 (_RefClimate 3001): its initial weather for good.
+    ClimateRow still{3001, 1, 250, false, 0, 240000, 30000, 0, 0, 0, 0, 0, 100};
+    ClimateWeather s;
+    s.Start(still, start, 1);
+    for (std::int64_t at = start; at < start + 10 * ClimateWeather::kDayMs; at += 60'000) CHECK_FALSE(s.Advance(at));
+    CHECK(s.Packed() == (1 | 250 << 8));
+}
+
 TEST_CASE("the loading screen's picture: by kind, then by the teleport's destination") {
     using sr::game::LoadingKind;
     using sr::game::LoadingPicture;

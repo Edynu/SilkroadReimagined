@@ -47,7 +47,7 @@ public:
         glm::vec3 sunDirection{0, 1, 0}; // towards the sun
         glm::vec3 sunColour{1.0f};
         glm::vec3 fogColour{0.6f, 0.7f, 0.8f}; // the environment's (the height fog's)
-        bool sunUp = false;
+        float sunWeight = 0.0f; // the sun's part in the shafts and the fog's light: 0 under the horizon, 1 well above it
         float timeOfDay = 0.5f;
         std::uint32_t width = 0, height = 0;
     };

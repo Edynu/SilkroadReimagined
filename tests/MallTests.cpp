@@ -129,8 +129,11 @@ struct MallServer {
         REQUIRE(server::CreateAccount(t.Db(), name + "acct", "secret1", error) == server::CreateAccountResult::Created);
         bool ok = false;
         p.account = server::FindAccount(t.Db(), name + "acct", ok)->id;
-        // Every account starts with 10,000: set what the test wants.
-        REQUIRE(t.Db().Query("UPDATE sro_vt_account.sk_silk SET silk_own = $2 WHERE jid = $1", {p.account, std::int64_t(silk)}).Affected() == 1);
+        // The silk the test wants (new accounts start without any).
+        REQUIRE(t.Db().Query("INSERT INTO sro_vt_account.sk_silk (jid, silk_own, silk_gift, silk_point) VALUES ($1, $2, 0, 0) "
+                             "ON CONFLICT (jid) DO UPDATE SET silk_own = excluded.silk_own",
+                             {p.account, std::int64_t(silk)})
+                    .Affected() == 1);
         p.client = std::make_unique<Client>(net, game.Port(), [this] { game.Poll(2ms); });
         REQUIRE(p.client->Greet());
         proto::LobbyEnter e;
@@ -230,7 +233,7 @@ TEST_CASE("Mall: the rules: the count, the places a purchase takes, the price, t
     CHECK(proto::PackSilkDate(2026, 11, 14, 13, 5) == (26u | 11u << 6 | 14u << 10 | 13u << 15 | 5u << 20));
 }
 
-TEST_CASE("Silk: every new account has 10,000; a grant writes the row, its logs and the bus; an order counts once; the history") {
+TEST_CASE("Silk: a new account has none; a grant writes the row, its logs and the bus; an order counts once; the history") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
     std::string error;
@@ -238,12 +241,10 @@ TEST_CASE("Silk: every new account has 10,000; a grant writes the row, its logs 
     bool ok = false;
     const std::int64_t jid = server::FindAccount(t.Db(), "silky", ok)->id;
     server::SilkBalance b;
-    REQUIRE(server::LoadSilk(t.Db(), jid, b, error));
-    CHECK(b == server::SilkBalance{10000, 0, 0});
-    // An account without a row reads 0 / 0 / 0.
-    REQUIRE(t.Db().Query("DELETE FROM sro_vt_account.sk_silk WHERE jid = $1", {jid}).Ok());
+    // No starting silk (kStartingSilk 0, the user's call 2026-11-21): no row, read as 0 / 0 / 0.
     REQUIRE(server::LoadSilk(t.Db(), jid, b, error));
     CHECK(b == server::SilkBalance{});
+    CHECK(t.Db().Query("SELECT count(*) FROM sro_vt_account.sk_silk WHERE jid = $1", {jid}).Int(0, 0) == 0);
     // A grant (made from outside: the bus says so).
     auto listener = server::Database::Connect(t.Url(), error);
     REQUIRE(listener);
@@ -269,8 +270,11 @@ TEST_CASE("Silk: every new account has 10,000; a grant writes the row, its logs 
     CHECK(notice->account == jid);
     CHECK(notice->reason == server::SilkReason::GiftReceived);
     CHECK(notice->value == 100);
-    CHECK(t.Db().Query("SELECT count(*) FROM sro_vt_account.sk_silkchange_by_web WHERE jid = $1", {jid}).Int(0, 0) == 2);
-    // The history: the bought list holds the starting silk (type 0, reason 0); the grant was a gift's reason (2).
+    CHECK(t.Db().Query("SELECT count(*) FROM sro_vt_account.sk_silkchange_by_web WHERE jid = $1", {jid}).Int(0, 0) == 1); // ORDER-1's
+    // Silk bought (type 0, reason 0), as the starting silk was.
+    CHECK(server::GrantSilk(t.Db(), jid, 10000, server::SilkKind::Own, server::SilkReason::Bought, "ORDER-2", "bought", after, error) ==
+          server::SilkGrant::Done);
+    // The history: the bought list holds it; the first grant was a gift's reason (2).
     std::vector<server::SilkHistoryRow> rows;
     REQUIRE(server::LoadSilkHistory(t.Db(), jid, 1, 1, rows, error));
     REQUIRE(rows.size() == 1);
@@ -305,7 +309,10 @@ TEST_CASE("Silk: 1,000 debits of 1 from three connections on a balance of 500 en
     REQUIRE(server::CreateAccount(t.Db(), "racer", "secret1", error) == server::CreateAccountResult::Created);
     bool ok = false;
     const std::int64_t jid = server::FindAccount(t.Db(), "racer", ok)->id;
-    REQUIRE(t.Db().Query("UPDATE sro_vt_account.sk_silk SET silk_own = 500 WHERE jid = $1", {jid}).Ok());
+    REQUIRE(t.Db().Query("INSERT INTO sro_vt_account.sk_silk (jid, silk_own, silk_gift, silk_point) VALUES ($1, 500, 0, 0) "
+                         "ON CONFLICT (jid) DO UPDATE SET silk_own = 500",
+                         {jid})
+                .Affected() == 1);
     server::DatabasePool pool;
     REQUIRE(pool.Start(t.Url(), 3, error));
     std::atomic<int> done{0}, refused{0}, taken{0};
@@ -440,12 +447,17 @@ TEST_CASE("Mall: a purchase the database fails leaves the silk and the bag as th
     CHECK(s.ItemsOf(r, kHat) + s.ItemsOf(r, kDress) + s.ItemsOf(r, kAttach) == 0);
 }
 
-TEST_CASE("Mall: the silk history: the starting silk in the bought list, packed dates; nothing in a day after a clock move") {
+TEST_CASE("Mall: the silk history: silk bought in the bought list, packed dates; nothing in a day after a clock move") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
     MallServer s(t);
     REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
-    auto p = s.Make("Reader", 10000);
+    auto p = s.Make("Reader", 0);
+    {
+        server::SilkBalance after;
+        REQUIRE(server::GrantSilk(t.Db(), p.account, 10000, server::SilkKind::Own, server::SilkReason::Bought, "ORDER-R", "bought", after, s.error) ==
+                server::SilkGrant::Done);
+    }
     p.client->Send(proto::SilkHistoryQuery{1, 3});
     auto h = Next<proto::SilkHistory>(p);
     CHECK(h.result == 0);

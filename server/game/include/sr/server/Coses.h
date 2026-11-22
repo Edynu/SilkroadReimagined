@@ -230,6 +230,9 @@ public:
     // Every COS of `owner` sent away: its death or leaving (`comesBack` false: its pets Inactive), a teleport or a move
     // to another game server (true: its pets stay Summoned and come out again where it arrives).
     void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false);
+    // Its owner died: as the original's, only the COS it rides goes (its ride slot); its pets and a transport it walks
+    // beside stay out.
+    void OwnerDied(std::uint32_t owner);
     // `owner`'s ride or transport (kept through DismissAll) brought beside `at`, where its owner arrives (the thieves'
     // town scroll, which works with a transport out:; a gate's or a ferry's link that allows one); told
     // again and boarded again, if it was, once its owner stands there (Tick).

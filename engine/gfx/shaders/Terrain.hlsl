@@ -152,8 +152,31 @@ float4 PSMain(VSOutput input) : SV_Target {
 
     // The effects' lights (V2): over the lit ground.
     color += color * FrameEffectLight(pc.frame, input.world, normalize(input.normal), input.position.xy) * 1.5;
-    // Wet ground (Modern weather): darker under the rain.
-    color *= lerp(1.0, 0.72, FrameValue(pc.frame, kFrameModern).z);
+    // The Modern weather (0 with the Original's): snow lying on what faces up, as a near-white texel would be lit; wet
+    // ground darker, the sky mirrored at a glancing look and the light's glint on what is flat (no normal maps: the
+    // ground's own normal).
+    const float4 weather = FrameValue(pc.frame, kFrameWeather);
+    if (weather.x > 0.0 || weather.y > 0.0) {
+        const float3 n = normalize(input.normal);
+        const float flat = saturate(n.y * 2.0 - 1.0);
+        if (weather.y > 0.0) {
+            // At most two thirds, the ground's own pattern kept under it (its brightness carried into the snow).
+            const float lying = weather.y * saturate(n.y * 2.5 - 1.4) * 0.65;
+            const float pattern = dot(color, float3(0.299, 0.587, 0.114)) / max(dot(input.lit * 2.0, float3(0.299, 0.587, 0.114)), 1e-3);
+            color = lerp(color, saturate(float3(0.92, 0.94, 0.98) * input.lit * 2.0 * lerp(0.7, 1.1, saturate(pattern * 1.5))), lying);
+        }
+        if (weather.x > 0.0) {
+            color *= lerp(1.0, 0.68, weather.x);
+            const float3 v = normalize(FrameValue(pc.frame, kFrameCamera).xyz - input.world);
+            const float glancing = pow(1.0 - saturate(dot(n, v)), 4.0);
+            const float4 horizon = FrameValue(pc.frame, kFrameSkyHorizon);
+            const float3 sky = FrameValue(pc.frame, kFrameSkyZenith).w > 0.5 ? horizon.rgb : FrameValue(pc.frame, kFrameFogColor).rgb;
+            color = lerp(color, sky * 0.8, weather.x * flat * glancing * 0.45);
+            const float4 sun = FrameValue(pc.frame, kFrameSun);
+            const float3 h = normalize(normalize(FrameValue(pc.frame, kFrameShadowLight).xyz + float3(0.0, 1e-4, 0.0)) + v);
+            color += FrameValue(pc.frame, kFrameSunColour).rgb * pow(saturate(dot(n, h)), 90.0) * weather.x * flat * 0.5 * max(sun.w, 0.25);
+        }
+    }
     // The sun's shadows (G1): what the lightmap does not already darken, darkened by 45 %.
     if (FrameValue(pc.frame, kFrameShadowParams).x > 0.5) {
         color *= lerp(0.55, 1.0, FrameShadow(pc.frame, input.world, normalize(input.normal), input.viewDepth));

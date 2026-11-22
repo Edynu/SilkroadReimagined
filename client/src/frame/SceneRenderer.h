@@ -128,6 +128,8 @@ private:
     std::uint64_t shadowFrame_ = 0;
     std::uint32_t drawnSize_ = 0;
     int shadowCharacterCascades_ = 2;              // cascades characters cast into (the casters row)
+    // The near cascades the swaying plants are drawn into every frame (not cached), at most the characters' cascades.
+    static constexpr std::size_t kLiveFoliageCascades = 2;
     std::uint64_t staticGeneration_ = 0;           // counts changes of the world's static instances
     std::array<std::uint64_t, 4> drawnGeneration_{}; // each cascade's at its last drawing
     glm::vec3 shadowLight_{0, 1, 0};   // towards the light

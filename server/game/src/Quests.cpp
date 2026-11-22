@@ -384,11 +384,7 @@ bool GoalAt(const QuestGoal& g, const std::string& npc) {
 }
 } // namespace
 
-bool Quests::Finishes(const QuestDef& q, const std::string& npc) const {
-    if (!q.tiers.empty() && Contains(q.givers, npc)) return true; // any of its givers takes the exchange
-    if (!q.finisher.empty()) return q.finisher == npc;
-    return std::any_of(q.goals.begin(), q.goals.end(), [&](const QuestGoal& g) { return GoalAt(g, npc); });
-}
+bool Quests::Finishes(const QuestDef& q, const std::string& npc) const { return game::QuestFinishesAt(q, npc); }
 
 bool Quests::Involves(const QuestDef& q, const QuestRecord& r, const std::string& npc) const {
     if (!UnderWay(r)) return false;

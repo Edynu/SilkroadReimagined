@@ -1414,6 +1414,19 @@ enum class SkillUseStatus : std::uint8_t {
 // The action list's count (the original's B074 second byte): the commands the server
 // holds for the player, 0, 1 (the one running) or 2 (and one waiting). Two held: the client sends no attack and no
 // queued skill, a ground click no stop.
+// The weather where the player stands (its region's climate, game::ClimateWeather): sent on
+// entering the world, on reaching a region of another weather and when its region's weather changes.
+struct WeatherNow {
+    static constexpr MessageId kId = 0x1005;
+    std::uint8_t kind = 1; // game::WeatherKind: 1 clear, 2 rain, 3 snow
+    std::uint8_t amount = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("kind", kind);
+        v("amount", amount);
+    }
+};
+
 struct ActionHeld {
     static constexpr MessageId kId = 0x10CE;
     std::uint8_t count = 0;

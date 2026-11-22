@@ -39,7 +39,7 @@ constexpr int kSlotBack = 200, kSlotIcon = 300, kSlotName = 320, kSlotCount = 34
 constexpr const char* kSlotEmpty = "interface\\stall\\stl_slot_05.ddj";
 constexpr const char* kSlotFull = "interface\\stall\\stl_slot_02.ddj";
 // The chat module's parts (ifchatmodule.txt).
-constexpr int kChatInput = 1, kChatLines = 2, kChatPeople = 4;
+constexpr int kChatInput = 1, kChatLines = 2, kChatLinesScroll = 3, kChatPeople = 4, kChatPeopleScroll = 5;
 
 ui::Widget* ChatPart(ui::Widget* window, int id) {
     ui::Widget* module = window != nullptr ? window->Child(kChat) : nullptr;
@@ -104,7 +104,12 @@ public:
         }
         // The chat module's sample text goes.
         for (const int id : {kChatLines, kChatPeople}) {
-            if (auto* box = ui::As<ui::TextBox>(ChatPart(this, id))) box->ClearParagraphs();
+            if (auto* box = ui::As<ui::TextBox>(ChatPart(this, id))) {
+                box->ClearParagraphs();
+                // Each with its own vertical scroll (the module's GDR_CHAT_VSCROLL 3 for the lines, GDR_CHAT_USERVSCROLL
+                // 5 for the people): without it the box only ever showed its last rows.
+                box->bar = ui::As<ui::ScrollBar>(ChatPart(this, id == kChatLines ? kChatLinesScroll : kChatPeopleScroll));
+            }
         }
         if (auto* input = ui::As<ui::Edit>(ChatPart(this, kChatInput))) input->limit = 120;
         // Dropped on a slot (or the window): an item of the bag put up there, its price asked (the register box).

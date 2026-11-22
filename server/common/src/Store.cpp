@@ -574,6 +574,40 @@ std::vector<std::pair<std::int16_t, std::string>> LoadRegionAreas(Database& db, 
     return out;
 }
 
+ClimateData LoadClimates(Database& db, bool& ok) {
+    ClimateData out;
+    const QueryResult exists = db.Query("SELECT to_regclass('_refclimate') IS NOT NULL AND to_regclass('_refregion') IS NOT NULL");
+    ok = exists.Ok();
+    if (!ok || !exists.Bool(0, 0)) return out;
+    const QueryResult c = db.Query(
+        "SELECT id, initialweather, initialamount, changeweather, division, duration, durationvariance, snowfall, snowfallvariance, probsnow, "
+        "rainfall, rainfallvariance, probrain FROM _refclimate ORDER BY id");
+    ok = c.Ok();
+    if (!ok) return out;
+    for (int i = 0; i < c.Rows(); ++i) {
+        game::ClimateRow r;
+        r.id = std::int32_t(c.Int(i, 0));
+        r.initialWeather = std::uint8_t(c.Int(i, 1));
+        r.initialAmount = std::uint8_t(c.Int(i, 2));
+        r.changes = c.Int(i, 3) != 0;
+        r.division = std::uint8_t(c.Int(i, 4));
+        r.durationMs = std::int32_t(c.Int(i, 5));
+        r.durationVarianceMs = std::int32_t(c.Int(i, 6));
+        r.snowfall = std::uint8_t(c.Int(i, 7));
+        r.snowfallVariance = std::uint8_t(c.Int(i, 8));
+        r.probSnow = std::uint8_t(c.Int(i, 9));
+        r.rainfall = std::uint8_t(c.Int(i, 10));
+        r.rainfallVariance = std::uint8_t(c.Int(i, 11));
+        r.probRain = std::uint8_t(c.Int(i, 12));
+        out.climates.push_back(r);
+    }
+    const QueryResult regions = db.Query("SELECT wregionid, climate FROM _refregion WHERE climate IS NOT NULL");
+    ok = regions.Ok();
+    if (!ok) return out;
+    for (int i = 0; i < regions.Rows(); ++i) out.regionClimate[std::uint16_t(std::int16_t(regions.Int(i, 0)))] = std::int32_t(regions.Int(i, 1));
+    return out;
+}
+
 // --- Login tickets ----------------------------------------------------------------------------
 
 std::vector<std::uint8_t> IssueTicket(Database& db, std::int64_t account, std::uint16_t server, int seconds, std::string& error) {

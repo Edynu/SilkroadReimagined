@@ -1450,6 +1450,7 @@ void DealBox::Created(ui::Interface& ui) {
     }
     if (count_ != nullptr) {
         count_->numeric = true;
+        count_->emptyAllowed = true; // deleted to nothing, a new count typed (the user's report 2026-11-21)
         count_->limit = 5;
         count_->passKeys = true; // Enter: the deal; Escape: Cancel
     }
@@ -1505,9 +1506,11 @@ void DealBox::Update(ui::Frame&) {
         if ((context_.stall == nullptr || !context_.stall->Mine()) && ui_ != nullptr) ui_->Close(this);
         return;
     }
-    if (count_ != nullptr && deal_.kind != Deal::Kind::Buyback) {
-        const int n = Count();
-        if (count_->text() != std::to_string(n) && !count_->text().empty()) count_->SetValue(std::to_string(n));
+    // Only a count over the most is brought back while typing: an empty box or a 0 stays as typed (the deal takes 1 at
+    // the least), so 50 can be deleted and 28 typed.
+    if (count_ != nullptr && deal_.kind != Deal::Kind::Buyback && !count_->text().empty()) {
+        const int typed = std::atoi(count_->text().c_str());
+        if (typed > std::max(1, deal_.most)) count_->SetValue(std::to_string(std::max(1, deal_.most)));
     }
     // A buy: the count times the price; a sale: the price of one; a buy-back: what it costs.
     if (price_ != nullptr) {

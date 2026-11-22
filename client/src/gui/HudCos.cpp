@@ -472,6 +472,22 @@ public:
             });
             return true;
         }
+        // Ctrl + click on an item of a pet's bag: into the inventory's first free place at once (the user's call 2026-11-21;
+        // a transport's goods stay in its bag).
+        if (n.kind == ui::Notice::Kind::Clicked && n.value == 2 && n.source != nullptr && pages_[kBag] != nullptr && n.source->parent() == pages_[kBag] &&
+            n.control >= kSlotBase && n.control < kSlotBase + proto::kCosBagPage && c_.state != nullptr) {
+            const auto* slot = ui::As<ui::Slot>(n.source);
+            const HudContext::CosShown* shown = Picked();
+            if (slot != nullptr && !slot->icon.empty() && shown != nullptr && shown->kind != std::uint8_t(game::CosKind::Transport)) {
+                const int free = c_.state->inventory.FreeBagPlace();
+                if (free < 0) {
+                    c_.state->Post(game::GameMessage::Kind::General, c_.Text("UIIT_MSG_STRGERR_INVENTORY_FULL"), c_.time);
+                } else {
+                    Move(std::uint8_t(page_ * proto::kCosBagPage + n.control - kSlotBase), std::uint8_t(free), true, false);
+                }
+            }
+            return true;
+        }
         // A click on an item of the bag: the proxy picked up in its stead.
         if (n.kind == ui::Notice::Kind::Clicked && n.value == 0 && n.source != nullptr && pages_[kBag] != nullptr && n.source->parent() == pages_[kBag] &&
             n.control >= kSlotBase && n.control < kSlotBase + proto::kCosBagPage && proxy_ != nullptr && c_.hud != nullptr && c_.hud->interface() != nullptr) {

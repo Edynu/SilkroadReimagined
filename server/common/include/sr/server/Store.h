@@ -21,6 +21,7 @@
 #include "sr/game/Items.h"
 #include "sr/game/Jobs.h"
 #include "sr/game/Potions.h"
+#include "sr/game/Weather.h"
 #include "sr/server/Database.h"
 #include "sr/server/InstanceStore.h"
 
@@ -175,6 +176,13 @@ std::vector<GameServerInfo> ShardsOf(const std::vector<GameServerInfo>& servers)
 std::optional<GameServerInfo> ChooseLobbyServer(const std::vector<GameServerInfo>& servers, std::uint16_t row, std::uint16_t lobby);
 // The game's area name of every region (_RefRegion; empty on a database without it).
 std::vector<std::pair<std::int16_t, std::string>> LoadRegionAreas(Database& db, bool& ok);
+// The original's climates (_RefClimate) and each region's (_RefRegion.Climate): the weather's (game::ClimateWeather).
+// Empty on a database without them.
+struct ClimateData {
+    std::vector<game::ClimateRow> climates;
+    std::unordered_map<std::uint16_t, std::int32_t> regionClimate; // region id -> climate id
+};
+ClimateData LoadClimates(Database& db, bool& ok);
 
 // --- Login tickets ----------------------------------------------------------------------------
 

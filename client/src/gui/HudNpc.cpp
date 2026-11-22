@@ -77,6 +77,7 @@ void DivideBox::Created(ui::Interface& ui) {
     }
     if (auto* edit = ui::As<ui::Edit>(Child(17))) {
         edit->numeric = true;
+        edit->emptyAllowed = true; // deleted to nothing, a new count typed
         edit->limit = 5;
         edit->passKeys = true; // Enter: Confirm; Escape: Cancel
     }
@@ -758,7 +759,7 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
         // Finishing it here with a reward to choose: the choice first.
         const game::QuestDef* q = context_.quests != nullptr ? context_.quests->Find(choice.destination) : nullptr;
         bool finishing = false;
-        if (q != nullptr && q->finisher == npcCodename_) {
+        if (q != nullptr && game::QuestFinishesAt(*q, npcCodename_)) {
             const auto under = context_.quests->Active().find(choice.destination);
             finishing = under != context_.quests->Active().end() && under->second.status == proto::QuestStatus::Achieved;
         }

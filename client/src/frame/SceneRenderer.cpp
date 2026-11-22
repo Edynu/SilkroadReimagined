@@ -421,16 +421,25 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
             live[i] = drawnShadows_.viewProj[i];
             liveSpecks[i] = speck * drawnShadows_.texels[int(i)];
         }
+        // The swaying plants (foliage parts) of the near cascades are drawn every frame with the characters: in the
+        // cached atlas they would stand still until the cascade is drawn again (the sway at the sun's few redraws a
+        // second). The far cascades keep them cached (a sway there is under a texel).
+        const int liveFoliage = int(std::min<std::size_t>(kLiveFoliageCascades, liveCount));
+        std::uint32_t cachedFoliage = 0;
+        for (std::size_t k = 0; k < shadowRedraw_.size(); ++k) {
+            if (shadowRedraw_[k] >= liveFoliage) cachedFoliage |= 1u << k;
+        }
         staticShadowLists_ = {};
         if (!shadowRedraw_.empty()) {
             staticShadowLists_ = staticShadowPass_.AddCulling(graph, worldInstances, meshes, world_, assets_->Meshes(),
                                                               std::span<const glm::mat4>(redrawn.data(), shadowRedraw_.size()), false,
-                                                              -1.0e30f, std::span<const float>(specks.data(), shadowRedraw_.size()), 0, 4);
+                                                              -1.0e30f, std::span<const float>(specks.data(), shadowRedraw_.size()), 0, 4,
+                                                              cachedFoliage);
         }
         shadowLists_ = shadowPass_.AddCulling(graph, worldInstances, meshes, world_, assets_->Meshes(),
                                               std::span<const glm::mat4>(live.data(), std::max<std::size_t>(liveCount, 1)), skinning, -1.0e30f,
                                               std::span<const float>(liveSpecks.data(), std::max<std::size_t>(liveCount, 1)),
-                                              std::uint32_t(liveCount), 0);
+                                              std::uint32_t(liveCount), 0, (1u << liveFoliage) - 1u);
         if (skinning) {
             shadowPass_.AddSkinning(graph, shadowLists_, worldInstances, meshes, geometry, palettes, view.worldPalettes, assets_->Geometry(),
                                     world_, assets_->Meshes());
@@ -552,7 +561,11 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
     modern.eye = eye_;
     modern.sunDirection = view.sky.sunPosition;
     modern.sunColour = view.sky.sunColor;
-    modern.sunUp = view.sky.sunVisible && view.sky.sunPosition.y >= 700.0f;
+    // The sun's weight in the Modern effects (its shafts, its light in the fog): fading with its height, not on or off.
+    {
+        const float height = glm::length(view.sky.sunPosition) > 0.0f ? glm::normalize(view.sky.sunPosition).y : -1.0f;
+        modern.sunWeight = view.sky.sunVisible ? glm::smoothstep(-0.02f, 0.12f, height) : 0.0f;
+    }
     modern.timeOfDay = view.lighting.timeOfDay;
     modern.width = width_;
     modern.height = height_;
@@ -600,17 +613,23 @@ void SceneRenderer::AddProbe(gfx::RenderGraph& graph, gfx::RenderGraph::Resource
 }
 
 void SceneRenderer::PrepareShadows(const SceneView& view, int quality) {
-    // The light: the sun or the moon, whichever stands higher, at every hour (2026-11-13, the user: from 0.2 to 0.25
-    // and 0.74 to 0.8, when the moon has set and the sun not risen or the other way, the cascades gave way to the
-    // circles under the characters). One just under the horizon still casts, weakly (its direction is held at 25
-    // degrees below), and through the hand-over the strength fades to nothing and back as the two cross, so the
-    // shadows do not jump from one side of the sky to the other.
+    // The light, at every hour (there are shadows all night): the sun first, as long as it stands above the horizon
+    // (a little under it, its last light), its shadows fading as it sets; then the moon, its shadows fading in once the
+    // sun is down. At the hand-over both are at nothing, so the shadows never jump from one side of the sky to the
+    // other; at dawn the same backwards. (The moon took over as soon as it stood higher than the sun, at the sun's full
+    // strength minus a short fade: the shadows flipped while the sun was still up; 2026-11-21, the user.)
     const auto unit = [](const glm::vec3& p) { return glm::length(p) > 0.0f ? glm::normalize(p) : glm::vec3(0.0f, -1.0f, 0.0f); };
     const glm::vec3 sun = unit(view.sky.sunPosition), moon = unit(view.sky.moonPosition);
-    const bool bySun = sun.y >= moon.y;
+    constexpr float kSunGone = -0.03f, kNight = -0.10f; // the sun's height: its last light, full night
+    const bool bySun = sun.y > kSunGone;
     glm::vec3 toLight = bySun ? sun : moon;
-    float strength = bySun ? std::max(glm::smoothstep(0.02f, 0.25f, sun.y), 0.25f) : 0.45f * std::max(glm::smoothstep(0.02f, 0.25f, moon.y), 0.35f);
-    strength *= std::clamp(std::abs(sun.y - moon.y) / 0.08f, 0.0f, 1.0f);
+    float strength = 0.0f;
+    if (bySun) {
+        strength = glm::smoothstep(kSunGone, 0.25f, sun.y);
+    } else {
+        const float night = 1.0f - glm::smoothstep(kNight, kSunGone, sun.y); // 0 as the sun goes, 1 once it is gone
+        strength = 0.45f * std::max(glm::smoothstep(0.02f, 0.25f, moon.y), 0.35f) * night;
+    }
     // Never lower than 25 degrees: long dawn shadows would cross whole regions.
     constexpr float kLowest = 0.4226f;
     if (toLight.y < kLowest) {
@@ -804,7 +823,7 @@ void SceneRenderer::Draw(rhi::CommandList& cmd, const SceneView& view, const Orb
                         Parts::Translucent);
     } else if (frame != 0) {
         // The original's order ("Water"): what stands below the water level, the water,
-        // then the rest and the entities.
+        // then the rest (the entities before it, seen through it under the surface).
         worldPass_.Draw(cmd, viewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::BeforeWater);
         if (terrainPass_.VisibleWater() != 0) {
             // A frame every 100 ms, as the original's (it counts wall-clock milliseconds).
@@ -969,9 +988,19 @@ std::uint64_t SceneRenderer::FrameConstants(const SceneView& view, bool shadows,
     // The Modern rows the world shaders read (not the overlay's own camera: its characters keep
     // the original's light).
     if (shadows) {
-        const float rain = std::min(1.0f, static_cast<float>(view.weather.rain.size()) / 400.0f);
         constants.modern = glm::vec4(video_.characterLighting != 0 ? 1.0f : 0.0f, video_.foliageSway != 0 ? 1.0f : 0.0f,
-                                     video_.weather == 2 ? rain : 0.0f, video_.lightEffects > 0 ? 1.0f : 0.0f);
+                                     video_.weather == 2 ? view.weather.ground.x : 0.0f, video_.lightEffects > 0 ? 1.0f : 0.0f);
+        // The Modern weather's ground (wet, snow lying): none with the Original's or the weather off.
+        if (video_.weather == 2) {
+            constants.weather = view.weather.ground;
+            // A shower's mist: the linear fog's far end comes in by up to a quarter with the rain falling.
+            const float rain = view.weather.ground.z;
+            if (rain > 0.0f && constants.fogRange.y > constants.fogRange.x) {
+                const float end = constants.fogRange.x + (constants.fogRange.y - constants.fogRange.x) * (1.0f - 0.25f * rain);
+                constants.fogRange.y = end;
+                constants.fogRange.z = 1.0f / std::max(end - constants.fogRange.x, 1.0f);
+            }
+        }
     }
     if (waterCopy) {
         constants.waterCopy.x = float(device_->BindlessIndex(waterCopy_));

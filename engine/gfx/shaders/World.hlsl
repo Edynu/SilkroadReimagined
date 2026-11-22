@@ -242,8 +242,23 @@ float3 ObjectColor(VSOutput input, float3 albedo, float3 normal, out float shado
     if (cascaded && !glowing) color *= lerp(0.5, 1.0, shadow);
     // Modern: the lit windows above 1, so the bloom spills their light.
     if (glowing && modern.w > 0.5) color *= 2.2;
-    // Wet ground (Modern weather): what faces up darkens under the rain.
-    if (modern.z > 0.0 && input.skinned == 0) color *= lerp(1.0, 0.7, modern.z * saturate(normal.y * 2.0 - 0.6));
+    // The Modern weather (0 with the Original's), on the map's objects (not the characters): snow lying on what faces
+    // up, lit as the object is; wet, what faces up darkens under the rain and takes the light's glint.
+    const float4 weather = FrameValue(pc.frame, kFrameWeather);
+    if (input.skinned == 0 && !glowing) {
+        if (weather.y > 0.0) {
+            // At most half, the object's own pattern kept under it.
+            const float pattern = saturate(dot(albedo, float3(0.299, 0.587, 0.114)) * 1.6);
+            color = lerp(color, saturate(float3(0.92, 0.94, 0.98) * saturate(lit) * lerp(0.75, 1.1, pattern)), weather.y * saturate(normal.y * 2.5 - 1.4) * 0.5);
+        }
+        if (weather.x > 0.0) {
+            const float up = saturate(normal.y * 2.0 - 0.6);
+            color *= lerp(1.0, 0.7, weather.x * up);
+            const float3 v = normalize(FrameValue(pc.frame, kFrameCamera).xyz - input.world);
+            const float3 h = normalize(normalize(light + float3(0.0, 1e-4, 0.0)) + v);
+            color += FrameValue(pc.frame, kFrameSunColour).rgb * pow(saturate(dot(normal, h)), 70.0) * weather.x * up * 0.35;
+        }
+    }
     return color;
 }
 

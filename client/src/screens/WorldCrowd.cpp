@@ -187,7 +187,24 @@ void PlanPlayer(Rng& rng, const CharacterData& t, const assets::FileSystem& fs, 
 bool PlanChosen(const CharacterData& t, const assets::FileSystem& fs, const std::vector<std::string>& items, WalkerPlan& out) {
     std::vector<std::uint32_t> worn;
     int race = -1;
+    // Besides the codenames: "woman", "height:N", "volume:N" (0..4) for the wearer's body.
+    bool male = true;
+    int height = 2, volume = 2;
+    std::size_t figureIndex = 0;
     for (const std::string& code : items) {
+        if (code.starts_with("figure:")) {
+            figureIndex = std::size_t(std::max(0, std::atoi(code.c_str() + 7)));
+            continue;
+        }
+        if (code == "woman") {
+            male = false;
+            continue;
+        }
+        if (code.starts_with("height:") || code.starts_with("volume:")) {
+            const int n = std::clamp(std::atoi(code.c_str() + 7), 0, 4);
+            (code[0] == 'h' ? height : volume) = n;
+            continue;
+        }
         const assets::ItemRow* row = t.items.Find(std::string_view(code));
         if (row == nullptr || assets::WornModels(fs, t.items, *row).empty()) {
             core::LogWarning("world: crowd: --walker-items: {} cannot be worn", code);
@@ -198,11 +215,11 @@ bool PlanChosen(const CharacterData& t, const assets::FileSystem& fs, const std:
     }
     if (worn.empty()) return false;
     using Race = game::CreationRules::Race;
-    const std::vector<std::uint32_t> figures = t.rules.creation.FiguresOf(race == 0 ? Race::China : Race::Europe, true);
+    const std::vector<std::uint32_t> figures = t.rules.creation.FiguresOf(race == 0 ? Race::China : Race::Europe, male);
     if (figures.empty()) return false;
     assets::DressedCharacter dressed;
     std::string error;
-    if (!assets::Dress(fs, t.characters, t.items, figures.front(), worn, assets::PackShape(2, 2), dressed, error)) {
+    if (!assets::Dress(fs, t.characters, t.items, figures[std::min(figureIndex, figures.size() - 1)], worn, assets::PackShape(height, volume), dressed, error)) {
         core::LogWarning("world: crowd: --walker-items: {}", error);
         return false;
     }

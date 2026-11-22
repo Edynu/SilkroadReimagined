@@ -112,6 +112,10 @@ void Hud::UseQuickSlot(int index, double now, bool frame) {
 }
 
 void Hud::Place(ui::Vec2 screen) {
+    // A minimised window's 0 x 0 (an Alt+Tab out of full screen): nothing placed for it. Pulled onto that screen
+    // every window went to the left of and above it, and the ones kept where they stand (the player's bars, the item
+    // mall's button) never came back on the restore (the user's report 2026-11-22).
+    if (screen.x < 64.0f || screen.y < 64.0f) return;
     screen_ = screen;
     if (ui_ == nullptr) return;
     const float W = screen.x, H = screen.y;

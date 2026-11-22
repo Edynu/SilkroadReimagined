@@ -34,7 +34,7 @@
 //                           the walkers (--characters N): --walker-players 0..1 --walker-skill-every S
 //                           --walker-monsters K (K monster kinds from characterdata); a close-up:
 //                           --walker-at X,Z (the first stands there, the second 60 east as its target)
-//                           [--walker-items ITEM_..,ITEM_..] [--walker-skill SKILL_..] (its items, the one skill it casts)
+//                           [--walker-items ITEM_..,ITEM_..[,woman][,height:N][,volume:N][,figure:N]] [--walker-skill SKILL_..] (its items, the one skill it casts)
 //   dungeon (C4d): --dungeon 0x8001|0x8009 (or the dungeoninfo id) --block N --camera x,y,z,yaw,pitch --glow false
 //   scene benchmark (GPU-driven world): --instances N --models a.bsr,b.bsr
 //   --asset-check bsr,bms,ddj [--asset-window N] [--asset-delay S]   stream every file of those types, report, exit

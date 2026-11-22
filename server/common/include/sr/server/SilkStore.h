@@ -27,9 +27,9 @@ struct SilkBalance {
     bool operator==(const SilkBalance&) const = default;
 };
 
-// Every account's silk at its registration (ours, the user's call 2026-11-14: "every character has after registration
-// and the ones in db now get 10000 silks"; given per account, as the original keeps silk).
-constexpr std::uint32_t kStartingSilk = 10000;
+// Every account's silk at its registration (ours; given per account, as the original keeps silk). 10,000 from
+// 2026-11-14; none for new accounts from 2026-11-21 (the user's call, "for now"): the accounts made before keep theirs.
+constexpr std::uint32_t kStartingSilk = 0;
 
 // The reasons of the original's silk line (0x3154) and its `sk_silkbuylist.silk_reason`.
 enum class SilkReason : std::uint8_t {

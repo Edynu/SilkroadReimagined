@@ -870,6 +870,13 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         if (tables_ && tables_->Usable()) BuffEffects(buff->token, buff->skill, true);
     } else if (const auto* held = std::get_if<proto::ActionHeld>(&event)) {
         actionsHeld_ = held->count;
+    } else if (const auto* weather = std::get_if<proto::WeatherNow>(&event)) {
+        // The weather where it stands (its region's climate); the world eases into it over 5 s. Kept for the next
+        // place's world too (a teleport makes a new one).
+        const std::uint8_t kind = std::uint8_t(std::clamp<int>(weather->kind, 1, 3));
+        if (kind != weather_.kind) core::LogInfo("game: weather {} (amount {})", kind == 1 ? "clear" : kind == 2 ? "rain" : "snow", weather->amount);
+        weather_ = {kind, weather->amount};
+        if (world_) world_->SetWeather(game::WeatherKind(weather_.kind), weather_.amount);
     } else if (const auto* gone = std::get_if<proto::BuffRemoved>(&event)) {
         // A buff's token: the states' entries (their token their kind) and the timed jobs' are not its (an imbue's token
         // 5 took the poison's icon off the board; the user's report 2026-11-13).
@@ -1259,6 +1266,7 @@ void PlayScreen::Arrive(ScreenContext& context, FrameSnapshot& snapshot) {
     originX_ = at.region & 0xFF;
     originY_ = at.region >> 8;
     world_ = std::make_unique<WorldScreen>(WorldScreen::Backdrop{originX_, originY_, kSlots + 1 + kMarkerSlots}); // + the zone markers
+    world_->SetWeather(game::WeatherKind(weather_.kind), weather_.amount);
     stageEffects_.Clear();
     stageEffects_.SetCompanionSlots(kWalkerSlots, kCompanionSlots);
     stageEffects_.struckBy = [this](std::size_t casterSlot) {

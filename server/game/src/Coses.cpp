@@ -1146,6 +1146,15 @@ void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport) 
     }
 }
 
+void Coses::OwnerDied(std::uint32_t owner) {
+    const auto it = owned_.find(owner);
+    if (it == owned_.end()) return;
+    const std::vector<std::uint32_t> list = it->second;
+    for (std::uint32_t entity : list) {
+        if (const auto c = coses_.find(entity); c != coses_.end() && c->second.ridden) Dismiss(entity, false);
+    }
+}
+
 void Coses::BringTransport(std::uint32_t owner, const proto::WorldPosition& at) {
     const auto it = owned_.find(owner);
     if (it == owned_.end()) return;

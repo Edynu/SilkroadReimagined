@@ -259,7 +259,7 @@ void Edit::Keyboard(Frame& frame) {
         ++caret_;
         changed = true;
     }
-    if (numeric && value.empty() && changed) value = "0";
+    if (numeric && value.empty() && changed && !emptyAllowed) value = "0";
     if (changed) {
         SetText(value);
         Notify(Notice::Kind::TextChanged);

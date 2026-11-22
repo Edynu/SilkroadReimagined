@@ -950,6 +950,10 @@ void Skills::Fight(SkillCaster& caster, Clock::time_point now) {
     // Walked into reach (the skill's range, else the weapon's, plus both bodies), then a swing each
     // time the last one is over; each swing's hits land a little into it (ours: the clips' hit
     // moments are the client's; a swing's share 0.3, then 0.3 apart).
+    // The action list's count told whenever it changed since, whatever changed it (a swing's or a cast's time over, a
+    // walk or a pick-up ending the fight, a waiting skill dropped): a count left at 2 kept the client from sending any
+    // skill, the player clicking again and again (the user's report 2026-11-21).
+    TellHeld(caster, now);
     if (!caster.dead) Companions(caster, now);
     // The swings' mana at their impact (no more than it has then).
     if (!caster.state.pendingCosts.empty()) {

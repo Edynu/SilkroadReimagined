@@ -51,10 +51,12 @@ public:
                      const GpuScene& scene, const MeshTable& table, const glm::mat4& viewProj, bool skinning,
                      float waterLevel);
     // Several views at once (Limits::views of them at most): each its own lists. `minRadius`: per
-    // view, parts smaller than it are left out; skinned instances go to the first `skinnedViews`.
+    // view, parts smaller than it are left out; skinned instances go to the first `skinnedViews`, static ones to the
+    // first `staticViews`, except their swaying parts (kMaterialFoliage), which go to the views of `foliageViews`' bits.
     Lists AddCulling(RenderGraph& graph, RenderGraph::Resource instances, RenderGraph::Resource meshes, const GpuScene& scene,
                      const MeshTable& table, std::span<const glm::mat4> views, bool skinning, float waterLevel,
-                     std::span<const float> minRadius = {}, std::uint32_t skinnedViews = 4, std::uint32_t staticViews = 4);
+                     std::span<const float> minRadius = {}, std::uint32_t skinnedViews = 4, std::uint32_t staticViews = 4,
+                     std::uint32_t foliageViews = 0xFFFFFFFFu);
     // Adds the skinning of what the culling listed, with the matrices in `palette` (a buffer the
     // game wrote this frame; `paletteResource` its import).
     void AddSkinning(RenderGraph& graph, const Lists& lists, RenderGraph::Resource instances, RenderGraph::Resource meshes,

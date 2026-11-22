@@ -27,7 +27,8 @@ static const uint kFrameSunColour = 656;
 static const uint kFrameModern = 672;         // x character lighting, y foliage sway, z wet ground
 static const uint kFrameWaterCopy = 688;      // x the scene's copy (rgb colour, a view depth), y 1 with one
 static const uint kFrameLightTiles = 704;     // tiles across, tile size, the masks' offset, tiles down
-static const uint kFramePointLights = 720;    // position, diffuse, ambient, attenuation (a0, a1, a2)
+static const uint kFrameWeather = 720;        // Modern: x wetness, y snow lying, z rain now (0..1)
+static const uint kFramePointLights = 736;    // position, diffuse, ambient, attenuation (a0, a1, a2)
 
 float4 FrameValue(uint64_t frame, uint offset) { return vk::RawBufferLoad<float4>(frame + offset, 16); }
 
@@ -109,6 +110,8 @@ float3 FrameEffectLight(uint64_t frame, float3 world, float3 n, float2 pixel) {
     if (tiles.y < 1.0 || tile.x >= uint(tiles.x) || tile.y >= uint(tiles.w)) return 0.0;
     // 128 lights a tile: four words of bits (SceneRenderer's kLightMaskWords).
     const uint4 mask = vk::RawBufferLoad<uint4>(frame + uint(tiles.z) + (tile.y * uint(tiles.x) + tile.x) * 16, 16);
+    // The brightest light at the point (per channel), not their sum: a heap of drops, each with its glow's light, would
+    // add up to white over the ground and their names (the user's report 2026-11-21); one light shines as it did.
     float3 sum = 0.0;
     // Bounded, without `continue`. (The Donwhang cave's hang was a `discard` before this loop in the object shaders,
     // World.hlsl's FadeCut note.)
@@ -126,7 +129,7 @@ float3 FrameEffectLight(uint64_t frame, float3 world, float3 n, float2 pixel) {
                     const float dist = sqrt(dist2);
                     const float fall = 1.0 - dist / at.w;
                     const float wrap = dist > 1e-3 ? saturate(dot(n, d / dist) * 0.6 + 0.4) : 1.0;
-                    sum += FrameValue(frame, first + i * 32 + 16).rgb * fall * fall * wrap;
+                    sum = max(sum, FrameValue(frame, first + i * 32 + 16).rgb * fall * fall * wrap);
                 }
             }
         }

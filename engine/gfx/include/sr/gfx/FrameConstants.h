@@ -83,11 +83,14 @@ struct FrameConstants {
     // view depth), for its reflections and refraction; y 1 when there is one. z: the effects'
     // lights (V2) following the point lights, 32 bytes each (position, radius; colour x intensity).
     glm::vec4 waterCopy{0.0f};
-    // 720: the effects' lights by screen tile: x tiles across, y the tile's size in pixels, z where
+    // 704: the effects' lights by screen tile: x tiles across, y the tile's size in pixels, z where
     // the tiles' masks start (bytes from the constants; a uint2 per tile, bit i: effect light i).
     glm::vec4 lightTiles{0.0f};
+    // 720: the Modern weather (0 with the Original's): x the ground's wetness, y the snow lying, z the rain falling
+    // now (each 0..1; the wetness and the snow build up and go slowly, WorldScreen's).
+    glm::vec4 weather{0.0f};
 };
-static_assert(sizeof(FrameConstants) == 720);
+static_assert(sizeof(FrameConstants) == 736);
 
 FrameConstants MakeFrameConstants(const glm::mat4& viewProj, const glm::vec3& camera, const SceneLighting& lighting, double seconds,
                                   std::size_t pointLights = 0);

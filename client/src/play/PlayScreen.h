@@ -225,6 +225,8 @@ private:
     std::uint32_t heldSkill_ = 0;
     double heldUntil_ = 0; // the latest it waits (5 s: a skill that hands on to the attack would hold it for ever)
     double HeldUntil(double now) const;
+    // The weather the server last told (proto::WeatherNow), given to each new place's world.
+    game::proto::WeatherNow weather_;
     // The action list's count the server told (proto::ActionHeld): two held, an attack
     // click and a queued skill are not sent, a ground click sends no stop; and when the player last
     // sent an attack or a skill (a walk kept waits 500 ms after it).

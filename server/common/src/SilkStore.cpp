@@ -111,6 +111,7 @@ SilkGrant GrantSilk(Database& db, std::int64_t account, std::int64_t amount, Sil
 }
 
 bool GiveStartingSilk(Database& tx, std::int64_t account, std::string& error) {
+    if (kStartingSilk == 0) return true; // none given (the account's silk row comes with its first grant)
     SilkBalance after;
     return GrantSilkIn(tx, account, kStartingSilk, SilkKind::Own, SilkReason::Bought, std::format("START-{}", account),
                        "The starting silk of every account (ours)", after, error, false) == SilkGrant::Done;

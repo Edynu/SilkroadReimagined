@@ -475,4 +475,9 @@ double QuestLevelScale(int playerLevel, int monsterLevel);
 std::string WriteQuest(const QuestDef& q);
 bool ParseQuest(std::string_view text, QuestDef& out, std::string& error);
 
+// Whether `npc` takes the quest back (the server's hand-in and the client's reward window alike): any of its givers for
+// a quest of tiers, its finisher, or with none the NPC of a goal it takes (a delivery's, a talk's or a capture's, or
+// one of the talk's others: the Beginner's Assistant's merchants).
+bool QuestFinishesAt(const QuestDef& q, std::string_view npc);
+
 } // namespace sr::game

@@ -234,7 +234,7 @@ public:
     void SetModel(std::uint32_t entity, std::uint32_t model);
     // A COS's name (a pet's, once named) from now on: newcomers see it in its appearance.
     void SetName(std::uint32_t entity, std::string name);
-    // Its walk and run speeds from its next leg on (0: the configured players'): a rider takes its mount's.
+    // Its walk and run speeds (0: the configured players'), a walk under way at them at once: a rider takes its mount's.
     void SetSpeeds(std::uint32_t entity, float walkSpeed, float runSpeed);
     // `mount` carries `rider` (0: nothing does): it is put where the rider stands and from then on walks every leg
     // the rider walks (MoveTo, Blink), so the two stay together and the mount's observers see it go.
@@ -279,8 +279,10 @@ public:
     void SetExtra(std::uint32_t entity, game::proto::MessageId id, std::vector<std::byte> payload);
     // A player's health and mana and their most, as its next WorldEntered (a teleport) tells it.
     void SetVitals(std::uint32_t entity, std::uint32_t hp, std::uint32_t maxHp, std::uint32_t mp, std::uint32_t maxMp);
-    // Its run speed times `factor` from its next leg on (a speed buff: 2 for +100 %).
+    // Its run speed times `factor` (a speed buff: 2 for +100 %): a walk under way goes on at it at once (Resume).
     void SetSpeedFactor(std::uint32_t entity, float factor);
+    // A walk under way started again from where it stands to the same end, at its speeds now (told as a new leg).
+    void Resume(std::uint32_t entity);
     // Its moves at its walk speed from its next leg on (a player's walk mode: the Action page's Walk / Run).
     void SetWalking(std::uint32_t entity, bool walking);
     void ForEachPlayer(const std::function<void(std::int64_t character, const Place& place)>& visit) const;

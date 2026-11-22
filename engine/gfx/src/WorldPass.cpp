@@ -43,9 +43,11 @@ struct CullConstants {
     std::uint32_t staticViews = 4;
     float eye[3]{};
     float minAngle = 0.0f;
+    std::uint32_t foliageViews = 0xFFFFFFFFu; // the views a static instance's swaying parts go to (Cull.hlsl)
 };
 static_assert(offsetof(CullConstants, cutoutBucket) == 484);
 static_assert(offsetof(CullConstants, eye) == 496 && offsetof(CullConstants, minAngle) == 508);
+static_assert(offsetof(CullConstants, foliageViews) == 512);
 static_assert(offsetof(CullConstants, minRadius) == 464);
 static_assert(offsetof(CullConstants, skinnedViews) == 480);
 static_assert(offsetof(CullConstants, views) == 160);
@@ -203,7 +205,7 @@ WorldPass::Lists WorldPass::AddCulling(RenderGraph& graph, RenderGraph::Resource
 WorldPass::Lists WorldPass::AddCulling(RenderGraph& graph, RenderGraph::Resource instances, RenderGraph::Resource meshes,
                                        const GpuScene& scene, const MeshTable& table, std::span<const glm::mat4> views, bool skinning,
                                        float waterLevel, std::span<const float> minRadius, std::uint32_t skinnedViews,
-                                       std::uint32_t staticViews) {
+                                       std::uint32_t staticViews, std::uint32_t foliageViews) {
     Lists lists;
     lists.commands = graph.ImportBuffer(commands_, "draw commands");
     lists.counts = graph.ImportBuffer(counts_, "draw counts");
@@ -225,6 +227,7 @@ WorldPass::Lists WorldPass::AddCulling(RenderGraph& graph, RenderGraph::Resource
     for (std::size_t v = 0; v < minRadius.size() && v < 4; ++v) constants.minRadius[v] = minRadius[v];
     constants.skinnedViews = skinnedViews;
     constants.staticViews = staticViews;
+    constants.foliageViews = foliageViews;
     std::memcpy(constants.eye, &sizeCullEye_[0], sizeof(constants.eye));
     constants.minAngle = sizeCullAngle_;
     constants.cutoutBucket = limits_.depthOnly ? 1u : 0u;
