@@ -428,9 +428,19 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                                kind == game::ItemKind::Accessory;
         return std::uint8_t(row->rarity | (equipment && !item.options.empty() ? 1 : 0));
     }
+    // A quest or event item (3/3/9) on the ground: the name of the player it belongs to, which the 1.188 client shows in
+    // brackets after the item's (upstream's review 2026-11-22; whose name the original sends for these is not known:
+    // ours, its owner's).
+    static std::string_view OwnedItemName(const assets::ItemRow& row, std::string_view owner) {
+        return row.typeId[0] == 3 && row.typeId[1] == 3 && row.typeId[2] == 9 ? owner : std::string_view();
+    }
     void DropLoot(const proto::WorldPosition& at, std::int64_t owner, std::vector<DropTable::Drop> drops) {
         std::uniform_real_distribution<float> turn(0.0f, 6.2831853f);
         const proto::FlatPosition centre = proto::ToFlat(at);
+        std::string ownerName;
+        for (const auto& [peerId, p] : players) {
+            if (owner != 0 && p.selected == owner && p.entity != 0) ownerName = p.name;
+        }
         for (std::size_t i = 0; i < drops.size(); ++i) {
             DropTable::Drop& d = drops[i];
             std::uint32_t model = d.item.refId != 0 ? d.item.refId : GoldModel(d.gold);
@@ -442,7 +452,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             // Specialty goods carry their owner's name, the alias they were bought under (the user's account of the
             // original, 2026-11-22: its owner's name shown on them).
             const assets::ItemRow* row = d.item.refId != 0 && config.rules->items ? config.rules->items->Find(d.item.refId) : nullptr;
-            const std::string_view name = row != nullptr && game::IsSpecialtyGood(*row) ? std::string_view(d.item.creator) : std::string_view();
+            const std::string_view name = row == nullptr                   ? std::string_view()
+                                          : game::IsSpecialtyGood(*row) ? std::string_view(d.item.creator)
+                                                                        : OwnedItemName(*row, ownerName);
             const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, d.item.plus, GroundState(d.item), name);
             GroundItem g{std::move(d.item), d.gold, owner, Clock::now() + kDropOwned, Clock::now() + kGroundLifetime};
             groundExpiry.push({g.expires, id});
@@ -3513,6 +3525,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void CosTransportGone(std::uint32_t owner) override {
         if (trades) trades->CargoChanged(owner); // its goods went with it: no stars
     }
+    void CosTransportBack(std::uint32_t owner) override {
+        if (trades) trades->CargoChanged(owner); // its goods count again: their stars, the bandits' caravan
+    }
     bool CosTown(std::uint16_t region) const override { return BanditTown(region); }
 
     // --- The jobs' experience and rewards ------------------------------------------------
@@ -4630,7 +4645,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::uniform_real_distribution<float> turn(0.0f, 6.2831853f), spread(-6.0f, 6.0f);
         const proto::FlatPosition c = proto::ToFlat(where->position);
         const proto::WorldPosition there = proto::FromFlat({c.x + spread(groundRandom), c.z + spread(groundRandom)}, where->position.y);
-        const std::uint32_t id = world->AddGroundItem(row->refObjId, there, turn(groundRandom), 1, 0);
+        const std::uint32_t id = world->AddGroundItem(row->refObjId, there, turn(groundRandom), 1, 0, 0, OwnedItemName(*row, p->name));
         GroundItem g{NewItem(*row, 1), 0, p->selected, Clock::now() + kGroundLifetime, Clock::now() + kGroundLifetime, true};
         groundExpiry.push({g.expires, id});
         ground[id] = std::move(g);
@@ -5232,8 +5247,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
     // Takes a player somewhere: on this server a teleport, in another's part of the world a move there.
     // `withTransport`: its transport comes along (the thieves' town scroll, a gate's or a ferry's link that allows one, a
-    // teleport zone's; on this server only: a move to another game server leaves it). A transport left behind drops its
-    // goods where it stands (Coses::Dismiss).
+    // teleport zone's; on this server only: a move to another game server leaves it). A transport left behind goes with
+    // its goods (only a kill or a termination drops them: Coses::Dismiss).
     void TravelTo(std::uint64_t peerId, PlayerWorld& player, const proto::WorldPosition& to, bool withTransport = false) {
         if (exchanges) exchanges->End(player.entity); // a teleport ends its exchange (ours: the original's busy player takes no gate)
         if (alchemy) alchemy->End(player.entity);
@@ -5604,7 +5619,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 }
             }
             if (coses) {
-                if (const auto cart = coses->TransportCart(player.entity)) list.back().partner = cart->entity;
+                if (const auto cart = coses->TransportCart(player.entity)) {
+                    list.back().partner = cart->entity;
+                    if (player.riding && coses->MountOf(player.entity) == cart->entity) list.back().mount = cart->entity; // never struck on it
+                }
             }
             if (skillUnit) {
                 const Skills::Protection guard = skillUnit->ProtectionOf(player.combat);
@@ -5759,7 +5777,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (alchemy) alchemy->End(player.entity);     // a death stops it at the next tick
         if (quests) quests->Died(player.entity);      // a caught COS runs away
         if (stalls) stalls->Leave(player.entity);
-        if (coses) coses->OwnerDied(player.entity); // the ride it is on goes, a transport stays; its pets stay out
+        if (coses) coses->OwnerDied(player.entity); // what it rides goes (a transport's goods with it); its pets stay out
         if (player.freePvpAt) {
             player.freePvpAt.reset();
             ShowFreePvp(player);
@@ -11339,8 +11357,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (alchemy) alchemy->End(player.entity);
         if (stalls) stalls->Leave(player.entity); // its stall closes (its visitors hear 0x3C15)
         // Its pets stay Summoned in their rows: they come out again where it next enters, on the next server or after a
-        // logout (the user's report 2026-11-14: summoned pets come back on the next login); its scroll COS go.
-        if (coses) coses->DismissAll(player.entity, true);
+        // logout (the user's report 2026-11-14: summoned pets come back on the next login); its scroll COS go. A dropped
+        // connection's (no reply asked, not a move) transport waits for it instead (Coses::OwnerDropped); a logout
+        // terminates it, its goods on the ground.
+        if (coses && !reply && !moving) coses->OwnerDropped(player.entity, player.selected, Clock::now());
+        if (coses) coses->DismissAll(player.entity, true, false, reply && !moving);
         if (quests) quests->Leave(player.entity);
         if (parties) {
             if (moving) parties->MovedAway(player.entity);

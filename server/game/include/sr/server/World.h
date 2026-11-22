@@ -206,7 +206,8 @@ public:
     // An item lying on the ground (itemdata RefObjID, a stack's count or the gold, its plus): an
     // entity seen by the players near it, like an NPC; Leave takes it away. `state` goes out as its
     // `rarity`: the original's byte for the name's colour (the item's rarity, | 1 for equipment with
-    // magic options). `name`: specialty goods' owner (the alias of the trader who bought them), shown under them.
+    // magic options). `name`: specialty goods' owner (the alias of the trader who bought them) or a quest or event
+    // item's (3/3/9, the player it belongs to), shown after the item's name.
     std::uint32_t AddGroundItem(std::uint32_t item, const game::proto::WorldPosition& position, float yaw, std::uint32_t amount,
                                 std::uint8_t plus, std::uint8_t state = 0, std::string_view name = {});
     // A skill object (proto::EntityKind::SkillObject: the skill's id, its owner's entity) standing at

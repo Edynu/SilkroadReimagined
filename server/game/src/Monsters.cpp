@@ -160,9 +160,11 @@ struct Monsters::State {
     std::unordered_map<std::uint16_t, std::vector<std::size_t>> byRegion; // the nests of each region
     std::unordered_map<std::uint32_t, Monster> monsters;
     // The places about a target its attackers take, as the original's positioner keeps them: eight, one each 45 degrees
-    // (from 22.5), each held by one monster; one comes to the place on the side it comes from, else the nearest free one
-    // to either side; with all eight held it goes for the target's own place. A place is held while its monster chases
-    // that target from it (an entry left by one gone or turned to another is free: HeldBy).
+    // from 22, turning the other way round (clockwise as atan2 counts), each held by one monster; one comes to the place on
+    // the side it comes from, else the nearest free one to either side; with all eight held it still goes for its own
+    // preferred place, shared; a nearer newcomer takes over a held place; none on another plane or beyond the next
+    // regions (upstream's review 2026-11-22). A place is held while its monster chases that target from it (an
+    // entry left by one gone or turned to another is free: HeldBy).
     static constexpr int kApproachPlaces = 8;
     std::unordered_map<std::uint32_t, std::array<std::uint32_t, kApproachPlaces>> approach;
     bool HeldBy(std::uint32_t target, int place, std::uint32_t entity) const {
@@ -172,30 +174,46 @@ struct Monsters::State {
         return m != monsters.end() && m->second.mode == Mode::Chase && m->second.target == target && m->second.slot == place &&
                m->second.slotTarget == target;
     }
-    // Its place about its target (taken now when it has none about this one); -1: all eight held.
+    // A place's angle in degrees as atan2 counts (place p at 22 + 45 p, the other way round).
+    static double ApproachAngle(int place) { return -(22.0 + 45.0 * place); }
+    // Its place about its target (taken now when it has none about this one); all eight held: its preferred one, shared.
+    // -1: the two not on the same plane or in regions not next to each other (it goes for the target's own spot).
     int ApproachPlace(Monster& m, const proto::WorldPosition& self, const proto::WorldPosition& target) {
+        const int rx = (self.region & 0xFF) - (target.region & 0xFF), rz = ((self.region >> 8) & 0x7F) - ((target.region >> 8) & 0x7F);
+        const bool dungeon = ((self.region | target.region) & 0x8000) != 0;
+        if (self.layer != target.layer || (dungeon && self.region != target.region) || std::abs(rx) > 1 || std::abs(rz) > 1) {
+            m.slot = -1;
+            m.slotTarget = 0;
+            return -1;
+        }
         if (m.slot >= 0 && m.slotTarget == m.target && HeldBy(m.target, m.slot, m.entity)) return m.slot;
         m.slot = -1;
         m.slotTarget = 0;
         const proto::FlatPosition a = proto::ToFlat(self), b = proto::ToFlat(target);
-        // The side it comes from (inferred: the place nearest its bearing from the target).
-        const double bearing = std::atan2(double(a.z - b.z), double(a.x - b.x)) * 180.0 / std::numbers::pi;
-        const int preferred = int(std::floor(std::fmod(bearing + 360.0, 360.0) / 45.0)) % kApproachPlaces;
+        const float mine = Distance(self, target);
+        // The side it comes from (inferred: the place nearest its bearing from the target), counted the places' way round.
+        const double bearing = -std::atan2(double(a.z - b.z), double(a.x - b.x)) * 180.0 / std::numbers::pi;
+        const int preferred = int(std::floor(std::fmod(bearing + 0.5 + 720.0, 360.0) / 45.0)) % kApproachPlaces;
         auto& places = approach[m.target];
         for (int k = 0; k < kApproachPlaces; ++k) {
             // preferred, then one to each side, then two, ...
             const int step = (k + 1) / 2, place = ((k % 2 == 1 ? preferred + step : preferred - step) % kApproachPlaces + kApproachPlaces) % kApproachPlaces;
-            if (HeldBy(m.target, place, places[std::size_t(place)])) continue;
+            if (const std::uint32_t holder = places[std::size_t(place)]; HeldBy(m.target, place, holder)) {
+                // A held place taken over by a newcomer nearer the target (the original's, inferred:
+                // the nearer wins); the one it had takes another next time (HeldBy fails for it).
+                const auto at = world.Where(holder);
+                if (!at || Distance(at->position, target) <= mine) continue;
+            }
             places[std::size_t(place)] = m.entity;
             m.slot = place;
             m.slotTarget = m.target;
             return place;
         }
-        return -1;
+        return preferred;
     }
     // The point of place `place` about `target`, `distance` out (the original's: 0.8 of the attacker's reach).
     static proto::WorldPosition ApproachPoint(const proto::WorldPosition& target, int place, float distance) {
-        const double angle = (22.5 + 45.0 * place) * std::numbers::pi / 180.0;
+        const double angle = ApproachAngle(place) * std::numbers::pi / 180.0;
         const proto::FlatPosition b = proto::ToFlat(target);
         return proto::FromFlat({float(b.x + distance * std::cos(angle)), float(b.z + distance * std::sin(angle))}, target.y);
     }
@@ -718,9 +736,7 @@ struct Monsters::State {
         }
         const Player* pick = hunted != nullptr ? hunted : fallback;
         if (pick == nullptr) return;
-        std::uint32_t target = pick->entity;
-        if (pick->ridden && pick->partner != 0 && Valid(pick->partner)) target = pick->partner;
-        Engage(m, target, now);
+        Engage(m, pick->entity, now); // a rider's transport (Engage)
     }
     // In a fight a bandit goes between a player and their transport: when the other is at least 15 nearer, it becomes
     // the target.
@@ -730,6 +746,7 @@ struct Monsters::State {
         if (nest.spec.bandit == 0 || who == players.end() || who->second->partner == 0) return;
         const auto other = players.find(who->second->partner);
         if (other == players.end() || !other->second->alive || other->second->hidden) return;
+        if (Struck(other->first) != other->first) return; // its owner on it: never struck
         if (!game::BanditHunts(game::BanditKind(nest.spec.bandit), other->second->job)) return;
         if (Distance(other->second->position, place.position) + game::kBanditSwitchCloser > Distance(who->second->position, place.position)) return;
         if (m.foe.entity != other->first) std::swap(m.foe, m.rival);
@@ -748,8 +765,7 @@ struct Monsters::State {
         const Nest& nest = nests[m.nest];
         const auto place = world.Where(m.entity);
         if (!place) return;
-        // A bandit idles where it stands (no circle of its own to wander back into).
-        if (Static(nest) || nest.spec.bandit != 0) {
+        if (Static(nest)) {
             m.nextThink = now + Seconds(Uniform(2.0f, 6.0f));
             return;
         }
@@ -773,8 +789,14 @@ struct Monsters::State {
         m.nextThink += Seconds(float(std::hypot(to.x - here.x, to.z - here.z)) / walk);
     }
 
+    // What a fight with `entity` strikes: the transport it rides, else itself.
+    std::uint32_t Struck(std::uint32_t entity) const {
+        const auto it = players.find(entity);
+        return it != players.end() && it->second->mount != 0 && Valid(it->second->mount) ? it->second->mount : entity;
+    }
     void Engage(Monster& m, std::uint32_t target, Clock::time_point now) {
         if (nests[m.nest].attacks.empty()) return; // nothing to fight with
+        target = Struck(target);
         if (m.states.In(game::StateKind::Confusion)) return; // its tactics keep it out of fights
         if (m.foe.entity != target) {
             m.rival = m.foe;
@@ -806,6 +828,12 @@ struct Monsters::State {
     void Fight(Monster& m, Clock::time_point now, Events& out) {
         m.nextThink = now + std::chrono::milliseconds(200);
         const auto place = world.Where(m.entity);
+        // Its target boarded a transport since: the transport is fought instead.
+        if (const std::uint32_t struck = Struck(m.target); struck != m.target) {
+            if (m.foe.entity == m.target) m.foe.entity = struck;
+            m.target = struck;
+            m.aim = {};
+        }
         const auto who = players.find(m.target);
         if (!place) return GoHome(m, now, out);
         // Its target dead, gone or hidden: it idles where it is and forgets both records (no
@@ -825,15 +853,10 @@ struct Monsters::State {
         }
         const proto::WorldPosition& there = who->second->position;
         const float distance = Distance(place->position, there);
-        // A bandit has no home to go back to (its nest is only where its wave put it): led beyond the trace it lets its
-        // target be where it stands, unhealed, and looks about again (ours; the user's report 2026-11-22: thieves walked
-        // back to their spawn point like a nest's monsters). It leaves 20 s after its last hit.
-        if (nest.spec.bandit != 0) {
-            if (distance > kGiveUpDistance) return DropFight(m, now);
-        } else {
-            const float leash = std::max(nest.spec.radius * 1.5f, kMinLeash);
-            if (distance > kGiveUpDistance || Distance(place->position, nest.spec.position) > leash) return GoHome(m, now, out);
-        }
+        // Led beyond the trace (500) or its leash it goes home, a bandit too: an ordinary monster whose home is where its
+        // wave put it (as the original's, whose bandits home as any monster). It still leaves 20 s after its last hit.
+        const float leash = std::max(nest.spec.radius * 1.5f, kMinLeash);
+        if (distance > kGiveUpDistance || Distance(place->position, nest.spec.position) > leash) return GoHome(m, now, out);
         // Feared by its target, or confused: it drops the fight where it stands.
         if (m.states.Idles(m.target)) return DropFight(m, now);
         // The skill it uses next: one of its attacks at random; myopia shortens its reach.
@@ -855,7 +878,8 @@ struct Monsters::State {
             // (0.2618 rad), or when the target moved 30 from the aim, so a chaser never stops at a stale spot.
             // Its place about the target (the original's eight): it heads for that point, 0.8 of its reach out from the
             // target on its side, so a crowd stands round its target instead of in one heap (the user's report
-            // 2026-11-22); with all eight held it heads for the target itself.
+            // 2026-11-22); with all eight held, its preferred place all the same; the target far apart (another plane, a
+            // region not next to its own), the target itself.
             const int spot = ApproachPlace(m, place->position, there);
             const proto::WorldPosition goal = spot >= 0 ? ApproachPoint(there, spot, reach * 0.8f) : there;
             m.nextThink = now + std::chrono::milliseconds(100);

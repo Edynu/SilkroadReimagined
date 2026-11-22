@@ -3396,8 +3396,12 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
             name = gold ? GoldText(e.amount) + " " + gui_.data().Text("UIIT_STT_GOLD") : gui_.data().Text(row->nameKey);
             colour = e.rarity == 1 ? ui::Argb(0xFF72BFFF) : ui::Argb(0xFFFFFFFF);
             lift = 5.0f;
-            // Specialty goods: their owner's alias under the name (ours: the original's line for it not traced).
-            if (!e.look.name.empty()) petLine = e.look.name;
+            // A name after the item's, as the 1.188 client does: specialty goods (3/3/8) "Name (*Alias)", their buyer's
+            // alias; a quest or event item (3/3/9) "Name (Owner)" (upstream's review 2026-11-22).
+            if (!e.look.name.empty() && row->typeId[0] == 3 && row->typeId[1] == 3) {
+                if (row->typeId[2] == 8) name += " (*" + e.look.name + ")";
+                else if (row->typeId[2] == 9) name += " (" + e.look.name + ")";
+            }
         } else if (name.empty() && IsNpc(e)) {
             if (const assets::ObjectRow* row = tables_->characters.Find(e.look.model)) name = gui_.data().Text(row->nameKey);
             colour = ui::Argb(0xFFEFDAA4);

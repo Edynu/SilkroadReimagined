@@ -192,6 +192,8 @@ public:
     // `owner`'s transport went (dismissed, dead, its owner gone): its goods with it (their drop
     // comes with step 7).
     virtual void CosTransportGone(std::uint32_t owner) { (void)owner; }
+    // `owner`'s transport, kept through its connection's drop (Coses::OwnerDropped), is its again: its goods count again.
+    virtual void CosTransportBack(std::uint32_t owner) { (void)owner; }
     // A transport killed: every slot of its bag dropped whole where it fell, its goods with no owner's mark.
     virtual void CosCargoDropped(std::uint32_t owner, const game::proto::WorldPosition& at, std::map<std::uint8_t, game::ItemInstance> bag) {
         (void)owner;
@@ -235,10 +237,16 @@ public:
     void Tick(Clock::time_point now);
     // Every COS of `owner` sent away: its death or leaving (`comesBack` false: its pets Inactive), a teleport or a move
     // to another game server (true: its pets stay Summoned and come out again where it arrives).
-    void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false);
-    // Its owner died: as the original's, only the COS it rides goes (its ride slot); its pets and a transport it walks
-    // beside stay out.
+    // `terminate`: its transport terminated, its cargo on the ground (a logout; Dismiss).
+    void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false, bool terminate = false);
+    // Its owner died: as the original's, only the COS it rides goes (its ride slot; a ridden transport too, its goods
+    // not dropped); its pets and a transport it walks beside stay out.
     void OwnerDied(std::uint32_t owner);
+    // Its owner's connection dropped (not a logout): its transport stays in the world, goods aboard, with no owner, for
+    // kTransportWait; its character entering again within it takes it back (Entered), else it is terminated, its goods on
+    // the ground (upstream's review of 2026-11-22). Call before DismissAll, while the owner is still in the world.
+    void OwnerDropped(std::uint32_t owner, std::int64_t character, Clock::time_point now);
+    static constexpr std::chrono::minutes kTransportWait{5};
     // `owner`'s ride or transport (kept through DismissAll) brought beside `at`, where its owner arrives (the thieves'
     // town scroll, which works with a transport out:; a gate's or a ferry's link that allows one); told
     // again and boarded again, if it was, once its owner stands there (Tick).
@@ -290,7 +298,7 @@ public:
     // A monster's hit on a pet (its entity): its health less the damage, everyone who sees it told; at none it is
     // dead (its row Dead, back into its item). Alive, it fights back.
     void Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult& hit);
-    // States a monster's hit rolled on a COS (a transport, a ride, a pet: a character as its owner is), as a monster's
+    // States a monster's hit rolled on a COS (a transport, a pet: a character as its owner is; a ride takes none), as a monster's
     // are kept: put on it and told to those who see it; frozen, asleep or stunned it stands, frostbite and slow slow
     // it, a burn or a poison takes its health at its ticks (Tick). False: none took. Its state defence: a monster's of
     // its level (StateDefenceOf; no resistances of its own: the COS rows carry none).
@@ -419,8 +427,10 @@ private:
     bool PlaceTaken(std::uint32_t owner, game::CosKind kind) const;
     void Refuse(std::uint32_t owner, const char* text, std::string arg = {});
     bool Ride(std::uint32_t owner, std::uint32_t entity, bool ride, Clock::time_point now);
-    // Sent away; a pet's row saved Summoned (`comesBack`), Dead (`dead`: its rental over) or Inactive.
-    void Dismiss(std::uint32_t entity, bool comesBack = false, bool dead = false);
+    // Sent away; a pet's row saved Summoned (`comesBack`), Dead (`dead`: its rental over) or Inactive. A transport's
+    // cargo drops where it stands only when it is killed (`dead`) or terminated (`terminate`: its owner's own end, a
+    // logout, its wait for a dropped owner over); every other end takes it away with its goods (as the original's).
+    void Dismiss(std::uint32_t entity, bool comesBack = false, bool dead = false, bool terminate = false);
     // A pet's row as its item shows it, to its owner (CosPetItems).
     void SendPetItem(std::uint32_t owner, const CosRow& row);
     // A grab pet's rental run out: its row Dead (true: it was not yet; save it).
@@ -449,6 +459,12 @@ private:
         std::vector<Travelling> list;
     };
     std::unordered_map<std::uint32_t, Travel> travelling_;
+    // Transports left by a dropped connection (OwnerDropped), by their owner's character: the entity and its end.
+    struct Waiting {
+        std::uint32_t entity = 0;
+        Clock::time_point until{};
+    };
+    std::unordered_map<std::int64_t, Waiting> waiting_;
     void Arrived(); // Tick: those whose owner stands at the other end, told again
     Clock::time_point nextFollow_{}, lastFollow_{};
     std::mt19937 random_{0x5EED0C05u};

@@ -473,6 +473,7 @@ bool Coses::Afflict(std::uint32_t entity, const std::vector<game::ActiveState>& 
     const auto it = coses_.find(entity);
     if (it == coses_.end() || it->second.hp == 0 || states.empty()) return false;
     Cos& c = it->second;
+    if (c.kind == game::CosKind::Ride) return false; // a horse takes no states (upstream's review of 2026-11-22)
     bool took = false;
     for (const game::ActiveState& s : states) took = c.states.Apply(s) || took;
     if (!took) return false;
@@ -921,7 +922,7 @@ bool Coses::Handle(std::uint32_t owner, proto::MessageId id, std::span<const std
             Refuse(owner, "UIIT_MSG_COSPETERR_CANT_DEACTIVATE_IN_DEADSTATE");
             return true;
         }
-        Dismiss(m.entity);
+        Dismiss(m.entity, false, false, true); // terminated: a transport's cargo on the ground
         return true;
     }
     case proto::CosCommand::kId: {
@@ -1148,7 +1149,7 @@ bool Coses::Ride(std::uint32_t owner, std::uint32_t entity, bool ride, Clock::ti
     return true;
 }
 
-void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead) {
+void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool terminate) {
     const auto it = coses_.find(entity);
     if (it == coses_.end()) return;
     const std::uint32_t owner = it->second.owner;
@@ -1161,10 +1162,10 @@ void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead) {
         if (comesBack && !dead) returning_[owner].push_back({c.row.id, c.serial});
         if (!comesBack || dead) SendPetItem(owner, c.row);
     }
-    // A transport's goods never go with it: whatever ends it (killed, terminated, left behind by its owner's return or
-    // travel without it, its owner leaving), every slot drops whole where it stands (the user's account of the original,
-    // 2026-11-22; the original's own drop is traced only for its death).
-    if (Cos& c = it->second; c.kind == game::CosKind::Transport && !c.bag.empty()) {
+    // A transport killed or terminated: every slot drops whole where it stands (as the original's: its death and its
+    // owner's terminate, nothing else; a logout and a dropped owner's wait run out are terminations of ours, upstream's
+    // review 2026-11-22). Any other end (a return, a travel without it, its rider's death) takes the goods along.
+    if (Cos& c = it->second; c.kind == game::CosKind::Transport && !c.bag.empty() && (dead || terminate)) {
         if (const auto at = host_.CosWorld().Where(entity)) host_.CosCargoDropped(owner, at->position, std::exchange(c.bag, {}));
     }
     host_.CosWorld().Leave(entity);
@@ -1196,7 +1197,7 @@ void Coses::CartChanged(std::uint32_t entity) {
     if (const auto it = coses_.find(entity); it != coses_.end()) SendBag(it->second);
 }
 
-void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport) {
+void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport, bool terminate) {
     // Pets still waiting to come back, their owner leaving for good: inactive.
     if (!comesBack) {
         if (const auto r = returning_.find(owner); r != returning_.end()) {
@@ -1219,7 +1220,7 @@ void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport) 
             travelling_[owner].list.push_back({entity, c->second.ridden}); // a rider stays on it through the travel
             continue;
         }
-        Dismiss(entity, comesBack);
+        Dismiss(entity, comesBack, false, terminate);
     }
 }
 
@@ -1230,14 +1231,29 @@ void Coses::OwnerDied(std::uint32_t owner) {
     for (std::uint32_t entity : list) {
         const auto c = coses_.find(entity);
         if (c == coses_.end() || !c->second.ridden) continue;
-        // A transport stays where its rider fell, its goods aboard (the user's account of the original, 2026-11-22):
-        // only its rider comes off. A ride goes (the original's release of the ridden COS).
-        if (c->second.kind == game::CosKind::Transport) {
-            Ride(owner, entity, false, Clock::now());
-        } else {
-            Dismiss(entity, false);
-        }
+        // The COS ridden goes, a transport too, its goods with it, none dropped (as the original's: the death releases
+        // the ride slot, saved and despawned). One walked beside is not touched (the loop's test). Rare: a rider is never
+        // a monster's target (its mount is).
+        Dismiss(entity, false);
     }
+}
+
+void Coses::OwnerDropped(std::uint32_t owner, std::int64_t character, Clock::time_point now) {
+    const auto it = owned_.find(owner);
+    if (it == owned_.end() || character == 0) return;
+    for (const std::uint32_t entity : std::vector<std::uint32_t>(it->second)) {
+        Cos& c = coses_.at(entity);
+        if (c.kind != game::CosKind::Transport) continue;
+        if (c.ridden) Ride(owner, entity, false, now);
+        std::erase(it->second, entity);
+        c.owner = 0;
+        c.target = 0;
+        // One waiting per character (a second drop while one waits: the newer).
+        if (const auto old = waiting_.find(character); old != waiting_.end() && old->second.entity != entity) Dismiss(old->second.entity, false, false, true);
+        waiting_[character] = {entity, now + kTransportWait};
+        core::LogInfo("cos: transport {} waits {} min for its owner's character {}", entity, kTransportWait.count(), character);
+    }
+    if (const auto again = owned_.find(owner); again != owned_.end() && again->second.empty()) owned_.erase(again);
 }
 
 void Coses::BringTransport(std::uint32_t owner, const proto::WorldPosition& at) {
@@ -1269,10 +1285,22 @@ bool Coses::KeptOutOfTown(std::uint32_t owner, const proto::WorldPosition& targe
 }
 
 void Coses::Entered(std::uint32_t owner, std::vector<PetLink> pets) {
+    const auto o = host_.CosOwner(owner);
+    // Its transport waiting since its connection dropped (OwnerDropped): its again, told once it stands (Arrived).
+    if (const auto w = o ? waiting_.find(o->character) : waiting_.end(); w != waiting_.end()) {
+        const std::uint32_t entity = w->second.entity;
+        waiting_.erase(w);
+        if (const auto c = coses_.find(entity); c != coses_.end() && c->second.owner == 0) {
+            c->second.owner = owner;
+            owned_[owner].push_back(entity);
+            travelling_[owner].list.push_back({entity, false});
+            host_.CosTransportBack(owner);
+            core::LogInfo("cos: {} takes its waiting transport {} back", o->name, entity);
+        }
+    }
     std::erase_if(pets, [](const PetLink& p) { return p.id == 0; });
     if (pets.empty()) return;
     // Each pet item's row to its owner's client (its tooltip, its slot); a rental run out meanwhile: dead now.
-    const auto o = host_.CosOwner(owner);
     for (const PetLink& link : pets) {
         host_.CosLoad(link.id, [this, owner, character = o ? o->character : 0](std::optional<CosRow> row) {
             if (!row || row->owner != character || !host_.CosOwner(owner)) return;
@@ -1474,7 +1502,7 @@ void Coses::Tick(Clock::time_point now) {
             unsummoned.push_back(entity);
             continue;
         }
-        if (c.ridden) continue;
+        if (c.ridden || c.owner == 0) continue; // a transport waiting for its owner (OwnerDropped) stands
         if (!world.Where(c.owner)) {
             lost.push_back(entity); // its owner left the world without a word
             continue;
@@ -1490,6 +1518,22 @@ void Coses::Tick(Clock::time_point now) {
     }
     for (std::uint32_t entity : unsummoned) Dismiss(entity);
     for (std::uint32_t entity : lost) Dismiss(entity);
+    // Transports whose owner did not come back in time: terminated, their goods on the ground (Dismiss).
+    for (auto it = waiting_.begin(); it != waiting_.end();) {
+        const auto c = coses_.find(it->second.entity);
+        if (c == coses_.end() || c->second.owner != 0) {
+            it = waiting_.erase(it);
+            continue;
+        }
+        if (now < it->second.until) {
+            ++it;
+            continue;
+        }
+        const std::uint32_t entity = it->second.entity;
+        it = waiting_.erase(it);
+        core::LogInfo("cos: transport {}'s owner did not come back: terminated", entity);
+        Dismiss(entity, false, false, true);
+    }
 }
 
 // --- The mall's items on a pet ---------------------------------------------------------

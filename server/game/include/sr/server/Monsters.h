@@ -131,6 +131,9 @@ public:
         std::uint32_t partner = 0;
         bool ridden = false;
         bool banditsOnly = false;
+        // The transport a player rides (0: none): a rider is never struck, every monster's fight with them goes to it
+        // (upstream's review of 2026-11-22).
+        std::uint32_t mount = 0;
         // A fortress war (MonsterNest::warGuild): its guild and union, and whether it fights in a fortress's war there.
         std::uint32_t guild = 0, alliance = 0;
         bool atWar = false;

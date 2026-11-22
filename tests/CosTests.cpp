@@ -708,6 +708,75 @@ TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and
     s.game.Stop();
 }
 
+TEST_CASE("Game server: a transport waits for its owner through a dropped connection, taken back at the next entry; a logout ends it (upstream's review 2026-11-22)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    CosServer s(t);
+    s.config.logoutCountdown = 1s;
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    const auto wearing = [&](std::uint32_t suit) {
+        return [&t, suit](std::int64_t character) {
+            REQUIRE(t.Db().Query("INSERT INTO _inventory (charid, slot, itemid) SELECT $1, 8, b.itemid FROM _inventory b JOIN _items it ON it.id64 = b.itemid "
+                                 "WHERE b.charid = $1 AND it.refitemid = $2 LIMIT 1 ON CONFLICT (charid, slot) DO UPDATE SET itemid = EXCLUDED.itemid",
+                                 {character, std::int64_t(suit)})
+                        .Ok());
+            REQUIRE(t.Db().Query("UPDATE _inventory b SET itemid = 0 FROM _items it WHERE it.id64 = b.itemid AND b.charid = $1 AND it.refitemid = $2 AND b.slot <> 8",
+                                 {character, std::int64_t(suit)})
+                        .Ok());
+        };
+    };
+    auto a = s.Make("Carter", 1000, {Stored(kCartScroll, 1), Stored(kTraderSuit, 1)}, 1, 0, 0, 1000, wearing(kTraderSuit));
+    auto watcher = s.Make("Watch", 1050, {});
+    a.client->Send(proto::UseItem{PlaceOf(a.bag, kCartScroll)});
+    const auto cart = Next<proto::CosSummoned>(a);
+    REQUIRE(Next<proto::CosRiding>(a).riding); // ridden when the connection drops: it is left standing
+    // The connection drops: its owner goes after the logout's second, the transport stays.
+    a.client->Connection().Close();
+    std::set<std::uint32_t> gone;
+    const auto dropped = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - dropped < 3s) {
+        proto::EntityGone g;
+        if (watcher.client->Expect(g, 50ms)) gone.insert(g.entity);
+    }
+    CHECK(gone.contains(a.entity));
+    CHECK_FALSE(gone.contains(cart.entity));
+    // Its character enters again: the transport is its again (told to it, the same entity).
+    bool ok = false;
+    const std::int64_t account = server::FindAccount(t.Db(), "Carteracct", ok)->id;
+    REQUIRE(t.Db().Query("DELETE FROM sro_vt_account.sr_online_sessions WHERE jid = $1", {account}).Ok());
+    Client again(s.net, s.game.Port(), [&] { s.game.Poll(2ms); });
+    REQUIRE(again.Greet());
+    proto::LobbyEnter e;
+    e.ticket = server::IssueTicket(t.Db(), account, s.config.id, 30, s.error);
+    again.Send(e);
+    proto::LobbyEntered entered;
+    REQUIRE(again.Expect(entered));
+    REQUIRE(entered.status == proto::LobbyEnterStatus::Accepted);
+    again.Send(proto::CharacterSelect{"Carter"});
+    proto::LobbyResult selected;
+    REQUIRE(again.Expect(selected));
+    again.Send(proto::WorldEnter{});
+    proto::WorldEntered world;
+    REQUIRE(again.Expect(world));
+    REQUIRE(world.status == proto::WorldStatus::Ok);
+    proto::CosSummoned back;
+    bool told = false;
+    for (int i = 0; i < 100 && !told; ++i) {
+        if (again.Expect(back, 20ms)) told = back.entity == cart.entity;
+    }
+    CHECK(told);
+    // A logout (not a drop): the transport is terminated with it.
+    again.Send(proto::LogoutRequest{proto::LogoutKind::Exit});
+    bool ended = false;
+    const auto asked = std::chrono::steady_clock::now();
+    while (!ended && std::chrono::steady_clock::now() - asked < 5s) {
+        proto::EntityGone g;
+        if (watcher.client->Expect(g, 50ms)) ended = g.entity == cart.entity;
+    }
+    CHECK(ended);
+    s.game.Stop();
+}
+
 TEST_CASE("Game server: pets: their rows made at the first summon, kept through unsummons, back in their items when unsummoned") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
@@ -1971,24 +2040,18 @@ TEST_CASE("Game server: the cargo: a killed transport drops its goods; the trade
     CHECK(bag.items[0].item == kGood);
     CHECK(bag.items[0].quantity == 40);
     CHECK(bag.items[0].creator == "Hauler1");
-    // The thief dies riding it: he comes off, the transport stays with the goods (the user's account, 2026-11-22).
+    // The thief dies riding it: the transport ridden goes, its goods with it, none on the ground (as the original's).
     thief.client->Send(proto::DevDie{});
-    proto::CosRiding off;
-    for (int i = 0; i < 20 && (off.mount != own.entity || off.riding); ++i) off = Next<proto::CosRiding>(thief);
-    CHECK(off.mount == own.entity);
-    CHECK_FALSE(off.riding);
     proto::CosDismissed gone;
-    CHECK_FALSE(thief.client->Expect(gone, 1500ms));
-    // Back to life at his return point: the transport left behind, its goods on the ground where it stood.
-    thief.client->Send(proto::Resurrect{1});
     REQUIRE(thief.client->Expect(gone, 10s));
     CHECK(gone.entity == own.entity);
-    std::uint32_t again = 0;
-    for (int i = 0; i < 1500 && again == 0; ++i) {
+    bool again = false;
+    for (int i = 0; i < 150 && !again; ++i) {
         proto::EntityAppeared seen;
-        if (trader.client->Expect(seen, 10ms) && seen.kind == proto::EntityKind::GroundItem && seen.character.model == kGood) again = seen.entity;
+        // (the first heap's appearance may still wait unread in the trader's queue: another heap only counts)
+        if (trader.client->Expect(seen, 10ms) && seen.kind == proto::EntityKind::GroundItem && seen.character.model == kGood && seen.entity != dropped) again = true;
     }
-    CHECK(again != 0);
+    CHECK_FALSE(again);
     s.game.Stop();
 }
 
