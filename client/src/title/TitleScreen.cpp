@@ -10,6 +10,7 @@
 #include "sr/core/Log.h"
 #include "sr/core/Text.h"
 #include "sr/core/Trace.h"
+#include "sr/platform/Window.h"
 #ifdef SR_PLAYER_BUILD
 #include "PlayerServer.h"
 #endif
@@ -84,7 +85,8 @@ void TitleScreen::Enter(ScreenContext& context) {
     tls.serverName = context.config.GetString("server-name", "localhost");
     if (tls.trustedCertificatePem.empty()) core::LogWarning("title: cannot read the server certificate {}", certificate);
 #endif
-    shared_->session = std::make_unique<game::TitleSession>(*shared_->net, tls, "SroReimagined 0.1");
+    // Its name and version in Hello: the shard turns an older one away (the servers' ClientGate.h).
+    shared_->session = std::make_unique<game::TitleSession>(*shared_->net, tls, "SroReimagined " SR_CLIENT_VERSION);
     shared_->data.Load(context.jobs, context.files, {kTitleLayout, kSelectLayout, kCreateChinaLayout, kCreateEuropeLayout});
     // The character tables from now on, not from the lobby: the login hides their time.
     shared_->LoadCharacters(context.jobs, context.files);
@@ -213,6 +215,13 @@ void TitleScreen::HandleEvents() {
                              error->reason);
             busy_ = false;
             message_ = error->protocolMismatch ? "This client is out of date for the server." : "UIO_MSG_ERROR_SEVER_CONNECT";
+            if (error->protocolMismatch) {
+                // The server's own words say what is out and where (ClientGate.h); an older server's are its protocol's.
+                outdated_ = error->reason.starts_with("Your client") ? error->reason
+                                                                    : "This client is out of date for the server. Start the launcher to update, or "
+                                                                      "download the new client from the website.";
+                message_.clear();
+            }
             if (error->where == game::TitleError::Where::Gateway) connected_ = true; // nothing more is coming
         }
     }
@@ -303,7 +312,6 @@ void TitleScreen::HideUntilShown(ScreenContext& context, FrameSnapshot& snapshot
 }
 
 void TitleScreen::Draw(ScreenContext& context, float width, float height) {
-    (void)context;
     const assets::UiLayout* layout = shared_->data.Layout(kTitleLayout);
     const float top = std::round(kBarTop / kVirtualHeight * height), bottom = std::round(kBarBottom / kVirtualHeight * height);
     kit_->FillScreen({0, 0, width, top}, ui::Rgba(0, 0, 0)); // the letterbox (inferred, as the prototype)
@@ -329,7 +337,9 @@ void TitleScreen::Draw(ScreenContext& context, float width, float height) {
         const float s = core::DesignGrid::kHeight / kVirtualHeight;
         kit_->Image(logo->ddj, Rect(cx - 254.0f * s, std::min(cy - 114.0f, cy + 6.0f - 172.0f * s - 8.0f), 508.0f * s, 172.0f * s));
     }
-    if (serverListOpen_) {
+    if (!outdated_.empty()) {
+        DrawOutdated(context); // in place of the login: nothing else to do with this client
+    } else if (serverListOpen_) {
         DrawServerList(*layout, cx, cy);
     } else {
         DrawLoginWindow(*layout, cx, cy);
@@ -337,7 +347,7 @@ void TitleScreen::Draw(ScreenContext& context, float width, float height) {
 
     const core::DesignPoint corner = kit_->grid().ToDesign({5.0f, height - 25.0f});
     // The original prints its client's version here; ours: SroReimagined's, and the game data it reads (vSRO 1.188).
-    kit_->Text("SroReimagined 0.1 (1.188)", Rect(corner.x, corner.y, 240, 20), ui::Rgba(255, 128, 128));
+    kit_->Text("SroReimagined " SR_CLIENT_VERSION " (1.188)", Rect(corner.x, corner.y, 240, 20), ui::Rgba(255, 128, 128));
     if (!message_.empty()) {
         const core::DesignPoint below = kit_->grid().ToDesign({0.0f, bottom});
         const bool blink = std::fmod(context.time, 1.0) < 0.85;
@@ -375,6 +385,24 @@ void TitleScreen::UpdateIntro(ScreenContext& context, FrameSnapshot& snapshot) {
     const float fx = std::cos(pitch) * std::sin(yaw), fy = -std::sin(pitch), fz = std::cos(pitch) * std::cos(yaw);
     world_->SetView(px - fx * k.distance, k.position[1] - fy * k.distance, pz - fz * k.distance, yaw, -pitch);
     world_->Update(context, snapshot);
+}
+
+void TitleScreen::DrawOutdated(ScreenContext& context) {
+    // A box in the middle: the words, the download page (the address in them) and Exit.
+    const float w = 460.0f, h = 190.0f;
+    const float x = std::floor((core::DesignGrid::kWidth - w) / 2.0f), y = std::floor((core::DesignGrid::kHeight - h) / 2.0f);
+    kit_->Fill(Rect(x, y, w, h), ui::Rgba(10, 8, 6, 235));
+    kit_->List().Outline(kit_->Screen(Rect(x, y, w, h)), ui::Rgba(150, 128, 82, 230), std::max(1.0f, kit_->grid().scale()));
+    kit_->Text("A new version is out", Rect(x, y + 14.0f, w, 20), ui::Rgba(255, 228, 160), 0, 1);
+    kit_->TextBox(outdated_, Rect(x + 24.0f, y + 44.0f, w - 48.0f, 80.0f), ui::Rgba(240, 230, 200));
+    std::string url;
+    if (const std::size_t at = outdated_.find("https://"); at != std::string::npos) url = outdated_.substr(at, outdated_.find_first_of(" \n", at) - at);
+    while (!url.empty() && (url.back() == '.' || url.back() == ',')) url.pop_back();
+    const float by = y + h - 44.0f;
+    if (!url.empty() && kit_->TextButton("outdated-download", "Open the download page", Rect(x + 24.0f, by, 220.0f, 28.0f))) {
+        if (!platform::OpenUrl(url)) core::LogWarning("title: could not open {}", url);
+    }
+    if (kit_->TextButton("outdated-exit", "Exit", Rect(x + w - 24.0f - 120.0f, by, 120.0f, 28.0f))) context.quit = true;
 }
 
 void TitleScreen::DrawLoginWindow(const assets::UiLayout& layout, float cx, float cy) {

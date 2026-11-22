@@ -2584,6 +2584,14 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     const ui::Vec2 screen{float(context.device.SwapchainWidth()), float(context.device.SwapchainHeight())};
     SamplePerformance(context);
     hudContext_.performance = &performance_;
+#ifdef SR_BUG_REPORTS
+    // The bug report window's Send (PlayBugReport.cpp); none in a replay, or while one is still going out.
+    if (!replay_ && !bugReport_) {
+        hudContext_.bugReport = [this](BugReportForm form) { StartBugReport(std::move(form)); };
+    } else {
+        hudContext_.bugReport = nullptr;
+    }
+#endif
     hudContext_.state = &player_;
     hudContext_.guild = &guild_;
     hudContext_.community = &community_;
@@ -4462,6 +4470,9 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         AppendUi(snapshot.ui, list_);
         context.holdCapture = true;
     }
+#ifdef SR_BUG_REPORTS
+    BugReportFrame(context, snapshot); // last: its screenshot's frame may leave the interface out
+#endif
 }
 
 } // namespace sr::client

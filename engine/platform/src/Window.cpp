@@ -255,6 +255,11 @@ std::string Window::ClipboardText() const {
 
 void Window::SetClipboardText(const std::string& text) { SDL_SetClipboardText(text.c_str()); }
 
+bool OpenUrl(const std::string& url) {
+    if (!url.starts_with("https://") && !url.starts_with("http://")) return false;
+    return SDL_OpenURL(url.c_str());
+}
+
 double Window::Time() const { return static_cast<double>(SDL_GetTicksNS()) / 1e9; }
 
 Window::NativeHandles Window::Native() const {

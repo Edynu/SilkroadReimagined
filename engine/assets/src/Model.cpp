@@ -949,10 +949,12 @@ bool FindPartLink(std::span<const std::byte> bsr, bool character, std::size_t me
             const std::size_t p = bsr.size() - tail;
             if (u32(p + 12) != n) continue;
             PartLink link{u32(p), u32(p + 4), u32(p + 8), {}};
-            bool valid = character || (link.a == 1 && (link.c == 1 || link.c == 2) && link.b <= 5);
+            // An item's: a 1 or 2, its part up to 16 (the job suits'), its mode 1 or 2, its keys under 32 with values 0
+            // or 1 (the client reads only the keys: a thief's suit's values are 0 and 1).
+            bool valid = character || (link.a >= 1 && link.a <= 2 && (link.c == 1 || link.c == 2) && link.b <= 16);
             for (std::uint32_t i = 0; valid && i < n; ++i) {
                 const std::uint32_t key = u32(p + 16 + 8 * i), value = u32(p + 20 + 8 * i);
-                valid = character ? value < meshCount : value == 0;
+                valid = character ? value < meshCount : key < 32 && value <= 1;
                 link.pairs.push_back({key, value});
             }
             if (!valid) continue;

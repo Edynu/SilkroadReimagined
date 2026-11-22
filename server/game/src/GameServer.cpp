@@ -49,9 +49,11 @@
 #include "sr/game/Jobs.h"
 #include "sr/game/Pk.h"
 #include "sr/game/PkProtocol.h"
+#include "sr/game/SupportProtocol.h"
 #include "sr/game/MallProtocol.h"
 #include "sr/game/MallServices.h"
 #include "sr/server/Database.h"
+#include "sr/server/SupportStore.h"
 #include "sr/server/Fortress.h"
 #include "sr/game/Academy.h"
 #include "sr/server/Academies.h"
@@ -9537,6 +9539,122 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         PublishChat(kChatBusDelivered, e.from, e.request, {}, nullptr);
     }
 
+    // --- Bug reports from the game (SupportProtocol.h) -----------------------------------------
+
+    // A report on its way in: its screenshot's parts until all have come.
+    struct BugReportIn {
+        proto::BugReport report;
+        std::vector<std::uint8_t> image;
+    };
+    std::unordered_map<std::uint64_t, BugReportIn> bugReports;                     // by peer
+    std::unordered_map<std::int64_t, std::deque<Clock::time_point>> bugReportTimes; // by account: the last hour's
+    static constexpr std::size_t kBugReportsPerHour = 5;
+
+    void TellNotice(Peer& peer, std::string text) {
+        proto::ChatLine line;
+        line.kind = proto::ChatKind::Notice;
+        line.text = std::move(text);
+        SendMessage(*peer.connection, line);
+    }
+
+    // The report, then its screenshot's parts in order (the last one completes it). False: a message that does not decode
+    // or breaks the order (the connection is closed).
+    bool TakeBugReport(Peer& peer, PlayerWorld& player, const net::Message& m) {
+#ifndef SR_BUG_REPORTS
+        // A build without them (CMake SR_BUG_REPORTS=OFF): the player told once a report, nothing kept.
+        (void)player;
+        if (m.id == proto::BugReport::kId) TellNotice(peer, "Bug reports are not taken by this server.");
+        return m.id == proto::BugReport::kId || m.id == proto::BugReportPart::kId;
+#else
+        if (m.id == proto::BugReport::kId) {
+            proto::BugReport report;
+            if (!proto::Decode(m.payload, report) || report.imageBytes > proto::kBugImageMax ||
+                report.category >= std::size(proto::kBugCategories)) {
+                return false;
+            }
+            // At most kBugReportsPerHour an account (counted as each comes in).
+            auto& times = bugReportTimes[peer.account];
+            const Clock::time_point now = Clock::now();
+            while (!times.empty() && now - times.front() > std::chrono::hours(1)) times.pop_front();
+            if (times.size() >= kBugReportsPerHour) {
+                bugReports.erase(peer.id);
+                TellNotice(peer, "You have sent several bug reports in the last hour: please wait a while before the next one.");
+                return true;
+            }
+            times.push_back(now);
+            BugReportIn& in = bugReports[peer.id];
+            in.image.clear();
+            in.report = std::move(report);
+            in.image.reserve(in.report.imageBytes);
+            if (in.report.imageBytes == 0) FinishBugReport(peer, player);
+            return true;
+        }
+        if (m.id != proto::BugReportPart::kId) return false;
+        proto::BugReportPart part;
+        if (!proto::Decode(m.payload, part)) return false;
+        const auto it = bugReports.find(peer.id);
+        if (it == bugReports.end()) return true; // its report refused or gone: the rest of it is let go
+        if (it->second.image.size() + part.bytes.size() > it->second.report.imageBytes) return false;
+        it->second.image.insert(it->second.image.end(), part.bytes.begin(), part.bytes.end());
+        if (it->second.image.size() == it->second.report.imageBytes) FinishBugReport(peer, player);
+        return true;
+#endif
+    }
+
+#ifdef SR_BUG_REPORTS
+    // Kept as the website's support ticket (source "client", the account's), the screenshot in the database; the player
+    // told its number or why not.
+    void FinishBugReport(Peer& peer, PlayerWorld& player) {
+        const auto it = bugReports.find(peer.id);
+        if (it == bugReports.end()) return;
+        BugReportIn in = std::move(it->second);
+        bugReports.erase(it);
+        NewTicket t;
+        t.kind = "bug";
+        t.category = std::string(proto::kBugCategories[in.report.category]);
+        t.subject = std::move(in.report.subject);
+        t.body = std::move(in.report.text);
+        t.name = player.name;
+        t.source = "client";
+        t.jid = peer.account;
+        t.address = peer.address;
+        // What the server knows besides the client's own lines: the character, the server and where it stands.
+        std::string info = std::format("character: {}\ngame server: {} ({})", player.name, config.id, config.name);
+        if (const auto place = world->Where(player.entity)) {
+            info += std::format("\nposition: region {} ({}, {}, {}){}", place->position.region, std::lround(place->position.x),
+                                std::lround(place->position.y), std::lround(place->position.z), place->position.layer != 0 ? " in an instance" : "");
+        }
+        t.clientInfo = info + "\n" + in.report.info;
+        if (t.clientInfo.size() > 2000) t.clientInfo.resize(2000);
+        if (const auto refusal = CheckTicket(t)) {
+            TellNotice(peer, "The bug report was not sent: " + *refusal);
+            return;
+        }
+        std::string mime;
+        if (!in.image.empty()) {
+            mime = SupportFileType(std::string_view(reinterpret_cast<const char*>(in.image.data()), std::min<std::size_t>(in.image.size(), 16)));
+            if (!mime.starts_with("image/")) in.image.clear(); // not a picture: the report goes without it
+        }
+        database.Submit([this, peerId = peer.id, name = player.name, t = std::move(t), image = std::move(in.image), mime](Database& db) {
+            const auto made = CreateTicket(db, t);
+            const std::int64_t ticket = made ? made->first : 0;
+            if (made && !image.empty()) AddTicketFileData(db, ticket, "screenshot" + SupportFileExtension(mime), mime, image);
+            completions->Post([this, peerId, name, ticket] {
+                Peer* p = peers->Find(peerId);
+                if (ticket == 0) {
+                    core::LogWarning("{}: {}'s bug report could not be saved", config.name, name);
+                    if (p != nullptr) TellNotice(*p, "The bug report could not be saved; please try again later.");
+                    return;
+                }
+                core::LogInfo("{}: {} sent bug report #{}", config.name, name, ticket);
+                if (p != nullptr) {
+                    TellNotice(*p, std::format("Thank you! Your bug report was sent (ticket #{}). The answer shows on your account page on the website.", ticket));
+                }
+            });
+        });
+    }
+#endif
+
     // --- The website's commands (AdminStore.h) and the GM commands -------------------------
 
     // The server's notice to every player of its world: the chat's notice line and the notice banner.
@@ -10079,6 +10197,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             // Friends, the block list and letters (Community.h): the same.
             if (proto::IsAcademyMessage(m.id)) {
                 if (player.entity != 0 && academies && !academies->Handle(AcademyActorOf(peer.id, player), m.id, m.payload, Clock::now())) peer.connection->Close();
+                return;
+            }
+            // A bug report from the game (SupportProtocol.h; the build's SR_BUG_REPORTS): one that does not decode closes it.
+            if (proto::IsSupportMessage(m.id)) {
+                if (player.entity != 0 && !TakeBugReport(peer, player, m)) peer.connection->Close();
                 return;
             }
             // The Open Market (OpenMarket.h): the same.
@@ -11380,6 +11503,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
 
     void Closed(Peer& peer) {
+        bugReports.erase(peer.id); // a report half sent goes with its connection
         if (!Linger(peer.id)) {
             LeaveWorld(peer.id, false);
             players.erase(peer.id);

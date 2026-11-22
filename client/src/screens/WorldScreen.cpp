@@ -533,9 +533,24 @@ void WorldScreen::SetStage(std::size_t slot, const StageLook& look, float x, flo
         c.active = true;
         return;
     }
+    const bool volumeOnly = c.look.volume != look.volume && StageModel(look) == c.type;
     c.look = look;
     c.nextType = StageModel(look);
     if (c.nextType == c.type) c.nextType = kNoType;
+    // The same model with another volume (the create screen's Body slider): no new spawn, the pose's bones change now.
+    if (volumeOnly && c.type < characterModels_.size()) {
+        const CharacterModel& m = characterModels_[c.type];
+        if (m.ready && m.info && m.info->skeleton) ApplyVolume(c, *m.info->skeleton);
+    }
+}
+
+void WorldScreen::ApplyVolume(Character& c, const assets::SkeletonData& skeleton) {
+    std::vector<float> radial(skeleton.bones.size(), 1.0f);
+    for (const auto& [bone, factor] : c.look.volume) {
+        const int b = skeleton.Find(bone);
+        if (b >= 0) radial[static_cast<std::size_t>(b)] = factor;
+    }
+    c.pose.SetRadialScale(std::move(radial));
 }
 
 void WorldScreen::SetStageTransform(std::size_t slot, const std::array<float, 12>& world) {
@@ -1350,13 +1365,7 @@ void WorldScreen::UpdateCharacters(ScreenContext& context, FrameSnapshot& snapsh
             c.playingTake = c.look.take;
             c.playingSet.clear(); // the model's own clip is its stance's
             c.playingCycle = StageLook::kNoState;
-            // The body's volume: its bones thicker or thinner across their length.
-            std::vector<float> radial(m.info->skeleton->bones.size(), 1.0f);
-            for (const auto& [bone, factor] : c.look.volume) {
-                const int b = m.info->skeleton->Find(bone);
-                if (b >= 0) radial[static_cast<std::size_t>(b)] = factor;
-            }
-            c.pose.SetRadialScale(std::move(radial));
+            ApplyVolume(c, *m.info->skeleton);
             c.handle = streamer_.NewHandle();
             c.spawned = true;
             ++spawned_;
@@ -1395,12 +1404,7 @@ void WorldScreen::UpdateCharacters(ScreenContext& context, FrameSnapshot& snapsh
             c.playingTake = c.look.take;
             c.playingSet.clear();
             c.playingCycle = StageLook::kNoState;
-            std::vector<float> radial(m.info->skeleton->bones.size(), 1.0f);
-            for (const auto& [bone, factor] : c.look.volume) {
-                const int b = m.info->skeleton->Find(bone);
-                if (b >= 0) radial[static_cast<std::size_t>(b)] = factor;
-            }
-            c.pose.SetRadialScale(std::move(radial));
+            ApplyVolume(c, *m.info->skeleton);
         }
         c.handle = streamer_.NewHandle();
         c.spawned = true;

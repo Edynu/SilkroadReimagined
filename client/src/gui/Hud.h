@@ -32,6 +32,8 @@ constexpr int kChat = 1, kMinimap = 10, kPlayerInfo = 11, kUnderBar = 12, kStore
               kTempleGuide = 165;
 // Ours: the performance panel (HudWindows.h PerformancePanel), an id no layout uses.
 constexpr int kPerformance = 9000;
+// Ours: the bug report window (HudWindows.h BugReportWindow; the build's SR_BUG_REPORTS).
+constexpr int kBugReport = 9001;
 // The main window's pages: the ids of the windows nested in it.
 constexpr int kPageInventory = 70, kPageEquipment = 71, kPageParty = 72, kPageSkills = 73, kPageActions = 74,
               kPageCharacter = 75, kPageQuests = 76, kPageAcademy = 77;

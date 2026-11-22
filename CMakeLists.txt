@@ -52,6 +52,10 @@ option(SR_TRACY "Tracy profiler zones (on demand; connect with the Tracy 0.14.1 
 # A public release builds without them (-DSR_DEV_COMMANDS=OFF): its SroGame.exe has no way to turn them on, whatever
 # its settings say. The tests and the skill lab need them, so they are left out of such a build.
 option(SR_DEV_COMMANDS "Developer commands in the game server (OFF for a public release)" ON)
+# The players' bug reports from the game (the HUD's button left of the performance panel, a screenshot with or without the
+# interface): the client's button and window, the game server's taking them into the website's support tickets
+# (sr_support_tickets, the screenshot in sr_support_files). OFF: neither side has them (the server refuses the messages).
+option(SR_BUG_REPORTS "In-game bug reports (client button and window, game server into the support tickets)" ON)
 if(NOT SR_DEV_COMMANDS AND SR_BUILD_TESTS)
     message(STATUS "SR_DEV_COMMANDS is OFF: the tests are not built (they use the developer commands)")
     set(SR_BUILD_TESTS OFF CACHE BOOL "Build the unit and integration tests" FORCE)

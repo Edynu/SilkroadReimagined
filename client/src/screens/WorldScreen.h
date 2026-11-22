@@ -472,6 +472,8 @@ private:
     std::size_t spawned_ = 0;
     // The size a character is drawn at (a stage character's or a dressed walker's height).
     static float ScaleOf(const Character& c) { return c.stage || c.dressed ? c.look.height * c.look.grow : 1.0f; }
+    // The body's volume (StageLook::volume): its bones thicker or thinner across their length, on the character's pose.
+    static void ApplyVolume(Character& c, const assets::SkeletonData& skeleton);
 
     // The crowd (WorldCrowd.cpp): the walkers dressed as the game's players and monsters, fighting
     // with their skills and wearing their buffs and glows.

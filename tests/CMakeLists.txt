@@ -59,6 +59,11 @@ set(SR_HUD_SOURCES Hud HudChat HudGuild HudGuildBoxes HudCommunity HudAcademy Hu
 list(TRANSFORM SR_HUD_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/client/src/gui/)
 list(TRANSFORM SR_HUD_SOURCES APPEND .cpp)
 target_sources(sr_tests PRIVATE ${SR_HUD_SOURCES} ${PROJECT_SOURCE_DIR}/client/src/gui/UiWarmupList.cpp)
+# The bug report's window (the root's SR_BUG_REPORTS), as the client builds it.
+if(SR_BUG_REPORTS)
+    target_sources(sr_tests PRIVATE ${PROJECT_SOURCE_DIR}/client/src/gui/HudBugReport.cpp)
+    target_compile_definitions(sr_tests PRIVATE SR_BUG_REPORTS=1)
+endif()
 target_include_directories(sr_tests PRIVATE ${PROJECT_SOURCE_DIR}/client/src)
 # The servers, run in-process (their database tests need SR_DB_URL).
 if(TARGET sr::login)

@@ -130,8 +130,16 @@ endif()
 
 # The players' build (the client-release preset): a window program without a console, started beside its exe
 # (src/PlayerStart.h), with its version resource and application manifest.
-# Its version: the project's (the root CMakeLists.txt), the one place it is set.
+# Its version: the project's (the root CMakeLists.txt), the one place it is set; every build knows it (the lobby tells the
+# servers, a bug report carries it).
 set(SR_CLIENT_VERSION "${PROJECT_VERSION}")
+target_compile_definitions(SroReimagined PRIVATE SR_CLIENT_VERSION="${SR_CLIENT_VERSION}")
+
+# The players' bug reports (the root's SR_BUG_REPORTS): the HUD's button and window.
+if(SR_BUG_REPORTS)
+    target_sources(SroReimagined PRIVATE src/gui/HudBugReport.cpp src/play/PlayBugReport.cpp)
+    target_compile_definitions(SroReimagined PRIVATE SR_BUG_REPORTS=1)
+endif()
 # The shard a players' build plays on, built into the exe (res/PlayerServer.h.in): its gateway, the servers'
 # certificate (the .pem the servers made, its certificate alone) and the name it was made for.
 set(SR_PLAYER_GATEWAY "" CACHE STRING "The players' build: the shard's gateway, host:port")

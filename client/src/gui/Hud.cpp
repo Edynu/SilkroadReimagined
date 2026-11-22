@@ -69,7 +69,8 @@ void Hud::Create(ui::Interface& ui, ui::Vec2 screen) {
     }
     // The extra quick slots are always there.
     if (const assets::UiLayoutNode* extra = NodeOf(hud::kExtQuickSlots)) ui.Open(*extra);
-    // Ours: the performance panel, collapsed, left of the minimap (Place).
+    // Ours: the performance panel, collapsed, left of the minimap and the COS's icons (it places itself), the bug report's
+    // button at its left.
     assets::UiLayoutNode performance;
     performance.type = "SRPerformancePanel";
     performance.name = "SRPerformancePanel";
@@ -125,7 +126,7 @@ void Hud::Place(ui::Vec2 screen) {
         ui::Rect& r = w->rect;
         switch (w->id()) {
         case hud::kMinimap: r.x = W - 129.0f, r.y = 0.0f; break;
-        case hud::kPerformance: r.x = W - 129.0f - 6.0f - PerformancePanel::kWidth, r.y = 4.0f; break; // ours
+        case hud::kPerformance: break; // ours: it places itself, left of the minimap and the COS out (PerformancePanel::Update)
         case hud::kTimer: r.x = W - 129.0f - r.w, r.y = 68.0f; break;
         case hud::kMainPopup: r.x = W - 44.0f - r.w, r.y = H - 200.0f - r.h; break; // 1.188 (1.150: H - 96)
         case hud::kUnderBar: r.x = std::floor((W - 800.0f) / 2.0f), r.y = H - 52.0f; break;

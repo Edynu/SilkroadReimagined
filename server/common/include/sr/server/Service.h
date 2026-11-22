@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "sr/server/ClientGate.h"
 #include "sr/game/Protocol.h"
 #include "sr/net/Connection.h"
 
@@ -61,6 +62,8 @@ struct PeerLimits {
     double messagesPerSecond = 50.0;
     double messageBurst = 200.0;
     bool budgetLoopback = false;
+    // The oldest client let in (ClientGate.h; null: any).
+    std::shared_ptr<ClientVersionGate> clientGate;
 };
 
 // The connections of one listener, from accept to close.

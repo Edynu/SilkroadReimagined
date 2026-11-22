@@ -83,6 +83,11 @@ constexpr std::uint32_t kMaterialAlphaZero = 128;
 // coordinates moved over time, times a colour between two ends, added to the part's texture. Its mesh record holds
 // the glow's texture in place of a lightmap and its words in place of the scroll rates (MeshTable.h).
 constexpr std::uint32_t kMaterialEquipGlow = 1u << 24;
+// Ours: a worn piece of cover mode 2 (assets::ModelPart::overSkin), laid over the skin it does not hide: its vertices are
+// pushed out along their normals by kOverSkinLift, so a coarse sleeve's flat faces stay over the rounder arm under them
+// (a garment's hands, 2026-11-22: the forearm showed through in streaks).
+constexpr std::uint32_t kMaterialOverSkin = 1u << 25;
+constexpr float kOverSkinLift = 0.06f; // model units (a character stands about 18 tall); the shaders' copy
 // Blended parts: bits 8-11 the source factor, 12-15 the destination factor (D3DBLEND numbers),
 // 16-23 the tint x 100.
 constexpr std::uint32_t kMaterialBlendShift = 8;

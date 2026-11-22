@@ -531,6 +531,11 @@ CREATE TABLE IF NOT EXISTS sr_support_files (
 );
 CREATE INDEX IF NOT EXISTS sr_support_files_ticket ON sr_support_files (ticket_id);
 )sql"},
+    // A file kept in the database itself (a game server's bug report screenshot, SupportStore.h AddTicketFileData: the
+    // website may run on another machine); null for those in SroWeb's web-support folder.
+    {16, R"sql(
+ALTER TABLE sr_support_files ADD COLUMN IF NOT EXISTS data bytea;
+)sql"},
 };
 
 // A shard's schema (sro_vt_shard, ...): characters, items, storage, skills, quick slots; and ours.

@@ -87,6 +87,7 @@ bool ReadProgramOptions(int argc, char** argv, const char* program, std::uint16_
     out.listen.acceptsPerMinute = std::size_t(std::max(0, out.config.GetInt("connects-per-minute", 30)));
     out.messagesPerSecond = std::max(0.0, double(out.config.GetInt("messages-per-second", 50)));
     out.messageBurst = std::max(1.0, double(out.config.GetInt("message-burst", 200)));
+    out.clientGate = ClientVersionGate::FromConfig(out.config);
     return true;
 }
 

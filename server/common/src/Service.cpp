@@ -90,7 +90,16 @@ void Peers::Pump(net::Listener& listener, const std::function<void(Peer&, const 
                     peer.connection->Close();
                     break;
                 }
-                const game::proto::Welcome welcome = game::proto::AnswerHello(hello, serverName_);
+                game::proto::Welcome welcome = game::proto::AnswerHello(hello, serverName_);
+                // A players' client older than the shard's floor (ClientGate.h): told where the new one is, as a protocol
+                // mismatch (the clients of before say "out of date" for it).
+                if (welcome.result == game::proto::WelcomeResult::Accepted && limits_.clientGate) {
+                    if (auto refusal = limits_.clientGate->Refuse(hello.client)) {
+                        core::LogInfo("{}: {} greets as '{}': turned away, out of date", serverName_, peer.address, hello.client);
+                        welcome.result = game::proto::WelcomeResult::ProtocolMismatch;
+                        welcome.reason = std::move(*refusal);
+                    }
+                }
                 SendMessage(*peer.connection, welcome);
                 if (welcome.result != game::proto::WelcomeResult::Accepted) {
                     peer.connection->CloseAfterSend();

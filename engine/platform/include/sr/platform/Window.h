@@ -84,4 +84,7 @@ private:
     bool resized_ = false;
 };
 
+// Opens an http(s) address in the player's browser (an update's download page); false for anything else or a failure.
+bool OpenUrl(const std::string& url);
+
 } // namespace sr::platform

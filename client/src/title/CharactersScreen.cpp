@@ -51,9 +51,12 @@ void CharactersScreen::Enter(ScreenContext& context) {
         autoSelect_ = context.config.GetString("select", "");
     }
     exitOnSelect_ = context.config.GetBool("exit-on-select", false);
-    autoPedestal_ = context.config.GetBool("pedestal", false);
+    // --pedestal-after-restart: the same, but only back from --logout-after's Restart (a create screen's tries after a world).
+    const bool pedestalNow = shared_->restarted ? context.config.GetBool("pedestal-after-restart", false) : false;
+    autoPedestal_ = context.config.GetBool("pedestal", false) || pedestalNow;
     const std::string pick = context.config.GetString("pick", "");
     autoPick_ = pick == "europe" ? 0 : pick == "china" ? 1 : -1;
+    if (context.config.GetBool("pedestal-after-restart", false) && !shared_->restarted) autoPick_ = -1;
     europe_ = context.config.GetString("race", "china") == "europe";
     male_ = context.config.GetString("sex", "man") != "woman";
 }

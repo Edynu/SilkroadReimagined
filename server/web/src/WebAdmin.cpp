@@ -851,7 +851,9 @@ void WebAdmin::Register(httplib::Server& http) {
         const auto gone = OnPool<std::optional<std::vector<std::string>>>(Pool(), [id](Database& db) { return web::DeleteTicket(db, id); });
         if (!gone || !*gone) return Refuse(res, 404, "ticket", "No such ticket.");
         std::error_code ec;
-        for (const std::string& stored : **gone) fs::remove(fs::absolute(Config().supportDir) / stored, ec);
+        for (const std::string& stored : **gone) {
+            if (!stored.starts_with("db:")) fs::remove(fs::absolute(Config().supportDir) / stored, ec); // "db:": in the database, gone with it
+        }
         fs::remove(fs::absolute(Config().supportDir) / std::to_string(id), ec);
         Audit(&*who, who->name, host_.visitor(req), "ticket-delete", std::format("#{}", id));
         Answer(res, 200, {{"ok", true}});
@@ -860,19 +862,30 @@ void WebAdmin::Register(httplib::Server& http) {
     http.Get(R"(/api/admin/tickets/(\d+)/files/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
         if (!Guard(req, res, false, false)) return;
         const std::int64_t ticket = std::atoll(req.matches[1].str().c_str()), file = std::atoll(req.matches[2].str().c_str());
-        const auto found = OnPool<std::optional<std::pair<std::string, std::string>>>(Pool(), [ticket, file](Database& db) -> std::optional<std::pair<std::string, std::string>> {
-            const QueryResult r = db.Query("SELECT stored, mime FROM sro_vt_account.sr_support_files WHERE id = $1 AND ticket_id = $2", {file, ticket});
+        struct Found {
+            std::string stored, mime;
+            std::optional<std::vector<std::uint8_t>> data; // a game server's screenshot, kept in the database
+        };
+        const auto found = OnPool<std::optional<Found>>(Pool(), [ticket, file](Database& db) -> std::optional<Found> {
+            const QueryResult r = db.Query("SELECT stored, mime, data FROM sro_vt_account.sr_support_files WHERE id = $1 AND ticket_id = $2", {file, ticket});
             if (!r.Ok() || r.Rows() != 1) return std::nullopt;
-            return std::pair{r.Text(0, 0), r.Text(0, 1)};
+            Found f{r.Text(0, 0), r.Text(0, 1), std::nullopt};
+            if (!r.IsNull(0, 2)) f.data = r.Bytes(0, 2);
+            return f;
         });
         if (!found || !*found) return Refuse(res, 404, "file", "No such file.");
-        const fs::path path = fs::absolute(Config().supportDir) / (*found)->first;
-        std::error_code ec;
-        if (!fs::is_regular_file(path, ec)) return Refuse(res, 404, "file", "The file is gone.");
         res.set_header("Content-Disposition", "inline");
         res.set_header("Cache-Control", "private, max-age=3600");
         res.set_header("Content-Security-Policy", "default-src 'none'; sandbox");
-        res.set_file_content(path.string(), (*found)->second);
+        if ((*found)->data) {
+            const std::vector<std::uint8_t>& bytes = *(*found)->data;
+            res.set_content(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), (*found)->mime);
+            return;
+        }
+        const fs::path path = fs::absolute(Config().supportDir) / (*found)->stored;
+        std::error_code ec;
+        if (!fs::is_regular_file(path, ec)) return Refuse(res, 404, "file", "The file is gone.");
+        res.set_file_content(path.string(), (*found)->mime);
     });
 
     // The client's download (SroDeploy's zip): what the site shows, and its VirusTotal link set by hand (for this file only).

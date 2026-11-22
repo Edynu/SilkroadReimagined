@@ -768,6 +768,8 @@ TEST_CASE("outfit report for a few creation outfits") {
                                       "ITEM_CH_W_CLOTHES_01_FA_A_DEF", "ITEM_CH_SPEAR_01_A_DEF"}},
         {"CHAR_EU_MAN_NOBLE", {"ITEM_EU_M_HEAVY_01_BA_A_DEF", "ITEM_EU_M_HEAVY_01_LA_A_DEF",
                                "ITEM_EU_M_HEAVY_01_FA_A_DEF", "ITEM_EU_SWORD_01_A_DEF", "ITEM_EU_SHIELD_01_A_DEF"}},
+        // A garment's hands (cover mode 2) over the forearm (the user's report 2026-11-22).
+        {"CHAR_CH_WOMAN_KANGSI", {"ITEM_CH_W_CLOTHES_01_BA_A", "ITEM_CH_W_CLOTHES_02_AA_A"}},
     };
     for (const Outfit& outfit : outfits) {
         const ObjectRow* row = characters.Find(outfit.body);
@@ -2657,7 +2659,7 @@ TEST_CASE("Magic POP's data: 3,302 prizes and 42 consolations whose weights sum 
     CHECK(empty == 4);
 }
 
-TEST_CASE("The body under worn pieces: a part is left out only where the pieces lie on it (the user's report 2026-11-18)") {
+TEST_CASE("The body under worn pieces: only a mode 1 piece's cover table hides it, as the original's (2026-11-22)") {
     const auto dir = GameDir();
     if (dir.empty()) {
         MESSAGE("SR_GAME_DIR not set - skipped");
@@ -2672,8 +2674,8 @@ TEST_CASE("The body under worn pieces: a part is left out only where the pieces 
     sr::assets::ItemTable items;
     REQUIRE_MESSAGE(characters.Load(fs, error), error);
     REQUIRE_MESSAGE(items.Load(fs, error), error);
-    // The body's parts an outfit leaves out (their file names), the shares of the candidates printed.
-    const auto leftOut = [&](const char* body, std::vector<const char*> worn) {
+    // The body's meshes an outfit hides (their file names).
+    const auto hidden = [&](const char* body, std::vector<const char*> worn) {
         const sr::assets::ObjectRow* figure = characters.Find(std::string_view(body));
         REQUIRE(figure != nullptr);
         std::vector<std::uint32_t> ids;
@@ -2687,28 +2689,25 @@ TEST_CASE("The body under worn pieces: a part is left out only where the pieces 
         sr::assets::ModelData model;
         sr::assets::OutfitReport report;
         REQUIRE_MESSAGE(sr::assets::AssembleOutfit(fs, d.body, d.items, model, report, error), error);
-        std::vector<const sr::assets::MeshData*> over;
-        for (const auto& part : model.parts) {
-            if (part.outfitItem >= 0) over.push_back(&part.mesh);
-        }
-        std::string text = std::string(body) + std::format(" covered 0x{:x}:", d.covered);
-        for (const auto& part : model.parts) {
-            if (part.outfitItem < 0 && part.meshPath.find("\\char\\") != std::string::npos) {
-                text += std::format("\n  {:48} {:.2f}", part.meshPath.substr(part.meshPath.find_last_of('\\') + 1),
-                                    sr::assets::CoveredShare(part.mesh, over, sr::assets::kCoverReach));
-            }
-        }
-        MESSAGE(text);
         std::set<std::string> names;
-        for (const std::string& path : sr::assets::LeaveOutCoveredBody(model, d.covered)) names.insert(path.substr(path.find_last_of('\\') + 1));
+        for (const std::string& path : report.hiddenMeshes) names.insert(path.substr(path.find_last_of('\\') + 1));
+        std::string text = std::string(body) + " hides:";
+        for (const std::string& n : names) text += " " + n;
+        MESSAGE(text);
         return names;
     };
-    // The thief's suit lies on the whole body (tighter than it): every part under it goes.
-    const auto thief = leftOut("CHAR_CH_MAN_MONK", {"ITEM_CH_M_TRADE_THIEF_04"});
+    // The thief's suit lists the whole body but the face (its keys' values 0 and 1): all of it is hidden under it.
+    const auto thief = hidden("CHAR_CH_MAN_MONK", {"ITEM_CH_M_TRADE_THIEF_04"});
     for (const char* part : {"man_torso_upper.bms", "man_torso_lower.bms", "man_arm_upper.bms", "man_arm_lower.bms", "man_pelvis.bms", "man_thigh.bms", "man_calf.bms"}) {
         CHECK_MESSAGE(thief.contains(part), part);
     }
-    // A European woman's first heavy set: the top ends above the waist, so the body's lower torso stays (Mage, 2026-11-18).
-    const auto mage = leftOut("CHAR_EU_WOMAN_NOBLE", {"ITEM_EU_W_HEAVY_01_BA_A_DEF", "ITEM_EU_W_HEAVY_01_LA_A_DEF", "ITEM_EU_W_HEAVY_01_FA_A_DEF"});
+    // A garment's top (keys 2 and 3, the second's value 1) hides both torso meshes; its hands (mode 2) hide nothing:
+    // the forearm is drawn under them.
+    const auto garment = hidden("CHAR_CH_WOMAN_KANGSI", {"ITEM_CH_W_CLOTHES_01_BA_A", "ITEM_CH_W_CLOTHES_02_AA_A"});
+    CHECK(garment.contains("woman_torso_upper.bms"));
+    CHECK(garment.contains("woman_torso_lower.bms"));
+    CHECK_FALSE(garment.contains("woman_arm_fore.bms"));
+    // A European woman's first heavy top ends above the waist and does not list it: her lower torso stays (Mage, 2026-11-18).
+    const auto mage = hidden("CHAR_EU_WOMAN_NOBLE", {"ITEM_EU_W_HEAVY_01_BA_A_DEF", "ITEM_EU_W_HEAVY_01_LA_A_DEF", "ITEM_EU_W_HEAVY_01_FA_A_DEF"});
     CHECK_FALSE(mage.contains("woman_torso_lower.bms"));
 }

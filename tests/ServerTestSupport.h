@@ -219,6 +219,16 @@ public:
         return Expect(welcome) && welcome.result == proto::WelcomeResult::Accepted;
     }
 
+    // Greets as `client` (a players' client names its version): the server's whole answer.
+    proto::Welcome GreetAs(const std::string& client) {
+        proto::Hello hello;
+        hello.client = client;
+        Send(hello);
+        proto::Welcome welcome;
+        if (!Expect(welcome)) welcome.result = proto::WelcomeResult::Refused;
+        return welcome;
+    }
+
     bool WaitClosed(std::chrono::milliseconds timeout = 10s) {
         const auto end = std::chrono::steady_clock::now() + timeout;
         while (connection_->State() != net::ConnectionState::Closed) {

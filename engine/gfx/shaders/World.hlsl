@@ -57,8 +57,10 @@ VSOutput VSMain(uint vertexId : SV_VertexID, [[vk::builtin("BaseInstance")]] uin
         v = pc.geometry + vertexOffset + uint64_t(vertexId) * stride;
         lightmapped = (vertexFlags & 1) != 0;
     }
-    const float3 position = vk::RawBufferLoad<float3>(v, 4);
+    float3 position = vk::RawBufferLoad<float3>(v, 4);
     const float3 normal = vk::RawBufferLoad<float3>(v + 12, 4);
+    // gfx::kMaterialOverSkin: a worn piece over the skin, pushed out along its normals by kOverSkinLift.
+    if ((vk::RawBufferLoad<uint>(mesh + 20, 4) & (1u << 25)) != 0 && dot(normal, normal) > 0.0) position += normalize(normal) * 0.06;
 
     const uint64_t record = pc.instances + uint64_t(draw.x) * 64;
     const float4 r0 = vk::RawBufferLoad<float4>(record, 16);

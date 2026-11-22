@@ -78,9 +78,20 @@ struct HudPerformance {
     bool connected = false;
 };
 
+// A bug report as the report window sends it (ours; the build's SR_BUG_REPORTS): what the player wrote and how the
+// screenshot is to be taken (the report window is never in it).
+struct BugReportForm {
+    int category = 0; // game::proto::kBugCategories
+    std::string subject, text;
+    bool screenshot = true;
+    bool withInterface = true; // the HUD in the screenshot (else the scene alone)
+};
+
 struct HudContext {
     // The performance panel's numbers (null: none, e.g. the gallery).
     const HudPerformance* performance = nullptr;
+    // The bug report's sending (null: no reports, the performance panel shows no report button).
+    std::function<void(BugReportForm)> bugReport;
     game::PlayerState* state = nullptr;
     // The player's guild and union (the guild window; null: none yet), its requests to the server
     // (GuildProtocol.h, encoded; null: offline) and the 1.188 windows' binary layouts by path.
@@ -739,17 +750,51 @@ public:
     PerformancePanel(const assets::UiLayoutNode& node, HudContext& context) : Widget(node), context_(context) {
         interactive = true;
     }
+    void Created(ui::Interface& ui) override { ui_ = &ui; }
     void Update(ui::Frame& frame) override;
     void Draw(ui::Frame& frame) override;
     void Mouse(ui::Frame& frame) override;
     bool expanded = false;
-    // Its size for its state (the lines it shows).
+    // Its size for its state (the lines it shows); the bug report's button (with HudContext::bugReport) at its left.
     static constexpr float kWidth = 184.0f, kHeader = 16.0f, kLine = 14.0f;
+    static constexpr float kButton = 18.0f, kButtonGap = 4.0f;
     static constexpr int kExpandedLines = 6;
+    // Its right edge from the screen's right: left of the minimap, and of the COS's status icons when any are out
+    // (HudCos.cpp: the first 172 from the right, 48 a further one, the picked one's outline 11 out).
+    static float RightGap(std::size_t coses);
 
 private:
+    bool HasButton() const { return static_cast<bool>(context_.bugReport); }
+    ui::Rect ButtonRect() const; // on the screen
     HudContext& context_;
+    ui::Interface* ui_ = nullptr;
 };
+
+#ifdef SR_BUG_REPORTS
+// The bug report window (ours; HudBugReport.cpp, hud::kBugReport): what kind of bug, a subject and the description, and the
+// screenshot (with or without the interface; the window itself never in it); Send gives it to HudContext::bugReport.
+// Drawn as the performance panel is (a dark box, the game's gold edge, the game's font), the controls the game's own.
+class BugReportWindow : public ui::Widget {
+public:
+    BugReportWindow(const assets::UiLayoutNode& node, HudContext& context) : Widget(node), context_(context) { interactive = true; }
+    void Created(ui::Interface& ui) override;
+    void Draw(ui::Frame& frame) override;
+    void Mouse(ui::Frame& frame) override;
+    bool OnNotice(const ui::Notice& notice) override;
+    static constexpr float kWidth = 420.0f, kHeight = 372.0f;
+
+private:
+    void Send();
+    HudContext& context_;
+    ui::Interface* ui_ = nullptr;
+    int category_ = 0;
+    std::string problem_;   // why Send was refused (shown over the buttons)
+    double problemAt_ = -1; // when (shown a few seconds)
+    double now_ = 0;
+};
+// Opens the report window (centred; a second press closes it).
+void ToggleBugReport(ui::Interface& ui, HudContext& context);
+#endif
 
 // CIFRegionView (83): the area's name, description and monster levels across the top when the
 // player comes into another area: 0.5 s in, 3 s, 0.5 s out.

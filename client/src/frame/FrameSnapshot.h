@@ -167,6 +167,10 @@ struct FrameSnapshot {
         scene.worldPalettes = {};
         scene.shadows.clear();
         scene.effects.Clear();
+        // Set by a screen each frame it wants them: a slot used by the game screen's character window last must not hand its
+        // own camera to the next screen's overlay (the create screen's character went there after a Restart, unseen).
+        scene.overlayOwnCamera = false;
+        scene.probeX = scene.probeY = -1.0f;
         worldCommands.clear();
         portraits.clear();
         uiUnder.Clear();

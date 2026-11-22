@@ -53,6 +53,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID) {
         normal = Transform(b0, normal, 0.0) * weights.x + Transform(b1, normal, 0.0) * weights.y;
     }
 
+    // gfx::kMaterialOverSkin: a worn piece over the skin, pushed out along its normals by kOverSkinLift.
+    if ((pc.material & (1u << 25)) != 0 && dot(normal, normal) > 0.0) position += normalize(normal) * 0.06;
+
     const float4 r0 = vk::RawBufferLoad<float4>(record, 16);
     const float4 r1 = vk::RawBufferLoad<float4>(record + 16, 16);
     const float4 r2 = vk::RawBufferLoad<float4>(record + 32, 16);

@@ -38,6 +38,7 @@ int main(int argc, char** argv) {
     config.listen = options.listen;
     config.peers.messagesPerSecond = options.messagesPerSecond;
     config.peers.messageBurst = options.messageBurst;
+    config.peers.clientGate = options.clientGate;
     server::GatewayServer gateway;
     if (!gateway.Start(config, error)) {
         core::LogError("SroGateway: {}", error);

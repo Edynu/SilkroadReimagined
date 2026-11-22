@@ -9,8 +9,9 @@
 //   item's attach bone (vertices on it moved by the attach bone's bind position),
 //   then the root. Rigid pieces follow the
 //   attach bone as a whole.
-// - An item whose part link replaces the skin (cover mode 1) hides the body meshes
-//   whose cover keys it lists (see PartLink in Model.h).
+// - An item of cover mode 1 hides the body meshes whose cover keys it lists, as the
+//   original's compound character does when it attaches one; a mode 2 piece hides
+//   nothing (see PartLink in Model.h). Nothing else leaves the body out.
 
 #include <cstdint>
 #include <string>
@@ -40,18 +41,5 @@ struct BindPose {
 };
 std::vector<BindPose> BindWorld(const SkeletonData& skeleton);
 std::vector<std::array<float, 3>> BindWorldPositions(const SkeletonData& skeleton);
-
-// The share (0..1) of a mesh's vertices that lie within `reach` of a triangle of the others (bind pose, model space):
-// how much of a body part the worn pieces lie on.
-float CoveredShare(const MeshData& part, const std::vector<const MeshData*>& over, float reach);
-
-// The body's own parts under the regions the shown pieces cover (DressedCharacter::covered: 0x02 the torso, 0x04 the
-// upper arm, 0x08 the lower arm, 0x10 the pelvis and thigh, 0x20 the calf) left out of an assembled outfit, each only
-// where the pieces lie on it: kCoverShare of its vertices within kCoverReach of their triangles (ours,
-// a suit tighter than the body, the thief's, would let it show through; a short top leaves the waist bare, so it stays).
-// Returns the parts left out.
-constexpr float kCoverReach = 0.3f; // model units (a character stands about 18 tall)
-constexpr float kCoverShare = 0.9f;
-std::vector<std::string> LeaveOutCoveredBody(ModelData& model, std::uint32_t covered);
 
 } // namespace sr::assets

@@ -366,21 +366,12 @@ void AssetStore::LoadModel(AssetId id, Record& r) {
         }
         std::string body = parts.front();
         parts.erase(parts.begin());
-        // "#coverN": the regions shown pieces cover (assets::DressedCharacter::covered); the body's own parts the pieces lie on
-        // there are left out.
-        std::uint32_t covered = 0;
-        if (const std::size_t mark = body.find("#cover"); mark != std::string::npos) {
-            covered = std::uint32_t(std::strtoul(body.c_str() + mark + 6, nullptr, 16));
-            body.erase(mark);
-        }
         for (std::string& item : parts) {
             assets::EquipGlow glow;
             glows.push_back(assets::SplitGlow(item, glow) ? std::optional<assets::EquipGlow>(std::move(glow)) : std::nullopt);
         }
         assets::OutfitReport report;
         if (!assets::AssembleOutfit(files_, body, parts, model, report, error)) return Fail(r, error);
-        // Under the pieces, the body's parts they lie on (assets::LeaveOutCoveredBody).
-        assets::LeaveOutCoveredBody(model, covered);
         for (std::string& w : report.warnings) model.warnings.push_back(std::move(w));
     } else if (const std::size_t mark = r.path.find("#set"); mark != std::string::npos) {
         // "model.bsr#setN": dressed in the resource's material set N (a champion's look).
@@ -435,6 +426,7 @@ void AssetStore::LoadModel(AssetId id, Record& r) {
                 p.materialFlags |= kMaterialAlphaTest;
             }
             if ((flags & 0x8u) != 0) p.materialFlags |= kMaterialNightLight;
+            if (part.overSkin) p.materialFlags |= kMaterialOverSkin;
             if ((flags & 0x1u) != 0) p.materialFlags |= kMaterialTwoSided;
             if (core::NormalizeAssetPath(part.meshPath).find("\\nature\\") != std::string::npos) p.materialFlags |= kMaterialFoliage;
             std::copy(std::begin(part.material.diffuse), std::end(part.material.diffuse), p.diffuse.begin());

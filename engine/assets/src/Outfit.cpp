@@ -1,7 +1,6 @@
 #include "sr/assets/Outfit.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cmath>
 #include <unordered_set>
@@ -95,10 +94,13 @@ bool AssembleOutfit(const FileSystem& fs, const std::string& bodyPath, const std
             report.warnings.push_back(itemPath + ": " + itemError);
             continue;
         }
-        // Covering.
+        // Covering: a mode 1 piece hides the body's meshes of its keys; a mode 2 piece is drawn over them.
+        bool overSkin = false;
         if (auto file = fs.Read(itemPath)) {
             PartLink link;
-            if (FindPartLink(file->Bytes(), false, item.resource.meshPaths.size(), link) && link.c == 1) {
+            const bool found = FindPartLink(file->Bytes(), false, item.resource.meshPaths.size(), link);
+            overSkin = found && link.c == 2 && link.b <= 5; // the armour's and the garments' parts, not a weapon
+            if (found && link.c == 1) {
                 for (const auto& pair : link.pairs) {
                     for (const auto& body : bodyLink.pairs) {
                         if (body[0] == pair[0]) hidden.insert(static_cast<int>(body[1]));
@@ -224,6 +226,7 @@ bool AssembleOutfit(const FileSystem& fs, const std::string& bodyPath, const std
             part.meshIndex = -1; // not a body mesh
             part.allowAlphaTest = false;
             part.outfitItem = itemIndex;
+            part.overSkin = overSkin;
             out.parts.push_back(std::move(part));
         }
         for (const std::string& w : item.warnings) report.warnings.push_back(itemPath + ": " + w);
@@ -241,117 +244,6 @@ bool AssembleOutfit(const FileSystem& fs, const std::string& bodyPath, const std
         out.parts = std::move(kept);
     }
     return true;
-}
-
-namespace {
-
-using Point = std::array<float, 3>;
-
-float Dot(const Point& a, const Point& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-Point Sub(const Point& a, const Point& b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
-
-// The squared distance from p to the triangle abc (the closest point by its Voronoi region).
-float TriangleDistance2(const Point& p, const Point& a, const Point& b, const Point& c) {
-    const Point ab = Sub(b, a), ac = Sub(c, a), ap = Sub(p, a);
-    const float d1 = Dot(ab, ap), d2 = Dot(ac, ap);
-    const auto at = [&](const Point& q) { const Point d = Sub(p, q); return Dot(d, d); };
-    if (d1 <= 0 && d2 <= 0) return at(a);
-    const Point bp = Sub(p, b);
-    const float d3 = Dot(ab, bp), d4 = Dot(ac, bp);
-    if (d3 >= 0 && d4 <= d3) return at(b);
-    const float vc = d1 * d4 - d3 * d2;
-    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
-        const float v = d1 / (d1 - d3);
-        return at({a[0] + v * ab[0], a[1] + v * ab[1], a[2] + v * ab[2]});
-    }
-    const Point cp = Sub(p, c);
-    const float d5 = Dot(ab, cp), d6 = Dot(ac, cp);
-    if (d6 >= 0 && d5 <= d6) return at(c);
-    const float vb = d5 * d2 - d1 * d6;
-    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
-        const float w = d2 / (d2 - d6);
-        return at({a[0] + w * ac[0], a[1] + w * ac[1], a[2] + w * ac[2]});
-    }
-    const float va = d3 * d6 - d5 * d4;
-    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
-        const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        return at({b[0] + w * (c[0] - b[0]), b[1] + w * (c[1] - b[1]), b[2] + w * (c[2] - b[2])});
-    }
-    const float denom = 1.0f / (va + vb + vc), v = vb * denom, w = vc * denom;
-    return at({a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w});
-}
-
-} // namespace
-
-float CoveredShare(const MeshData& part, const std::vector<const MeshData*>& over, float reach) {
-    if (part.vertices.empty()) return 0.0f;
-    // The others' triangles with their boxes widened by the reach.
-    struct Triangle {
-        Point a, b, c, low, high;
-    };
-    std::vector<Triangle> triangles;
-    for (const MeshData* mesh : over) {
-        if (mesh == nullptr) continue;
-        for (std::size_t i = 0; i + 2 < mesh->indices.size(); i += 3) {
-            if (mesh->indices[i] >= mesh->vertices.size() || mesh->indices[i + 1] >= mesh->vertices.size() || mesh->indices[i + 2] >= mesh->vertices.size()) continue;
-            Triangle t;
-            const auto& va = mesh->vertices[mesh->indices[i]].position;
-            const auto& vb = mesh->vertices[mesh->indices[i + 1]].position;
-            const auto& vc = mesh->vertices[mesh->indices[i + 2]].position;
-            t.a = {va[0], va[1], va[2]};
-            t.b = {vb[0], vb[1], vb[2]};
-            t.c = {vc[0], vc[1], vc[2]};
-            for (int k = 0; k < 3; ++k) {
-                t.low[k] = std::min({t.a[k], t.b[k], t.c[k]}) - reach;
-                t.high[k] = std::max({t.a[k], t.b[k], t.c[k]}) + reach;
-            }
-            triangles.push_back(t);
-        }
-    }
-    const float reach2 = reach * reach;
-    std::size_t near = 0;
-    for (const MeshVertex& v : part.vertices) {
-        const Point p{v.position[0], v.position[1], v.position[2]};
-        for (const Triangle& t : triangles) {
-            if (p[0] < t.low[0] || p[0] > t.high[0] || p[1] < t.low[1] || p[1] > t.high[1] || p[2] < t.low[2] || p[2] > t.high[2]) continue;
-            if (TriangleDistance2(p, t.a, t.b, t.c) <= reach2) {
-                ++near;
-                break;
-            }
-        }
-    }
-    return float(near) / float(part.vertices.size());
-}
-
-std::vector<std::string> LeaveOutCoveredBody(ModelData& model, std::uint32_t covered) {
-    std::vector<std::string> left;
-    if (covered == 0) return left;
-    // A body part and the region over it: the torso the mail's (0x02), the upper arm the shoulders' (0x04), the lower arm
-    // the hands' (0x08), the pelvis and thigh the pants' (0x10), the calf the boots' (0x20).
-    static constexpr std::pair<const char*, std::uint32_t> kParts[] = {
-        {"_torso_upper.bms", 0x02}, {"_torso_lower.bms", 0x02}, {"_arm_upper.bms", 0x04}, {"_arm_lower.bms", 0x08},
-        {"_arm_fore.bms", 0x08},    {"_pelvis.bms", 0x10},      {"_thigh.bms", 0x10},     {"_calf.bms", 0x20}};
-    std::vector<const MeshData*> over;
-    for (const ModelPart& part : model.parts) {
-        if (part.outfitItem >= 0) over.push_back(&part.mesh);
-    }
-    const auto underPieces = [&](const ModelPart& part) {
-        if (part.outfitItem >= 0) return false;
-        std::string path = part.meshPath;
-        std::replace(path.begin(), path.end(), '/', '\\');
-        std::transform(path.begin(), path.end(), path.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
-        if (path.find("\\char\\") == std::string::npos) return false;
-        for (const auto& [suffix, region] : kParts) {
-            if (path.ends_with(suffix)) return (covered & region) != 0 && CoveredShare(part.mesh, over, kCoverReach) >= kCoverShare;
-        }
-        return false;
-    };
-    std::erase_if(model.parts, [&](const ModelPart& part) {
-        if (!underPieces(part)) return false;
-        left.push_back(part.meshPath);
-        return true;
-    });
-    return left;
 }
 
 } // namespace sr::assets

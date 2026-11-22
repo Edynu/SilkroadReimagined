@@ -9,6 +9,8 @@ add_library(sr_server STATIC
     common/src/Schema.cpp
     common/src/Crypto.cpp
     common/src/Store.cpp
+    common/src/SupportStore.cpp
+    common/src/ClientGate.cpp
     common/src/AdminStore.cpp
     common/src/GuildStore.cpp
     common/src/ShardLayout.cpp
@@ -84,6 +86,9 @@ target_include_directories(sr_gameserver PUBLIC game/include)
 target_link_libraries(sr_gameserver PUBLIC sr::server sr::game sr::assets PRIVATE sr_compile_options)
 if(SR_DEV_COMMANDS)
     target_compile_definitions(sr_gameserver PUBLIC SR_DEV_COMMANDS=1)
+endif()
+if(SR_BUG_REPORTS)
+    target_compile_definitions(sr_gameserver PRIVATE SR_BUG_REPORTS=1)
 endif()
 
 add_executable(SroGame game/src/main.cpp)

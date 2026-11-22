@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <format>
+#include <fstream>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -14,6 +16,7 @@
 #include "sr/game/TitleProtocol.h"
 #include "sr/net/Connection.h"
 #include "sr/server/Database.h"
+#include "sr/server/ClientGate.h"
 #include "sr/server/GatewayServer.h"
 #include "sr/server/LoginServer.h"
 #include "sr/server/Service.h"
@@ -34,7 +37,7 @@ TEST_CASE("Server database: the original's layout migrates once, then stays; a s
     std::string error;
     CHECK(server::MigrateSchema(t.Db(), error));
     CHECK(server::SchemaVersion(t.Db()) == server::LatestSchemaVersion());
-    CHECK(server::LatestSchemaVersion() == 14);     // the original's account tables + ours; 3: sr_beta_keys; 4: the website's administration; 5: the session's character; 6: the site's players; 7: the shard's capacity; 8: the session's token; 9: silk (sk_silk and its logs, the starting silk); 10: the skill lab's tables; 11: its RE notes by side, notes by aspect, the files check; 12: sr_server_samples; 13: sr_lab_videos; 14: sr_lab_items
+    CHECK(server::LatestSchemaVersion() == 16);     // the original's account tables + ours; 3: sr_beta_keys; 4: the website's administration; 5: the session's character; 6: the site's players; 7: the shard's capacity; 8: the session's token; 9: silk (sk_silk and its logs, the starting silk); 10: the skill lab's tables; 11: its RE notes by side, notes by aspect, the files check; 12: sr_server_samples; 13: sr_lab_videos; 14: sr_lab_items; 15: the support tickets; 16: a ticket file kept in the database
     CHECK(server::LatestShardSchemaVersion() == 29); // the original's shard tables + ours; 28: _openmarket (the Open Market); 27: sr_academy_matching (the Academy's matching list); 26: the Academy's tables (_trainingcamp...); 25: _timedjobforpet (the pets' timed jobs); 24: sr_event_entries, _flagworld_eventparticipants (the events); 22: _inventoryforlinkedstorage (the magic cubes); 20: _siegefortressobject and the forges' (the fortress war); 19: _charnicknamelist (the jobs' aliases); 18: sr_auto_potion's rows of ours; 17: _bindingoptionwithitem again (merged: both lines of work took 15); 16: _charcos, _invcos (the pets); 15: _bindingoptionwithitem; 14: sr_unique_events; 2: _charquest, buffs in _timedjob; 3: the guilds' tables; 4: sr_crests; 5: sr_auto_potion; 6: sr_guild_storage_lock; 7: _guildwar; 8: the fortress war's tables; 9: the guild window's; 10: friends, blocks, letters; 11: _rentiteminfo; 12: sr_quests; 13: the collection book, the instance entries
     CHECK(t.Db().Query("SELECT to_regclass('sro_vt_shard._charquest') IS NOT NULL").Bool(0, 0));
     CHECK(t.Db().Query("SELECT to_regclass('sro_vt_shard._charcos') IS NOT NULL").Bool(0, 0));
@@ -411,4 +414,69 @@ TEST_CASE("Servers: loopback addresses") {
     CHECK_FALSE(net::IsLoopbackAddress("10.0.0.1"));
     CHECK_FALSE(net::IsLoopbackAddress("1127.0.0.1"));
     CHECK_FALSE(net::IsLoopbackAddress("::ffff:10.0.0.1"));
+}
+
+TEST_CASE("Client versions: compared by their numbers, read from Hello's name and from SroDeploy's client.json") {
+    using server::ClientVersionGate;
+    CHECK(ClientVersionGate::Older("0.1", "0.1.3"));
+    CHECK(ClientVersionGate::Older("0.1.2", "0.1.3"));
+    CHECK(ClientVersionGate::Older("0.1.9", "0.1.10"));
+    CHECK_FALSE(ClientVersionGate::Older("0.1.3", "0.1.3"));
+    CHECK_FALSE(ClientVersionGate::Older("0.2", "0.1.9"));
+    CHECK_FALSE(ClientVersionGate::Older("0.1.3.0", "0.1.3"));
+    CHECK(ClientVersionGate::ClientVersion("SroReimagined 0.1.2") == "0.1.2");
+    CHECK(ClientVersionGate::ClientVersion("SroReimagined 0.1") == "0.1"); // the clients before 0.1.3
+    CHECK_FALSE(ClientVersionGate::ClientVersion("sr_tests"));
+    CHECK_FALSE(ClientVersionGate::ClientVersion("SroBots"));
+    CHECK(ClientVersionGate::PublishedVersion(R"({"version": "0.1.3", "file": "SroReimagined-0.1.3.zip"})") == "0.1.3");
+    CHECK(ClientVersionGate::PublishedVersion(R"({"file":"a.zip","version":"0.2.0"})") == "0.2.0");
+    CHECK(ClientVersionGate::PublishedVersion(R"({"file":"a.zip"})").empty());
+    CHECK(ClientVersionGate::PublishedVersion(R"({"version":"<script>"})").empty());
+}
+
+TEST_CASE("Servers: a players' client older than the shard's floor is turned away at Hello, told where the new one is") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    // SroDeploy's published client: the floor follows it.
+    const std::filesystem::path patch = std::filesystem::temp_directory_path() / std::format("sr_gate_{}", std::chrono::steady_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(patch / "windows-x64");
+    std::ofstream(patch / "windows-x64" / "client.json") << R"({"version": "0.1.4", "file": "SroReimagined-0.1.4.zip"})";
+    core::Config settings;
+    settings.Set("min-client-version", "0.1.3");
+    settings.Set("client-version-from-patch", "true");
+    settings.Set("web-patch-dir", patch.string());
+    settings.Set("client-download-url", "https://example.com/download");
+    auto gate = server::ClientVersionGate::FromConfig(settings);
+    REQUIRE(gate);
+    CHECK(gate->Required() == "0.1.4");
+
+    server::GatewayServer gateway;
+    server::GatewayConfig config;
+    config.listen = Local();
+    config.databaseUrl = t.Url();
+    config.loginPort = 15780;
+    config.refresh = 50ms;
+    config.peers.clientGate = gate;
+    REQUIRE_MESSAGE(gateway.Start(config, error), error);
+    net::NetService net(1);
+    const auto greet = [&](const std::string& name) {
+        Client client(net, gateway.Port(), [&] { gateway.Poll(2ms); });
+        return client.GreetAs(name);
+    };
+    // The clients of before (all "0.1") and an older one: a protocol mismatch, with the words and the address.
+    for (const char* old : {"SroReimagined 0.1", "SroReimagined 0.1.3"}) {
+        CAPTURE(old);
+        const proto::Welcome w = greet(old);
+        CHECK(w.result == proto::WelcomeResult::ProtocolMismatch);
+        CHECK(w.reason.find("version 0.1.4 is out") != std::string::npos);
+        CHECK(w.reason.find("https://example.com/download") != std::string::npos);
+    }
+    // The published one and newer, and the programs that are not the players' client, come in.
+    CHECK(greet("SroReimagined 0.1.4").result == proto::WelcomeResult::Accepted);
+    CHECK(greet("SroReimagined 0.2.0").result == proto::WelcomeResult::Accepted);
+    CHECK(greet("sr_tests").result == proto::WelcomeResult::Accepted);
+    gateway.Stop();
+    std::error_code ec;
+    std::filesystem::remove_all(patch, ec);
 }

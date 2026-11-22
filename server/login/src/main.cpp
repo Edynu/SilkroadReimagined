@@ -85,6 +85,7 @@ int main(int argc, char** argv) {
     config.listen = options.listen;
     config.peers.messagesPerSecond = options.messagesPerSecond;
     config.peers.messageBurst = options.messageBurst;
+    config.peers.clientGate = options.clientGate;
     server::LoginServer login;
     if (!login.Start(config, error)) {
         core::LogError("SroLogin: {}", error);

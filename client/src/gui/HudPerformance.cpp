@@ -2,6 +2,8 @@
 // connection's latency and traffic, in a small box drawn with the game's own font. One line collapsed, its header
 // clicked to expand or collapse it.
 
+#include <algorithm>
+#include <cmath>
 #include <format>
 #include <string>
 
@@ -31,21 +33,62 @@ std::string Total(std::uint64_t bytes) {
 
 } // namespace
 
-void PerformancePanel::Update(ui::Frame&) {
-    rect.w = kWidth;
+float PerformancePanel::RightGap(std::size_t coses) {
+    constexpr float kMinimap = 129.0f, kGap = 6.0f;
+    if (coses == 0) return kMinimap + kGap;
+    // The leftmost status icon's left edge, its outline included (HudCos.cpp kStatusRight, kStatusStep).
+    return std::max(kMinimap, 172.0f + 48.0f * float(coses - 1) + 11.0f) + kGap;
+}
+
+void PerformancePanel::Update(ui::Frame& frame) {
+    const float button = HasButton() ? kButton + kButtonGap : 0.0f;
+    rect.w = button + kWidth;
     rect.h = kHeader + (expanded ? float(kExpandedLines) * kLine + 4.0f : 0.0f);
+    // At the top, left of the minimap and of the COS's status icons out now (a pet's would hide it).
+    const ui::Vec2 screen = frame.interface.screen();
+    rect.x = std::floor(screen.x - RightGap(context_.coses.size()) - rect.w);
+    rect.y = 4.0f;
+}
+
+ui::Rect PerformancePanel::ButtonRect() const {
+    const ui::Rect r = ScreenRect();
+    return {r.x, r.y - 1.0f, kButton, kButton};
 }
 
 void PerformancePanel::Mouse(ui::Frame& frame) {
-    // A press on the header (the top line) expands or collapses it.
     if (frame.pointer.hovered != this || !frame.input.Pressed(ui::MouseButton::Left)) return;
+    const ui::Vec2 p = frame.pointer.position;
+    if (HasButton()) {
+        const ui::Rect b = ButtonRect();
+        if (p.x >= b.x && p.x <= b.Right() && p.y >= b.y && p.y <= b.Bottom()) {
+#ifdef SR_BUG_REPORTS
+            if (ui_ != nullptr) ToggleBugReport(*ui_, context_);
+#endif
+            return;
+        }
+        if (p.x < b.Right() + kButtonGap) return;
+    }
+    // A press on the header (the top line) expands or collapses it.
     const ui::Rect r = ScreenRect();
-    if (frame.pointer.position.y <= r.y + kHeader) expanded = !expanded;
+    if (p.y <= r.y + kHeader) expanded = !expanded;
 }
 
 void PerformancePanel::Draw(ui::Frame& frame) {
-    const ui::Rect r = ScreenRect();
     const float a = Opacity();
+    ui::Rect r = ScreenRect();
+    if (HasButton()) {
+        // The bug report's button: the game's bug icon in a box like the panel's, lit under the mouse.
+        const ui::Rect b = ButtonRect();
+        const ui::Vec2 m = frame.pointer.position;
+        const bool over = frame.pointer.hovered == this && m.x >= b.x && m.x <= b.Right() && m.y >= b.y && m.y <= b.Bottom();
+        frame.paint.Fill(b, ui::WithAlpha(over ? ui::Rgba(60, 48, 24, 220) : kBack, a));
+        frame.paint.Outline(b, ui::WithAlpha(over ? ui::Rgba(240, 210, 130) : kEdge, a));
+        frame.paint.Image("icon\\item\\etc\\etc_bug_earwig.ddj", {b.x + 1.0f, b.y + 1.0f, b.w - 2.0f, b.h - 2.0f}, {0, 0}, {1, 1},
+                          ui::WithAlpha(ui::kWhite, a));
+        if (over) frame.interface.ShowTooltip("Report a bug", b);
+        r.x += kButton + kButtonGap;
+        r.w -= kButton + kButtonGap;
+    }
     frame.paint.Fill(r, ui::WithAlpha(kBack, a));
     frame.paint.Outline(r, ui::WithAlpha(kEdge, a));
 

@@ -287,6 +287,8 @@ struct ModelPart {
     bool allowAlphaTest = true;
     // The outfit's item it comes from (its place in AssembleOutfit's itemPaths); -1: the body, or not an outfit.
     int outfitItem = -1;
+    // A worn piece of cover mode 2 (PartLink::c): drawn over the body's skin, which stays under it.
+    bool overSkin = false;
     MeshData mesh;
     bool hasMaterial = false;
     MaterialData material;
@@ -332,9 +334,10 @@ bool UseMaterialSet(const FileSystem& fs, ModelData& model, std::uint32_t setId)
 // The attachment table at the very end of a .bsr (after every other section):
 //   u32 a, u32 b, u32 c, u32 count, count x { u32 key, u32 value }   [+ u32 0 on characters]
 // On a character, pairs map a cover key to the mesh (prim) index it hides; on an
-// item, `b` is the equipment part (HA 0, BA 1, LA 2, FA 3, SA 4, AA 5), `c` the
-// cover mode (1 replaces: hide the wearer's meshes with the same keys; 2 is layered
-// over the skin) and the pair keys are the body regions it covers.
+// item, `b` is the equipment part (HA 0, BA 1, LA 2, FA 3, SA 4, AA 5, a weapon 6 / 7,
+// a job suit 16), `c` the cover mode (1: the wearer's meshes with the same keys are hidden
+// while it is worn; 2: nothing is hidden, the piece is drawn over the skin) and the pair
+// keys are the body regions it covers (their values are not read: 0 or 1).
 // Found by scanning back from the end of the file (there is no pointer to it):
 // the largest `count` whose record lines up exactly and passes the checks.
 struct PartLink {

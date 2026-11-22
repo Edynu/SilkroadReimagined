@@ -39,9 +39,11 @@
 // how the clips were found and the files that failed, and quits (exit 3 when anything was missing).
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <utility>
@@ -339,6 +341,22 @@ private:
     void SampleNetwork();
     // The performance panel's numbers (performance_), every frame.
     void SamplePerformance(const ScreenContext& context);
+#ifdef SR_BUG_REPORTS
+    // A bug report from the HUD's window (PlayBugReport.cpp): its screenshot taken on the next frame (the report window
+    // closed, the interface left out unless asked for), read back once written, then sent with the report in parts.
+    void StartBugReport(BugReportForm form);
+    void BugReportFrame(ScreenContext& context, FrameSnapshot& snapshot);
+    struct BugReportOut {
+        enum class Stage : std::uint8_t { Capture, Waiting, Sending } stage = Stage::Capture;
+        BugReportForm form;
+        std::filesystem::path shot; // the screenshot's file, written by the render thread
+        double since = 0;           // when it was asked for (the wait's limit)
+        std::vector<std::uint8_t> image;
+        std::size_t sent = 0;       // the image's bytes sent
+        double nextPart = 0;        // the parts' pace
+    };
+    std::optional<BugReportOut> bugReport_;
+#endif
     std::uint32_t gotoPoint_ = 0;
     int devPoint_ = 0;
     // The F1 Teleport panel's other ways: a place by the minimap's X / Y, an NPC (npcpos.txt's, by its name or codename), a

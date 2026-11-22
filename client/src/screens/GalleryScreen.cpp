@@ -463,6 +463,13 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     snapshot.scene.active = false;
     snapshot.clearColor = {backdrop_[0], backdrop_[1], backdrop_[2], 1.0f};
     hudContext_.state = &sample_;
+#ifdef SR_BUG_REPORTS
+    // The bug report's button and window on sample data: Send only logs what it would send.
+    hudContext_.bugReport = [](BugReportForm form) {
+        core::LogInfo("gallery: bug report '{}' ({} characters), category {}, screenshot {}, interface {}", form.subject, form.text.size(), form.category,
+                      form.screenshot, form.withInterface);
+    };
+#endif
     if (!sampleGuild_.InGuild()) {
         // A guild of eight with a notice, in a union of three (the guild window's sample).
         sampleGuild_.SetSelf("Gallery");

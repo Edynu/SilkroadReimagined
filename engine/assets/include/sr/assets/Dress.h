@@ -39,11 +39,10 @@ struct DressedCharacter {
     std::vector<std::pair<std::string, float>> volume; // bone name -> thickness across its length
     bool europe = false, female = false;
     // The body's regions a shown piece covers (charactervisualchange's Slot bits: 0x02 the mail's, 0x04 the shoulders',
-    // 0x08 the hands', 0x10 the pants', 0x20 the boots'). Ours (inferred from the meshes): the body's
-    // parts under them are left out, as a suit tighter than the body (the thief's) would let them show through.
+    // 0x08 the hands', 0x10 the pants', 0x20 the boots'): which pieces are drawn and whether the default garments are.
+    // The body's own meshes are hidden only by the pieces' cover tables (AssembleOutfit).
     std::uint32_t covered = 0;
-    // Body and items as one asset key ("body|item|item", the body "#coverN" when its torso is left out), the asset store's
-    // outfit form.
+    // Body and items as one asset key ("body|item|item"), the asset store's outfit form.
     std::string Key() const;
 };
 

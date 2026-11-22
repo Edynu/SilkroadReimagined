@@ -74,6 +74,10 @@ private:
     bool busy_ = false;
     bool autoLogin_ = false;
     std::string message_;
+    // The shard turned this client away as out of date (its words, ClientGate.h on the servers): a box over the title
+    // instead of the login, with the download page and Exit.
+    std::string outdated_;
+    void DrawOutdated(ScreenContext& context);
     bool connected_ = false;
 };
 

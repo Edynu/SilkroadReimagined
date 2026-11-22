@@ -96,7 +96,7 @@ private:
     bool europe_ = false, male_ = true;
     // Automated runs.
     std::string autoCreate_, autoSelect_;
-    bool autoPedestal_ = false; // --pedestal: press Create once the list is in
+    bool autoPedestal_ = false; // --pedestal: press Create once the list is in (--pedestal-after-restart: back from a Restart)
     int autoPick_ = -1;         // --pick europe|china: pick that race at the pedestal
     bool exitOnSelect_ = false;
 };

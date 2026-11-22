@@ -80,6 +80,9 @@ void RegisterHudWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CIFNotify", [c](const assets::UiLayoutNode& n) { return std::make_unique<NoticeBanner>(n, *c); });
     // Ours (no class of the original): the performance panel.
     ui.Register("SRPerformancePanel", [c](const assets::UiLayoutNode& n) { return std::make_unique<PerformancePanel>(n, *c); });
+#ifdef SR_BUG_REPORTS
+    ui.Register("SRBugReport", [c](const assets::UiLayoutNode& n) { return std::make_unique<BugReportWindow>(n, *c); });
+#endif
     ui.Register("CIFSystemWnd", [c](const assets::UiLayoutNode& n) { return std::make_unique<SystemMenu>(n, *c); });
     ui.Register("CIFChatViewer", [c](const assets::UiLayoutNode& n) { return std::make_unique<ChatWindow>(n, *c); });
     ui.Register("CIFWholeChat", [c](const assets::UiLayoutNode& n) { return std::make_unique<GlobalChatWindow>(n, *c); });

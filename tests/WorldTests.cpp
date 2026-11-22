@@ -25,6 +25,7 @@
 #include "sr/game/NavPath.h"
 #include "sr/game/PlayerState.h"
 #include "sr/game/WorldProtocol.h"
+#include "sr/game/SupportProtocol.h"
 #include "sr/game/SimulationClock.h"
 #include "sr/game/WorldRecording.h"
 #include "sr/game/WorldView.h"
@@ -3077,4 +3078,103 @@ TEST_CASE("Pathfinding: the wall cost keeps a way off the walls: Jangan's specia
                                       << " long; with it " << keptNear << " of " << keptSamples << ", " << game::NavPathLength(from, kept) << " long");
     CHECK(keptNear * plainSamples <= plainNear * keptSamples); // a smaller share near the walls
     CHECK(game::NavPathLength(from, kept) <= game::NavPathLength(from, plain) * 1.15); // and not much longer
+}
+
+TEST_CASE("Game server: a bug report from the game becomes the website's support ticket, its screenshot in the database") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    core::JobSystem jobs(2);
+    server::GameServer game;
+    server::GameServerConfig config;
+    config.listen = Local();
+    config.databaseUrl = t.Url();
+    config.rules = WorldRules();
+    config.reportInterval = 50ms;
+    config.jobs = &jobs;
+    net::NetService net(1);
+    const auto pump = [&] { game.Poll(2ms); };
+    REQUIRE_MESSAGE(game.Start(config, error), error);
+    REQUIRE(server::CreateAccount(t.Db(), "reporter", "secret1", error) == server::CreateAccountResult::Created);
+    bool ok = false;
+    const std::int64_t account = server::FindAccount(t.Db(), "reporter", ok)->id;
+    Client c(net, game.Port(), pump);
+    REQUIRE(c.Greet());
+    proto::LobbyEnter e;
+    e.ticket = server::IssueTicket(t.Db(), account, config.id, 30, error);
+    c.Send(e);
+    proto::LobbyEntered entered;
+    REQUIRE(c.Expect(entered));
+    proto::CharacterCreate m;
+    m.name = "Reporter";
+    m.model = 100;
+    m.chest = 1;
+    m.legs = 2;
+    m.shoes = 3;
+    m.weapon = 10;
+    c.Send(m);
+    proto::LobbyResult r;
+    REQUIRE(c.Expect(r));
+    REQUIRE(r.status == proto::LobbyStatus::Ok);
+    c.Send(proto::CharacterSelect{"Reporter"});
+    REQUIRE(c.Expect(r));
+    c.Send(proto::WorldEnter{});
+    proto::WorldEntered in;
+    REQUIRE(c.Expect(in));
+    REQUIRE(in.status == proto::WorldStatus::Ok);
+
+    // The report, then its screenshot (a JPEG's first bytes) in two parts.
+    std::vector<std::uint8_t> image(70'000, 0x5A);
+    image[0] = 0xFF, image[1] = 0xD8, image[2] = 0xFF;
+    proto::BugReport report;
+    report.category = 1; // graphics
+    report.subject = "Arms through the sleeves";
+    report.text = "The forearm shows through the garment's hands in streaks.";
+    report.info = "client: 0.1.3\nGPU: test";
+    report.imageBytes = std::uint32_t(image.size());
+    c.Send(report);
+    for (std::size_t at = 0; at < image.size(); at += proto::kBugPartBytes) {
+        proto::BugReportPart part;
+        part.bytes.assign(image.begin() + std::ptrdiff_t(at), image.begin() + std::ptrdiff_t(std::min(image.size(), at + proto::kBugPartBytes)));
+        c.Send(part);
+    }
+    // Told its ticket's number in the chat.
+    proto::ChatLine line;
+    bool told = false;
+    for (int i = 0; i < 20 && !told; ++i) {
+        if (!c.Expect(line)) break;
+        told = line.kind == proto::ChatKind::Notice && line.text.find("ticket #") != std::string::npos;
+    }
+    REQUIRE(told);
+    const auto tickets = t.Db().Query("SELECT id, kind, category, source, jid, subject, client_info FROM sro_vt_account.sr_support_tickets");
+    REQUIRE(tickets.Ok());
+    REQUIRE(tickets.Rows() == 1);
+    CHECK(tickets.Text(0, 1) == "bug");
+    CHECK(tickets.Text(0, 2) == "graphics");
+    CHECK(tickets.Text(0, 3) == "client");
+    CHECK(tickets.Int(0, 4) == account);
+    CHECK(tickets.Text(0, 5) == "Arms through the sleeves");
+    CHECK(tickets.Text(0, 6).find("character: Reporter") != std::string::npos); // the server's own lines
+    CHECK(tickets.Text(0, 6).find("client: 0.1.3") != std::string::npos);    // and the client's
+    const auto files = t.Db().Query("SELECT mime, bytes, length(data), stored FROM sro_vt_account.sr_support_files WHERE ticket_id = $1", {tickets.Int(0, 0)});
+    REQUIRE(files.Ok());
+    REQUIRE(files.Rows() == 1);
+    CHECK(files.Text(0, 0) == "image/jpeg");
+    CHECK(files.Int(0, 1) == std::int64_t(image.size()));
+    CHECK(files.Int(0, 2) == std::int64_t(image.size()));
+    CHECK(files.Text(0, 3).starts_with("db:"));
+
+    // Five an hour: four more without a screenshot are taken, the next is turned away.
+    report.imageBytes = 0;
+    int taken = 0;
+    bool refused = false;
+    for (int i = 0; i < 5; ++i) {
+        c.Send(report);
+        if (!c.Expect(line)) break;
+        if (line.text.find("ticket #") != std::string::npos) ++taken;
+        if (line.text.find("several bug reports") != std::string::npos) refused = true;
+    }
+    CHECK(taken == 4);
+    CHECK(refused);
+    game.Stop();
 }

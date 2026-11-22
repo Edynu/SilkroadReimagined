@@ -15,11 +15,13 @@
 //   connections-per-address N   connections open at once from one address (default 8; 0 no limit; loopback exempt)
 //   connects-per-minute N       new connections from one address within a minute (default 30; 0 no limit)
 //   messages-per-second N, message-burst N   a connection's message budget (default 50, 200; 0 none; Service.h PeerLimits)
+//   min-client-version V, client-version-from-patch, client-download-url URL   the oldest client let in (ClientGate.h)
 
 #include <atomic>
 #include <string>
 
 #include "sr/core/Config.h"
+#include "sr/server/ClientGate.h"
 #include "sr/net/Connection.h"
 
 namespace sr::server {
@@ -29,6 +31,8 @@ struct ProgramOptions {
     std::string databaseUrl;
     net::ListenConfig listen;
     double messagesPerSecond = 50.0, messageBurst = 200.0; // copied into each server's PeerLimits
+    // min-client-version, client-version-from-patch, client-download-url (ClientGate.h): copied into PeerLimits too.
+    std::shared_ptr<ClientVersionGate> clientGate;
 };
 
 // Parses the command line and the settings file. False (with `error`) when the program cannot start.

@@ -50,8 +50,6 @@ constexpr VolumeBone kFemale[] = {
 
 std::string DressedCharacter::Key() const {
     std::string key = body;
-    // The body's parts under the regions shown pieces cover, left out (the asset store reads the mark).
-    if ((covered & 0x3E) != 0) key += std::format("#cover{:x}", covered & 0x3E);
     for (const std::string& item : items) key += "|" + item;
     return key;
 }

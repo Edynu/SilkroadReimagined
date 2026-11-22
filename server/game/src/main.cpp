@@ -680,6 +680,7 @@ int main(int argc, char** argv) {
     config.listen = options.listen;
     config.peers.messagesPerSecond = options.messagesPerSecond;
     config.peers.messageBurst = options.messageBurst;
+    config.peers.clientGate = options.clientGate;
     config.databaseUrl = options.databaseUrl;
     config.shardSchema = c.GetString("shard-schema", server::kDefaultShardSchema);
     config.rules = rules;

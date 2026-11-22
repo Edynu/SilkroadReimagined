@@ -156,6 +156,22 @@ bool PlayScreen::FlagScriptStep(ScreenContext& context, const std::string& verb,
         snapName_ = arg.empty() ? "snap" : arg;
         return true;
     }
+#ifdef SR_BUG_REPORTS
+    if (verb == "bug-report") { // bug-report:SUBJECT|TEXT[|noui]: the report window's Send (PlayBugReport.cpp), its screenshot taken
+        BugReportForm form;
+        form.category = 1;
+        const std::size_t bar = arg.find('|');
+        form.subject = arg.substr(0, bar);
+        std::string rest = bar == std::string::npos ? std::string() : arg.substr(bar + 1);
+        if (rest.ends_with("|noui")) {
+            form.withInterface = false;
+            rest.resize(rest.size() - 5);
+        }
+        form.text = rest;
+        if (!replay_) StartBugReport(std::move(form));
+        return true;
+    }
+#endif
     if (ArenaScriptStep(context, verb, arg)) return true; // arena-* (PlayArena.cpp)
     if (!verb.starts_with("ctf-") && verb != "sook-swap") return false;
     if (replay_ || !shared_ || !shared_->session) return true;

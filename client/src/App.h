@@ -18,6 +18,8 @@ int Run(const core::Config& config);
 
 // Writes RGBA8 pixels as a PNG file.
 bool SavePng(const std::filesystem::path& path, int width, int height, const std::uint8_t* rgba);
+// A JPEG (a bug report's screenshot: a tenth of the PNG's size); the alpha is left out.
+bool SaveJpeg(const std::filesystem::path& path, int width, int height, const std::uint8_t* rgba, int quality);
 // The mouse cursors kept as files beside the code (Cursors.cpp): read, false when the folder is not there yet; written from
 // the executable's once.
 bool LoadCursorFolder(const std::filesystem::path& dir, std::vector<assets::CursorImage>& out);

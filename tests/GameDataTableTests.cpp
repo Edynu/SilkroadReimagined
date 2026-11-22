@@ -118,6 +118,26 @@ TEST_CASE("FindPartLink accepts an item table followed by one more u32") {
     CHECK(link.pairs[0][0] == 2);
 }
 
+TEST_CASE("FindPartLink takes an item table whose keys carry the value 1 (a thief's suit, a job suit's part 16)") {
+    std::vector<std::byte> item(0x80, std::byte{0x7F});
+    PutU32(item, 1);
+    PutU32(item, 16); // b: the job suit
+    PutU32(item, 1);  // c: hides the body under it
+    PutU32(item, 3);
+    PutU32(item, 0); // key, value
+    PutU32(item, 0);
+    PutU32(item, 2);
+    PutU32(item, 1);
+    PutU32(item, 3);
+    PutU32(item, 0);
+    PartLink link;
+    REQUIRE(FindPartLink(item, false, 1, link));
+    CHECK(link.b == 16);
+    REQUIRE(link.pairs.size() == 3);
+    CHECK(link.pairs[1][0] == 2);
+    CHECK(link.pairs[1][1] == 1);
+}
+
 TEST_CASE("DecodeLevelTable reads the EXP to the next level") {
     std::vector<std::uint64_t> exp;
     std::string error;

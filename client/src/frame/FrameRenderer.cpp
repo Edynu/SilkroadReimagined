@@ -146,8 +146,19 @@ void FrameRenderer::Render(const FrameSnapshot& snapshot) {
     lastPresent_ = presented;
 
     if (capture) {
-        const bool ok = !pixels.empty() && SavePng(snapshot.capture, static_cast<int>(device_.SwapchainWidth()),
-                                                   static_cast<int>(device_.SwapchainHeight()), pixels.data());
+        const int w = static_cast<int>(device_.SwapchainWidth()), h = static_cast<int>(device_.SwapchainHeight());
+        bool ok = false;
+        if (!pixels.empty() && snapshot.capture.extension() == ".jpg") {
+            // A JPEG goes in under another name and is then renamed: whoever waits for it never reads it half written.
+            std::filesystem::path part = snapshot.capture;
+            part += ".part";
+            std::error_code ec;
+            ok = SaveJpeg(part, w, h, pixels.data(), 85);
+            if (ok) std::filesystem::rename(part, snapshot.capture, ec);
+            ok = ok && !ec;
+        } else if (!pixels.empty()) {
+            ok = SavePng(snapshot.capture, w, h, pixels.data());
+        }
         if (ok) {
             core::LogInfo("captured {}", snapshot.capture.string());
         } else {

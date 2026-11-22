@@ -142,6 +142,7 @@ int main(int argc, char** argv) {
     gatewayConfig.listen = options.listen;
     gatewayConfig.peers.messagesPerSecond = options.messagesPerSecond;
     gatewayConfig.peers.messageBurst = options.messageBurst;
+    gatewayConfig.peers.clientGate = options.clientGate;
     gatewayConfig.listen.port = std::uint16_t(c.GetInt("gateway-port", 15779));
     gatewayConfig.loginHost = c.GetString("login-host", "127.0.0.1");
     gatewayConfig.loginPort = std::uint16_t(c.GetInt("login-port", 15780));
@@ -157,6 +158,7 @@ int main(int argc, char** argv) {
     loginConfig.listen = options.listen;
     loginConfig.peers.messagesPerSecond = options.messagesPerSecond;
     loginConfig.peers.messageBurst = options.messageBurst;
+    loginConfig.peers.clientGate = options.clientGate;
     loginConfig.listen.port = gatewayConfig.loginPort;
     loginConfig.addressAttempts = c.GetInt("address-attempts", loginConfig.addressAttempts);
     loginConfig.legacyPasswords = c.GetString("legacy-passwords", "keep") == "clear" ? server::LegacyPasswords::Clear : server::LegacyPasswords::Keep;

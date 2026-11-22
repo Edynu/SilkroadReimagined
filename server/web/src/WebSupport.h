@@ -24,6 +24,7 @@
 #include <nlohmann/json.hpp>
 
 #include "sr/server/Database.h"
+#include "sr/server/SupportStore.h"
 
 namespace sr::server::web {
 
@@ -35,26 +36,13 @@ constexpr int kSupportUploadHours = 2;
 // POST /api/support/<id>/files: a body larger than the others' (the server's size guard lets it through).
 bool SupportUploadPath(const std::string& method, const std::string& path);
 
-struct NewTicket {
-    std::string kind;     // "contact" or "bug"
-    std::string category; // SupportCategories(kind)
-    std::string subject, body;
-    std::string name, email;
-    std::string source = "site"; // "site" or "client"
-    std::string clientInfo;      // the client's version and system (a bug from the game)
-    std::int64_t jid = 0;        // the signed-in player's account; 0: none
-    std::string address;
-};
-
-const std::vector<std::string>& SupportCategories(const std::string& kind);
-// Trims and checks it; the refusal's words, or none.
-std::optional<std::string> CheckTicket(NewTicket& t);
-// The ticket made: its id and the upload token (shown once; the database keeps its SHA-256).
-std::optional<std::pair<std::int64_t, std::string>> CreateTicket(Database& db, const NewTicket& t);
-
-// An attachment's kind by its first bytes: "image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm"; empty: refused.
-std::string SupportFileType(std::string_view head);
-std::string SupportFileExtension(const std::string& mime);
+// Made here and by the game servers (sr/server/SupportStore.h).
+using sr::server::CheckTicket;
+using sr::server::CreateTicket;
+using sr::server::NewTicket;
+using sr::server::SupportCategories;
+using sr::server::SupportFileExtension;
+using sr::server::SupportFileType;
 
 // A player's own tickets: their messages (not the staff's notes) and their files' names.
 nlohmann::json PlayerTickets(Database& db, std::int64_t jid);
