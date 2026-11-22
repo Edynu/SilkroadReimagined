@@ -64,7 +64,7 @@ sr_copy_openssl_runtime(SroControl)
 sr_copy_postgresql_runtime(SroControl)
 
 # The website's API: a library (the tests run it in-process) and SroWeb.exe.
-add_library(sr_web STATIC web/src/WebServer.cpp web/src/WebAdmin.cpp web/src/WebPlayers.cpp web/src/WebDev.cpp)
+add_library(sr_web STATIC web/src/WebServer.cpp web/src/WebAdmin.cpp web/src/WebPlayers.cpp web/src/WebDev.cpp web/src/WebSupport.cpp)
 add_library(sr::web ALIAS sr_web)
 target_include_directories(sr_web PUBLIC web/include)
 target_link_libraries(sr_web PUBLIC sr::server PRIVATE httplib::httplib nlohmann_json::nlohmann_json sr_compile_options)

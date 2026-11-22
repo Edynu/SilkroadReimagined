@@ -53,7 +53,9 @@ struct WebConfig {
 
     // The administration (sr/server/WebAdmin.h).
     bool admin = true;
-    std::vector<std::string> adminAllow; // addresses or IPv4 ranges (a.b.c.d/n) the admin API answers; empty: any
+    // Addresses or ranges (a.b.c.d/n, IPv6 x:y::/n) the admin API answers; 127.0.0.1, ::1 and "localhost" are one (this
+    // machine, however the browser reaches it). Empty: any.
+    std::vector<std::string> adminAllow;
     std::vector<std::string> origins;    // more origins a change may come from (scheme://host[:port]); its own always
     bool secureCookie = true;            // the session cookie only over HTTPS (browsers count http://localhost as secure)
     // The developer pages (/dev) without a login for this machine (a developer's own shard, deploy/dev-shard.cfg): a request
@@ -61,9 +63,15 @@ struct WebConfig {
     // still asks for a login). Never on a shard behind a reverse proxy on the same machine: its visitors come from there too.
     bool devLocal = false;
     int adminLoginAttempts = 10;         // admin logins tried per address in 15 minutes
-    std::string filesDir = "web-files";  // uploads: images/ and client/ (served at /files/)
+    std::string filesDir = "web-files";  // uploads: images/ (served at /files/)
+    // The client's download: SroDeploy's patch folder (its <channel>/client.json names the players' zip beside it, made
+    // when a client patch is published), and the address the web server serves that folder at. Empty: no download.
+    std::string patchDir;
+    std::string patchUrl = "/patch";
+    // Support's attachments (screenshots, videos): never served to the public (the administration reads them).
+    std::string supportDir = "web-support";
+    int supportAttempts = 5; // tickets sent per address an hour (0: no limit)
     std::string labDir = "web-lab";      // the skill lab's videos (videos/; served to the developer pages alone)
-    std::int64_t uploadMaxBytes = std::int64_t(20) << 30; // a client upload's largest (20 GB)
     std::int64_t imageMaxBytes = std::int64_t(8) << 20;   // an image's largest (8 MB)
 
     std::string shardSchema = kDefaultShardSchema; // its tables and its bus (the game servers' --shard-schema)

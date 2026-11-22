@@ -1,7 +1,9 @@
 #include "sr/server/WebAdmin.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstring>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -9,6 +11,8 @@
 #include <fstream>
 #include <future>
 #include <mutex>
+#include <set>
+#include <sstream>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -19,6 +23,7 @@
 #include "sr/server/WebServer.h"
 #include "WebCommon.h"
 #include "WebDev.h"
+#include "WebSupport.h"
 
 namespace sr::server {
 
@@ -34,7 +39,6 @@ constexpr int kSessionHours = 12, kIdleMinutes = 60;
 constexpr int kWrongInARow = 5, kLockMinutes = 15;
 constexpr std::size_t kAdminPasswordMin = 12;
 constexpr std::size_t kSiteMax = 512 * 1024;
-constexpr std::size_t kBodyMax = 64 * 1024; // any request but an upload
 
 // A link the site may show: its own path, or http(s).
 bool SafeLink(std::string_view s) {
@@ -70,32 +74,38 @@ bool ValidContent(const json& j, const std::string& key, std::string& why, int d
     return (why = "unknown value"), false;
 }
 
-// IPv4 ranges and exact addresses (anything else compared as text).
-bool Allowed(const std::vector<std::string>& allow, const std::string& address) {
-    if (allow.empty()) return true;
-    const auto v4 = [](std::string_view s, std::uint32_t& out) {
-        unsigned a, b, c, d;
-        char tail = 0;
-        if (std::sscanf(std::string(s).c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4 || a > 255 || b > 255 || c > 255 || d > 255) return false;
-        out = (a << 24) | (b << 16) | (c << 8) | d;
+// An address as 16 bytes (IPv4 as ::ffff:a.b.c.d); false when it is not one.
+bool ParseAddress(std::string_view text, std::array<std::uint8_t, 16>& out) {
+    std::string s(text);
+    if (s.size() > 2 && s.front() == '[' && s.back() == ']') s = s.substr(1, s.size() - 2);
+    if (const auto zone = s.find('%'); zone != std::string::npos) s.resize(zone);
+    out.fill(0);
+    in_addr v4{};
+    if (inet_pton(AF_INET, s.c_str(), &v4) == 1) {
+        out[10] = out[11] = 0xFF;
+        std::memcpy(out.data() + 12, &v4, 4);
         return true;
-    };
-    std::string addr = address.starts_with("::ffff:") ? address.substr(7) : address;
-    std::uint32_t ip = 0;
-    const bool isV4 = v4(addr, ip);
-    for (const std::string& rule : allow) {
-        const std::size_t slash = rule.find('/');
-        if (slash == std::string::npos) {
-            if (rule == addr || (rule == "localhost" && (addr == "127.0.0.1" || addr == "::1"))) return true;
-            continue;
-        }
-        std::uint32_t net = 0;
-        const int bits = std::atoi(rule.c_str() + slash + 1);
-        if (!isV4 || !v4(std::string_view(rule).substr(0, slash), net) || bits < 0 || bits > 32) continue;
-        const std::uint32_t mask = bits == 0 ? 0 : 0xFFFFFFFFu << (32 - bits);
-        if ((ip & mask) == (net & mask)) return true;
+    }
+    in6_addr v6{};
+    if (inet_pton(AF_INET6, s.c_str(), &v6) == 1) {
+        std::memcpy(out.data(), &v6, 16);
+        return true;
     }
     return false;
+}
+
+bool IsV4Mapped(const std::array<std::uint8_t, 16>& a) {
+    for (int i = 0; i < 10; ++i)
+        if (a[std::size_t(i)] != 0) return false;
+    return a[10] == 0xFF && a[11] == 0xFF;
+}
+
+// This machine: 127.0.0.0/8 or ::1.
+bool IsLoopbackAddress(const std::array<std::uint8_t, 16>& a) {
+    if (IsV4Mapped(a)) return a[12] == 127;
+    for (int i = 0; i < 15; ++i)
+        if (a[std::size_t(i)] != 0) return false;
+    return a[15] == 1;
 }
 
 } // namespace
@@ -158,8 +168,81 @@ std::string AuthenticatorUri(std::string_view name, std::string_view secretBase3
 
 // --- The public site's data --------------------------------------------------------------------------
 
-std::optional<std::string> SiteJson(Database& db) {
-    json out = {{"content", json::object()}, {"news", json::array()}, {"images", json::array()}, {"downloads", json::array()}};
+bool AddressAllowed(const std::vector<std::string>& allow, const std::string& address) {
+    if (allow.empty()) return true;
+    std::array<std::uint8_t, 16> ip{};
+    if (!ParseAddress(address, ip)) return std::find(allow.begin(), allow.end(), address) != allow.end();
+    for (const std::string& rule : allow) {
+        if (rule == "localhost") {
+            if (IsLoopbackAddress(ip)) return true;
+            continue;
+        }
+        const std::size_t slash = rule.find('/');
+        std::array<std::uint8_t, 16> net{};
+        if (!ParseAddress(std::string_view(rule).substr(0, slash), net)) continue;
+        if (slash == std::string::npos) {
+            // This machine is one, whichever way the browser came (127.0.0.1 or ::1).
+            if (ip == net || (IsLoopbackAddress(net) && IsLoopbackAddress(ip))) return true;
+            continue;
+        }
+        int bits = std::atoi(rule.c_str() + slash + 1);
+        if (IsV4Mapped(net)) {
+            if (bits < 0 || bits > 32) continue;
+            bits += 96;
+        }
+        if (bits < 0 || bits > 128) continue;
+        bool same = true;
+        for (int i = 0; i < 16 && same; ++i) {
+            const int keep = std::clamp(bits - i * 8, 0, 8);
+            const std::uint8_t mask = keep == 0 ? 0 : std::uint8_t(0xFF << (8 - keep));
+            same = (ip[std::size_t(i)] & mask) == (net[std::size_t(i)] & mask);
+        }
+        if (same) return true;
+    }
+    return false;
+}
+
+namespace {
+
+// The players' zip SroDeploy made (<patch>/windows-x64/client.json), or null. Its VirusTotal link: the file's own page
+// there (by its SHA-256), unless the admin gave another for this very file (sr_site_content "client-virustotal").
+json ClientJson(Database& db, const WebConfig& config) {
+    if (config.patchDir.empty()) return nullptr;
+    const std::string channel = "windows-x64";
+    std::ifstream in(fs::path(config.patchDir) / channel / "client.json", std::ios::binary);
+    if (!in) return nullptr;
+    std::stringstream text;
+    text << in.rdbuf();
+    const json j = json::parse(text.str(), nullptr, false);
+    if (!j.is_object()) return nullptr;
+    const std::string file = j.value("file", ""), sha = j.value("sha256", "");
+    const bool safeName = !file.empty() && file.size() < 100 && std::all_of(file.begin(), file.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_';
+    });
+    if (!safeName || sha.size() != 64) return nullptr;
+    json out = {{"version", j.value("version", "")},
+                {"channel", channel},
+                {"url", config.patchUrl + "/" + channel + "/" + file},
+                {"file", file},
+                {"size", j.value("size", std::int64_t(0))},
+                {"unpacked", j.value("unpacked", std::int64_t(0))},
+                {"files", j.value("files", 0)},
+                {"sha256", sha},
+                {"created", j.value("created", "")},
+                {"virustotal", "https://www.virustotal.com/gui/file/" + sha},
+                {"virustotalAuto", true}};
+    const QueryResult r = db.Query("SELECT value FROM sro_vt_account.sr_site_content WHERE key = 'client-virustotal'");
+    if (r.Ok() && r.Rows() == 1) {
+        const json v = json::parse(r.Text(0, 0), nullptr, false);
+        if (v.is_object() && v.value("sha256", "") == sha && !v.value("url", "").empty()) out["virustotal"] = v["url"], out["virustotalAuto"] = false;
+    }
+    return out;
+}
+
+} // namespace
+
+std::optional<std::string> SiteJson(Database& db, const WebConfig& config) {
+    json out = {{"content", json::object()}, {"news", json::array()}, {"images", json::array()}, {"client", ClientJson(db, config)}};
     const QueryResult content = db.Query("SELECT value FROM sro_vt_account.sr_site_content WHERE key = 'site'");
     if (!content.Ok()) return std::nullopt;
     if (content.Rows() == 1) {
@@ -173,22 +256,10 @@ std::optional<std::string> SiteJson(Database& db) {
     for (int i = 0; i < news.Rows(); ++i)
         out["news"].push_back({{"id", news.Int(i, 0)}, {"date", news.Text(i, 1)}, {"tag", news.Text(i, 2)}, {"title", news.Text(i, 3)}, {"text", news.Text(i, 4)},
                                {"comments", news.Int(i, 5)}});
-    const QueryResult files = db.Query("SELECT kind, stored, original, label, bytes, sha256, floor(extract(epoch FROM uploaded_at))::bigint "
-                                       "FROM sro_vt_account.sr_site_files WHERE visible ORDER BY uploaded_at DESC, id DESC");
+    const QueryResult files = db.Query("SELECT stored, label FROM sro_vt_account.sr_site_files WHERE visible AND kind = 'image' "
+                                       "ORDER BY uploaded_at DESC, id DESC");
     if (!files.Ok()) return std::nullopt;
-    for (int i = 0; i < files.Rows(); ++i) {
-        const std::string kind = files.Text(i, 0);
-        if (kind == "image") {
-            out["images"].push_back({{"url", "/files/images/" + files.Text(i, 1)}, {"label", files.Text(i, 3)}});
-        } else {
-            out["downloads"].push_back({{"url", "/files/client/" + files.Text(i, 1)},
-                                        {"name", files.Text(i, 2)},
-                                        {"label", files.Text(i, 3)},
-                                        {"bytes", files.Int(i, 4)},
-                                        {"sha256", files.Text(i, 5)},
-                                        {"uploaded", files.Int(i, 6)}});
-        }
-    }
+    for (int i = 0; i < files.Rows(); ++i) out["images"].push_back({{"url", "/files/images/" + files.Text(i, 0)}, {"label", files.Text(i, 1)}});
     return out.dump();
 }
 
@@ -249,12 +320,24 @@ private:
         return Session{0, "local", "tester", csrf};
     }
 
+    // A refusal for an address web-admin-allow does not list: the address said (so it can be added), and logged once.
+    void RefuseAddress(httplib::Response& res, const std::string& address) {
+        {
+            static std::mutex mutex;
+            static std::set<std::string> told;
+            std::lock_guard lock(mutex);
+            if (told.size() < 1000 && told.insert(address).second)
+                core::LogWarning("SroWeb: the administration refused {} (not in web-admin-allow)", address);
+        }
+        Refuse(res, 403, "forbidden", std::format("Not from this address ({}). Add it to web-admin-allow in shard.cfg.", address));
+    }
+
     // The request's admin, else the answer refusing it. `write`: a change (its origin and second token checked);
     // `adminOnly`: the admin role's; `tester`: the tester role may too (its own account's routes and /dev's).
     std::optional<Session> Guard(const httplib::Request& req, httplib::Response& res, bool write, bool adminOnly, bool tester = false) {
         const std::string address = host_.visitor(req);
-        if (!Allowed(Config().adminAllow, address)) {
-            Refuse(res, 403, "forbidden", "Not from this address.");
+        if (!AddressAllowed(Config().adminAllow, address)) {
+            RefuseAddress(res, address);
             return std::nullopt;
         }
         const std::vector<std::uint8_t> token = FromHex(CookieValue(req, kCookie));
@@ -342,7 +425,7 @@ private:
 
 void WebAdmin::Login(const httplib::Request& req, httplib::Response& res) {
     const std::string address = host_.visitor(req);
-    if (!Allowed(Config().adminAllow, address)) return Refuse(res, 403, "forbidden", "Not from this address.");
+    if (!AddressAllowed(Config().adminAllow, address)) return RefuseAddress(res, address);
     const auto body = Body(req, res);
     if (!body) return;
     const std::string name = Field(*body, "name"), password = Field(*body, "password"), code = Field(*body, "code");
@@ -441,15 +524,14 @@ void WebAdmin::Command(const httplib::Request& req, httplib::Response& res, cons
 void WebAdmin::Upload(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
     const auto who = Guard(req, res, true, true);
     if (!who) return;
-    const std::string kind = req.get_param_value("kind");
-    if (kind != "image" && kind != "client") return Refuse(res, 400, "kind", "Upload an image or a client.");
+    // Images only: the client's download is SroDeploy's (web-patch-dir).
+    const std::string kind = req.get_param_value("kind").empty() ? std::string("image") : req.get_param_value("kind");
+    if (kind != "image") return Refuse(res, 400, "kind", "Only images are uploaded here; the client comes from SroDeploy.");
     std::string original = fs::path(req.get_param_value("name")).filename().string();
     const std::string label = req.get_param_value("label").substr(0, 200);
     if (original.empty() || original.size() > 200) return Refuse(res, 400, "name", "The file needs its name.");
     const std::string ext = Lower(fs::path(original).extension().string());
-    if (kind == "client" && ext != ".zip" && ext != ".7z" && ext != ".rar" && ext != ".exe" && ext != ".msi")
-        return Refuse(res, 400, "type", "A client is a .zip, .7z, .rar, .exe or .msi file.");
-    const std::int64_t max = kind == "image" ? Config().imageMaxBytes : Config().uploadMaxBytes;
+    const std::int64_t max = Config().imageMaxBytes;
     const std::string lengthHeader = req.get_header_value("Content-Length");
     const std::int64_t length = lengthHeader.empty() ? -1 : std::atoll(lengthHeader.c_str());
     if (length <= 0) return Refuse(res, 411, "length", "The upload must say its size.");
@@ -479,16 +561,14 @@ void WebAdmin::Upload(const httplib::Request& req, httplib::Response& res, const
         Refuse(res, status, code, message);
     };
     if (!read || got != length) return fail(400, "incomplete", "The upload did not arrive whole.");
-    std::string storedExt = ext;
-    if (kind == "image") {
-        const auto starts = [&](std::string_view magic, std::size_t at = 0) { return head.size() >= at + magic.size() && head.compare(at, magic.size(), magic) == 0; };
-        if (starts("\xFF\xD8\xFF")) storedExt = ".jpg";
-        else if (starts("\x89PNG\r\n\x1A\n")) storedExt = ".png";
-        else if (starts("RIFF") && starts("WEBP", 8)) storedExt = ".webp";
-        else return fail(400, "type", "Images are JPEG, PNG or WebP.");
-    }
+    std::string storedExt;
+    const auto starts = [&](std::string_view magic, std::size_t at = 0) { return head.size() >= at + magic.size() && head.compare(at, magic.size(), magic) == 0; };
+    if (starts("\xFF\xD8\xFF")) storedExt = ".jpg";
+    else if (starts("\x89PNG\r\n\x1A\n")) storedExt = ".png";
+    else if (starts("RIFF") && starts("WEBP", 8)) storedExt = ".webp";
+    else return fail(400, "type", "Images are JPEG, PNG or WebP.");
     const std::string stored = id + storedExt;
-    const fs::path dir = root / (kind == "image" ? "images" : "client");
+    const fs::path dir = root / "images";
     fs::create_directories(dir, ec);
     fs::rename(part, dir / stored, ec);
     if (ec) return fail(500, "disk", "The file could not be stored.");
@@ -506,22 +586,10 @@ void WebAdmin::Upload(const httplib::Request& req, httplib::Response& res, const
     }
     Audit(&*who, who->name, host_.visitor(req), "upload", std::format("{} {} ({} bytes, sha256 {})", kind, original, got, sha));
     host_.siteChanged();
-    Answer(res, 201, {{"id", *row}, {"url", std::string("/files/") + (kind == "image" ? "images/" : "client/") + stored}, {"sha256", sha}, {"bytes", got}});
+    Answer(res, 201, {{"id", *row}, {"url", "/files/images/" + stored}, {"sha256", sha}, {"bytes", got}});
 }
 
 void WebAdmin::Register(httplib::Server& http) {
-    // Bodies stay small except an upload's (the admin's, checked before a byte is read).
-    http.set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
-        if (req.path == "/api/admin/files" && req.method == "POST") return httplib::Server::HandlerResponse::Unhandled;
-        if (web::DevUploadPath(req.method, req.path)) return httplib::Server::HandlerResponse::Unhandled;
-        const std::string length = req.get_header_value("Content-Length");
-        if ((!length.empty() && std::atoll(length.c_str()) > std::int64_t(kBodyMax)) || req.has_header("Transfer-Encoding")) {
-            Refuse(res, 413, "too-big", "The request is too large.");
-            return httplib::Server::HandlerResponse::Handled;
-        }
-        return httplib::Server::HandlerResponse::Unhandled;
-    });
-
     http.Post("/api/admin/login", [this](const httplib::Request& req, httplib::Response& res) { Login(req, res); });
     // The developer pages (the skill lab): any role's session, or a key.
     web::DevAccess dev;
@@ -681,13 +749,165 @@ void WebAdmin::Register(httplib::Server& http) {
         Answer(res, 200, {{"ok", true}});
     });
 
-    // Files: the slider's images and the client.
+    // The dashboard: the shard at a glance (the players online and the servers come from the public /api/status and /api/load).
+    http.Get("/api/admin/dashboard", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Guard(req, res, false, false)) return;
+        const WebConfig& config = Config();
+        const auto board = OnPool<json>(Pool(), [&config](Database& db) {
+            json j = json::object();
+            const QueryResult a = db.Query(
+                "SELECT (SELECT count(*) FROM sro_vt_account.tb_user), "
+                "       (SELECT count(*) FROM sro_vt_account.tb_user WHERE regtime > localtimestamp - interval '1 day'), "
+                "       (SELECT count(*) FROM sro_vt_account.tb_user WHERE regtime > localtimestamp - interval '7 days'), "
+                "       (SELECT count(*) FROM _char WHERE deleted = 0 AND charid <> 0), "
+                "       (SELECT count(*) FROM _guild WHERE id <> 0), "
+                "       (SELECT count(*) FROM sro_vt_account.sr_online_sessions), "
+                "       (SELECT count(DISTINCT userjid) FROM sro_vt_account._blockeduser WHERE type = 1 AND timebegin <= localtimestamp AND timeend > localtimestamp)");
+            if (a.Ok() && a.Rows() == 1)
+                j["accounts"] = {{"total", a.Int(0, 0)}, {"day", a.Int(0, 1)}, {"week", a.Int(0, 2)}, {"characters", a.Int(0, 3)},
+                                 {"guilds", a.Int(0, 4)}, {"online", a.Int(0, 5)}, {"banned", a.Int(0, 6)}};
+            json days = json::array();
+            const QueryResult d = db.Query("SELECT to_char(g.day, 'YYYY-MM-DD'), count(u.jid) FROM generate_series((current_date - 29)::timestamp, current_date::timestamp, interval '1 day') g(day) "
+                                           "LEFT JOIN sro_vt_account.tb_user u ON u.regtime >= g.day AND u.regtime < g.day + interval '1 day' "
+                                           "GROUP BY g.day ORDER BY g.day");
+            for (int i = 0; d.Ok() && i < d.Rows(); ++i) days.push_back({{"day", d.Text(i, 0)}, {"count", d.Int(i, 1)}});
+            j["registrations"] = days;
+            j["support"] = web::SupportCounts(db);
+            json recent = json::array();
+            const QueryResult t = db.Query("SELECT id, kind, category, status, subject, floor(extract(epoch FROM updated_at))::bigint "
+                                           "FROM sro_vt_account.sr_support_tickets WHERE status = 'open' ORDER BY updated_at DESC LIMIT 6");
+            for (int i = 0; t.Ok() && i < t.Rows(); ++i)
+                recent.push_back({{"id", t.Int(i, 0)}, {"kind", t.Text(i, 1)}, {"category", t.Text(i, 2)}, {"status", t.Text(i, 3)},
+                                  {"subject", t.Text(i, 4)}, {"updated", t.Int(i, 5)}});
+            j["openTickets"] = recent;
+            json audit = json::array();
+            const QueryResult l = db.Query("SELECT floor(extract(epoch FROM at))::bigint, name, action, detail FROM sro_vt_account.sr_web_audit "
+                                           "WHERE action NOT LIKE 'login%' ORDER BY at DESC LIMIT 8");
+            for (int i = 0; l.Ok() && i < l.Rows(); ++i)
+                audit.push_back({{"at", l.Int(i, 0)}, {"name", l.Text(i, 1)}, {"action", l.Text(i, 2)}, {"detail", l.Text(i, 3)}});
+            j["audit"] = audit;
+            j["client"] = ClientJson(db, config);
+            return j;
+        });
+        if (!board) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        Answer(res, 200, *board);
+    });
+
+    // Support: the players' messages and bug reports (WebSupport.h). Moderators answer too; only an admin deletes.
+    http.Get("/api/admin/tickets", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Guard(req, res, false, false)) return;
+        const std::string status = req.get_param_value("status"), kind = req.get_param_value("kind"), q = req.get_param_value("q").substr(0, 100);
+        const auto list = OnPool<json>(Pool(), [status, kind, q](Database& db) { return web::TicketList(db, status, kind, q); });
+        if (!list) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        Answer(res, 200, *list);
+    });
+    http.Get(R"(/api/admin/tickets/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Guard(req, res, false, false)) return;
+        const std::int64_t id = std::atoll(req.matches[1].str().c_str());
+        const auto ticket = OnPool<json>(Pool(), [id](Database& db) { return web::TicketDetail(db, id); });
+        if (!ticket) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        if (ticket->is_null()) return Refuse(res, 404, "ticket", "No such ticket.");
+        Answer(res, 200, {{"ticket", *ticket}});
+    });
+    http.Post(R"(/api/admin/tickets/(\d+)/messages)", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res, true, false);
+        if (!who) return;
+        const auto body = Body(req, res);
+        if (!body) return;
+        std::string text = Field(*body, "text");
+        text.erase(0, text.find_first_not_of(" \t\r\n"));
+        text.erase(text.find_last_not_of(" \t\r\n") + 1);
+        if (text.empty() || text.size() > 10000) return Refuse(res, 400, "text", "The answer is 1 to 10000 characters.");
+        const bool note = body->contains("note") && (*body)["note"].is_boolean() && (*body)["note"].get<bool>();
+        const std::int64_t id = std::atoll(req.matches[1].str().c_str());
+        const auto ok = OnPool<bool>(Pool(), [id, name = who->name, text, note](Database& db) { return web::StaffMessage(db, id, name, text, note); });
+        if (!ok || !*ok) return Refuse(res, 404, "ticket", "No such ticket.");
+        Audit(&*who, who->name, host_.visitor(req), note ? "ticket-note" : "ticket-answer", std::format("#{}", id));
+        Answer(res, 200, {{"ok", true}});
+    });
+    http.Put(R"(/api/admin/tickets/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res, true, false);
+        if (!who) return;
+        const auto body = Body(req, res);
+        if (!body) return;
+        const std::string status = Field(*body, "status");
+        const std::int64_t id = std::atoll(req.matches[1].str().c_str());
+        const auto ok = OnPool<bool>(Pool(), [id, status](Database& db) { return web::SetTicketStatus(db, id, status); });
+        if (!ok || !*ok) return Refuse(res, 404, "ticket", "No such ticket (or that status).");
+        Audit(&*who, who->name, host_.visitor(req), "ticket-status", std::format("#{} {}", id, status));
+        Answer(res, 200, {{"ok", true}});
+    });
+    http.Delete(R"(/api/admin/tickets/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res, true, true);
+        if (!who) return;
+        const std::int64_t id = std::atoll(req.matches[1].str().c_str());
+        const auto gone = OnPool<std::optional<std::vector<std::string>>>(Pool(), [id](Database& db) { return web::DeleteTicket(db, id); });
+        if (!gone || !*gone) return Refuse(res, 404, "ticket", "No such ticket.");
+        std::error_code ec;
+        for (const std::string& stored : **gone) fs::remove(fs::absolute(Config().supportDir) / stored, ec);
+        fs::remove(fs::absolute(Config().supportDir) / std::to_string(id), ec);
+        Audit(&*who, who->name, host_.visitor(req), "ticket-delete", std::format("#{}", id));
+        Answer(res, 200, {{"ok", true}});
+    });
+    // An attachment, to the administration only: shown in the page (a picture, a video), never run as anything else.
+    http.Get(R"(/api/admin/tickets/(\d+)/files/(\d+))", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Guard(req, res, false, false)) return;
+        const std::int64_t ticket = std::atoll(req.matches[1].str().c_str()), file = std::atoll(req.matches[2].str().c_str());
+        const auto found = OnPool<std::optional<std::pair<std::string, std::string>>>(Pool(), [ticket, file](Database& db) -> std::optional<std::pair<std::string, std::string>> {
+            const QueryResult r = db.Query("SELECT stored, mime FROM sro_vt_account.sr_support_files WHERE id = $1 AND ticket_id = $2", {file, ticket});
+            if (!r.Ok() || r.Rows() != 1) return std::nullopt;
+            return std::pair{r.Text(0, 0), r.Text(0, 1)};
+        });
+        if (!found || !*found) return Refuse(res, 404, "file", "No such file.");
+        const fs::path path = fs::absolute(Config().supportDir) / (*found)->first;
+        std::error_code ec;
+        if (!fs::is_regular_file(path, ec)) return Refuse(res, 404, "file", "The file is gone.");
+        res.set_header("Content-Disposition", "inline");
+        res.set_header("Cache-Control", "private, max-age=3600");
+        res.set_header("Content-Security-Policy", "default-src 'none'; sandbox");
+        res.set_file_content(path.string(), (*found)->second);
+    });
+
+    // The client's download (SroDeploy's zip): what the site shows, and its VirusTotal link set by hand (for this file only).
+    http.Get("/api/admin/client", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Guard(req, res, false, true)) return;
+        const WebConfig& config = Config();
+        const auto client = OnPool<json>(Pool(), [&config](Database& db) { return ClientJson(db, config); });
+        if (!client) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        Answer(res, 200, {{"client", *client}, {"patchDir", !config.patchDir.empty()}});
+    });
+    http.Put("/api/admin/client", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res, true, true);
+        if (!who) return;
+        const auto body = Body(req, res);
+        if (!body) return;
+        const std::string url = Field(*body, "virustotal");
+        if (!url.empty() && (url.size() > 300 || !url.starts_with("https://www.virustotal.com/")))
+            return Refuse(res, 400, "virustotal", "The link must be a https://www.virustotal.com/ address (or empty for the automatic one).");
+        const WebConfig& config = Config();
+        const std::string by = who->name;
+        const auto ok = OnPool<bool>(Pool(), [&config, url, by](Database& db) {
+            const json client = ClientJson(db, config);
+            if (!client.is_object()) return false;
+            const std::string value = json{{"sha256", client["sha256"]}, {"url", url}}.dump();
+            return db.Query("INSERT INTO sro_vt_account.sr_site_content (key, value, updated_by) VALUES ('client-virustotal', $1, $2) "
+                            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()",
+                            {value, by})
+                .Ok();
+        });
+        if (!ok || !*ok) return Refuse(res, 404, "client", "There is no client download yet (publish one with SroRelease).");
+        Audit(&*who, who->name, host_.visitor(req), "client-virustotal", url.empty() ? std::string("automatic") : url);
+        host_.siteChanged();
+        Answer(res, 200, {{"ok", true}});
+    });
+
+    // Files: the slider's images.
     http.Get("/api/admin/files", [this](const httplib::Request& req, httplib::Response& res) {
         if (!Guard(req, res, false, true)) return;
         const auto list = OnPool<json>(Pool(), [](Database& db) {
             json a = json::array();
             const QueryResult r = db.Query("SELECT id, kind, stored, original, label, bytes, sha256, visible, floor(extract(epoch FROM uploaded_at))::bigint, uploaded_by "
-                                           "FROM sro_vt_account.sr_site_files ORDER BY uploaded_at DESC, id DESC");
+                                           "FROM sro_vt_account.sr_site_files WHERE kind = 'image' ORDER BY uploaded_at DESC, id DESC");
             for (int i = 0; r.Ok() && i < r.Rows(); ++i) {
                 const std::string kind = r.Text(i, 1);
                 a.push_back({{"id", r.Int(i, 0)}, {"kind", kind}, {"url", std::string("/files/") + (kind == "image" ? "images/" : "client/") + r.Text(i, 2)},

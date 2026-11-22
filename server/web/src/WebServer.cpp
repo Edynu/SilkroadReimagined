@@ -22,7 +22,9 @@
 #include "sr/server/Database.h"
 #include "sr/server/Service.h"
 #include "sr/server/WebAdmin.h"
+#include "WebDev.h"
 #include "WebPlayers.h"
+#include "WebSupport.h"
 
 namespace sr::server {
 
@@ -259,7 +261,7 @@ struct WebServer::State {
           status(pool, c.statusAge, [this](Database& db) { return StatusJson(db, config); }),
           rankings(pool, c.rankingAge, [this](Database& db) { return RankingsJson(db, config.rankingCount); }),
           uniques(pool, c.statusAge, [](Database& db) { return UniquesJson(db); }),
-          site(pool, std::chrono::seconds(60), [](Database& db) { return SiteJson(db); }),
+          site(pool, std::chrono::seconds(60), [c](Database& db) { return SiteJson(db, c); }),
           stats(pool, std::chrono::seconds(60), [](Database& db) { return StatsJson(db); }),
           load(pool, std::chrono::seconds(30), [](Database& db) { return LoadJson(db); }),
           news(pool, std::chrono::seconds(60), [](Database& db) { return NewsList(db); }) {}
@@ -310,6 +312,7 @@ struct WebServer::State {
         url("/server", "", "hourly", "0.6");
         url("/rankings", "", "hourly", "0.6");
         url("/about", "", "monthly", "0.5");
+        url("/support", "", "monthly", "0.4");
         for (const auto& [id, day] : articles) url("/news/" + id, day, "monthly", "0.7");
         xml += "</urlset>\n";
         res.set_header("Cache-Control", "public, max-age=3600");
@@ -323,6 +326,7 @@ struct WebServer::State {
                                   "Disallow: /admin\n"
                                   "Disallow: /dev\n"
                                   "Disallow: /api/admin\n"
+                                  "Disallow: /account\n"
                                   "\n"
                                   "Sitemap: " + SiteUrl(req) + "/sitemap.xml\n";
         res.set_header("Cache-Control", "public, max-age=3600");
@@ -344,6 +348,10 @@ struct WebServer::State {
                 last.erase(last.find_last_not_of(' ') + 1);
                 if (!last.empty()) return last;
             }
+        } else if (!config.trustProxy && IsLoopback(req.remote_addr) && req.has_header("X-Forwarded-For")) {
+            // A proxy on this machine names its visitors, but they are not taken: each would look like this machine.
+            static std::once_flag once;
+            std::call_once(once, [] { core::LogWarning("SroWeb: a local proxy sends X-Forwarded-For but web-trust-proxy is off: every visitor looks like this machine"); });
         }
         return req.remote_addr;
     }
@@ -428,8 +436,20 @@ bool WebServer::Start(const WebConfig& config, std::string& error) {
     httplib::Server& http = s.http;
     const std::size_t threads = std::size_t(std::max(1, config.threads));
     http.new_task_queue = [threads] { return new httplib::ThreadPool(threads); };
-    // Only an admin's upload may be large (WebAdmin's pre-routing keeps every other body under 64 KB).
-    http.set_payload_max_length(config.admin ? std::size_t(std::max(config.uploadMaxBytes, config.imageMaxBytes)) : 16 * 1024);
+    // Only an upload may be large (an admin's image, a support ticket's file, the developer pages' video); every other body
+    // stays under 64 KB, refused before a byte is read.
+    http.set_payload_max_length(std::size_t(std::max(config.imageMaxBytes, web::kSupportVideoMax)));
+    http.set_pre_routing_handler([admin = config.admin](const httplib::Request& req, httplib::Response& res) {
+        const bool upload = (admin && ((req.path == "/api/admin/files" && req.method == "POST") || web::DevUploadPath(req.method, req.path))) ||
+                            web::SupportUploadPath(req.method, req.path);
+        if (upload) return httplib::Server::HandlerResponse::Unhandled;
+        const std::string length = req.get_header_value("Content-Length");
+        if ((!length.empty() && std::atoll(length.c_str()) > 64 * 1024) || req.has_header("Transfer-Encoding")) {
+            Refuse(res, 413, "too-big", "The request is too large.");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
     http.set_read_timeout(10s);
     http.set_write_timeout(10s);
     // The page loads only its own scripts, styles, fonts and images, and is never framed.
@@ -508,7 +528,7 @@ bool WebServer::Start(const WebConfig& config, std::string& error) {
             all << in.rdbuf();
             res.set_content(all.str(), "text/html; charset=utf-8");
         };
-        for (const char* path : {"/download", "/admin", "/dev", "/news", "/about", "/server", "/rankings", R"(/news/\d+)"}) http.Get(path, page);
+        for (const char* path : {"/download", "/account", "/support", "/admin", "/dev", "/news", "/about", "/server", "/rankings", R"(/news/\d+)"}) http.Get(path, page);
         // For search engines: the pages and the news (a file of the same name in the site's folder would be served instead).
         http.Get("/sitemap.xml", [&s](const httplib::Request& req, httplib::Response& res) { s.Sitemap(req, res); });
         http.Get("/robots.txt", [&s](const httplib::Request& req, httplib::Response& res) { s.Robots(req, res); });

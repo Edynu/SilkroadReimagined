@@ -22,13 +22,17 @@
 //   --make-dev-key NAME                      a key for scripts and agents on the developer pages' API (/api/admin/dev,
 //                                            "Authorization: Bearer srdev_..."), printed once; --dev-key-disable NAME, --dev-key-enable NAME
 //   web-admin (true)                         the administration's API at /api/admin
-//   web-admin-allow (any)                    addresses or IPv4 ranges it answers, e.g. "127.0.0.1, 10.0.0.0/8"
+//   web-admin-allow (any)                    addresses or ranges it answers, e.g. "127.0.0.1, 203.0.113.7, 2a02:8070::/32"
+//                                            (127.0.0.1, ::1 and localhost are the same: this machine)
 //   web-origins                              more origins a change may come from (e.g. the dev page http://localhost:5173)
 //   web-cookie-secure (true)                 the session cookie only over HTTPS (http://localhost counts as secure)
 //   web-dev-local (false)                    the developer pages (/dev) without a login from this machine (127.0.0.1 / ::1,
 //                                            no proxy's forwarding header): a developer's own shard only, never behind a proxy
-//   web-files (web-files)                    the uploads' folder (images/, client/; served at /files/)
-//   web-upload-max-mb (20480)                the client upload's largest
+//   web-files (web-files)                    the uploads' folder (images/; served at /files/)
+//   web-support (web-support)                support's attachments (screenshots, videos; never public)
+//   web-support-attempts (5)                 support tickets sent per address an hour (0: no limit)
+//   web-patch-dir DIR                        SroDeploy's patch folder: the client's download (<channel>/client.json)
+//   web-patch-url (/patch)                   where the web server (nginx) serves that folder
 
 #include <algorithm>
 #include <chrono>
@@ -161,7 +165,11 @@ int main(int argc, char** argv) {
     web.devLocal = c.GetBool("web-dev-local", false);
     web.filesDir = c.GetString("web-files", "web-files");
     web.labDir = c.GetString("web-lab", "web-lab");
-    web.uploadMaxBytes = std::int64_t(std::clamp(c.GetInt("web-upload-max-mb", 20480), 1, 200000)) << 20;
+    web.supportDir = c.GetString("web-support", "web-support");
+    web.supportAttempts = c.GetInt("web-support-attempts", web.supportAttempts);
+    web.patchDir = c.GetString("web-patch-dir", "");
+    web.patchUrl = c.GetString("web-patch-url", "/patch");
+    while (!web.patchUrl.empty() && web.patchUrl.back() == '/') web.patchUrl.pop_back();
     web.levelCap = std::clamp(c.GetInt("level-cap", 110), 1, 140);
     web.rateExp = c.GetDouble("rate-exp", 1.0);
     web.rateSp = c.GetDouble("rate-sp", 1.0);
@@ -184,6 +192,8 @@ int main(int argc, char** argv) {
     core::LogInfo("SroWeb: the site's API on http://{}:{}/api{}{}", web.host, server.Port(), web.siteRoot.empty() ? "" : ", the site from ",
                   web.siteRoot);
     if (web.betaKeys) core::LogInfo("SroWeb: registration needs a beta key (SroWeb --make-keys N)");
+    if (web.patchDir.empty()) core::LogInfo("SroWeb: no client download (web-patch-dir is not set)");
+    else core::LogInfo("SroWeb: the client's download from {} (served at {})", web.patchDir, web.patchUrl);
     if (web.admin) {
         core::LogInfo("SroWeb: the administration at /admin ({}); accounts: SroWeb --make-admin NAME",
                       web.adminAllow.empty() ? std::string("from any address") : "from " + c.GetString("web-admin-allow", ""));

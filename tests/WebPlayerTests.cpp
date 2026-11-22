@@ -216,3 +216,191 @@ TEST_CASE("Web players: a game account signs in; comments on the news as one's c
     CHECK(stats.uniquesKilledToday == 3);
     CHECK(client.Get("/api/stats")->status == 200);
 }
+
+TEST_CASE("Web players: the player's own page: the account, its characters; a new password and e-mail with the current password") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    server::Database& db = t.Db();
+    REQUIRE_MESSAGE(server::MigrateSchema(db, error), error);
+    REQUIRE(server::CreateAccount(db, "walker", "walker-pass", error, server::LegacyPasswords::Keep, {"walker@example.com", "", {}}) == server::CreateAccountResult::Created);
+    REQUIRE(server::CreateAccount(db, "other", "other-pass", error) == server::CreateAccountResult::Created);
+    const std::int64_t astra = MakeCharacter(db, "walker", "Astra", 110);
+    MakeCharacter(db, "walker", "Nyx", 40);
+    MakeCharacter(db, "other", "Kaizen", 90);
+    REQUIRE(db.Query("UPDATE sro_vt_shard._char SET refobjid = 14890, remaingold = 1234567 WHERE charid = $1", {astra}).Ok());
+    REQUIRE(db.Query("INSERT INTO sro_vt_shard._guild (name, lvl, gatheredsp, foundationdate) VALUES ('Dragons', 1, 0, now())").Ok());
+    REQUIRE(db.Query("UPDATE sro_vt_shard._char SET guildid = (SELECT id FROM sro_vt_shard._guild WHERE name = 'Dragons') WHERE charid = $1", {astra}).Ok());
+    REQUIRE(db.Query("INSERT INTO sro_vt_shard._chartrijob (charid, jobtype, level) VALUES ($1, 3, 4)", {astra}).Ok());
+
+    server::WebConfig c;
+    c.databaseUrl = t.Url();
+    c.port = 0;
+    c.filesDir = (std::filesystem::temp_directory_path() / "sr-web-files-profile").string();
+    c.secureCookie = false;
+    server::WebServer web;
+    REQUIRE_MESSAGE(web.Start(c, error), error);
+    httplib::Client client("127.0.0.1", web.Port());
+    client.set_read_timeout(30s);
+
+    CHECK(client.Get("/api/account/profile")->status == 401);
+    Player w;
+    REQUIRE(SignIn(client, "walker", "walker-pass", &w).first == 200);
+    const json p = json::parse(client.Get("/api/account/profile", w.Headers(false))->body);
+    CHECK(p["account"]["name"] == "walker");
+    CHECK(p["account"]["email"] == "w***@example.com"); // masked
+    REQUIRE(p["characters"].size() == 2);                 // its own only
+    const json& a = p["characters"][0];
+    CHECK(a["name"] == "Astra");
+    CHECK(a["race"] == "European");
+    CHECK(a["sex"] == "female");
+    CHECK(a["gold"] == 1234567);
+    CHECK(a["guild"] == "Dragons");
+    CHECK(a["job"] == "Hunter");
+    CHECK(a["jobLevel"] == 4);
+    CHECK(a["online"] == false);
+    CHECK(p["characters"][1]["guild"] == "");
+    CHECK(p.dump().find("Kaizen") == std::string::npos);
+
+    // A second sign-in (another browser): the password's change ends it, not this one.
+    Player w2;
+    REQUIRE(SignIn(client, "walker", "walker-pass", &w2).first == 200);
+    const auto post = [&](const Player& who, const char* path, const json& body, bool token = true) {
+        return client.Post(path, who.Headers(token), body.dump(), "application/json")->status;
+    };
+    CHECK(post(w, "/api/account/password", {{"current", "walker-pass"}, {"password", "new-pass-1"}}, false) == 403); // no page token
+    CHECK(post(w, "/api/account/password", {{"current", "wrong-pass"}, {"password", "new-pass-1"}}) == 403);
+    CHECK(post(w, "/api/account/password", {{"current", "walker-pass"}, {"password", "x"}}) == 400);
+    CHECK(post(w, "/api/account/password", {{"current", "walker-pass"}, {"password", "new-pass-1"}}) == 200);
+    CHECK(SignIn(client, "walker", "walker-pass").first == 401);
+    CHECK(client.Get("/api/account/me", w.Headers(false))->status == 200);
+    CHECK(client.Get("/api/account/me", w2.Headers(false))->status == 401);
+
+    CHECK(post(w, "/api/account/email", {{"current", "new-pass-1"}, {"email", "not-an-address"}}) == 400);
+    CHECK(post(w, "/api/account/email", {{"current", "walker-pass"}, {"email", "new@example.org"}}) == 403);
+    CHECK(post(w, "/api/account/email", {{"current", "new-pass-1"}, {"email", "new@example.org"}}) == 200);
+    CHECK(json::parse(client.Get("/api/account/profile", w.Headers(false))->body)["account"]["email"] == "n***@example.org");
+    CHECK(post(w, "/api/account/email", {{"current", "new-pass-1"}, {"email", ""}}) == 200);
+    CHECK(json::parse(client.Get("/api/account/profile", w.Headers(false))->body)["account"]["hasEmail"] == false);
+    web.Stop();
+}
+
+TEST_CASE("Web support: a message and a bug report with a screenshot; the staff's answer and note; the player's view; the limits") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error, secret;
+    server::Database& db = t.Db();
+    REQUIRE_MESSAGE(server::MigrateSchema(db, error), error);
+    REQUIRE(server::CreateAccount(db, "walker", "walker-pass", error) == server::CreateAccountResult::Created);
+    REQUIRE(server::MakeAdmin(db, "boss", "moderator", "boss-long-password", secret, error));
+
+    server::WebConfig c;
+    c.databaseUrl = t.Url();
+    c.port = 0;
+    c.filesDir = (std::filesystem::temp_directory_path() / "sr-web-files-support").string();
+    c.supportDir = (std::filesystem::temp_directory_path() / "sr-web-support").string();
+    std::filesystem::remove_all(c.supportDir);
+    c.secureCookie = false;
+    c.supportAttempts = 3;
+    server::WebServer web;
+    REQUIRE_MESSAGE(web.Start(c, error), error);
+    httplib::Client client("127.0.0.1", web.Port());
+    client.set_read_timeout(30s);
+    const auto send = [&](const json& body, const httplib::Headers& h = {}) { return client.Post("/api/support", h, body.dump(), "application/json")->status; };
+    const auto upload = [&](const std::string& path, const std::string& bytes) { return client.Post(path, bytes, "application/octet-stream"); };
+
+    // Anonymous: an e-mail address is needed; the text's length; the kind's own categories. None of these count.
+    json contact = {{"kind", "contact"}, {"category", "account"}, {"subject", "Lost my password"}, {"text", "I cannot log in any more, please help."}};
+    CHECK(send(contact) == 400);
+    contact["email"] = "someone@example.com";
+    CHECK(send({{"kind", "contact"}, {"category", "graphics"}, {"subject", "Hello there"}, {"text", "0123456789 0123"}, {"email", "a@example.com"}}) == 400);
+    CHECK(send({{"kind", "contact"}, {"category", "other"}, {"subject", "Hi there"}, {"text", "short"}, {"email", "a@example.com"}}) == 400);
+    // A robot (the hidden field filled in): thanked, nothing kept.
+    json robot = contact;
+    robot["website"] = "http://spam.example";
+    CHECK(send(robot) == 201);
+    REQUIRE(send(contact) == 201);
+    const std::int64_t first = db.Query("SELECT max(id) FROM sro_vt_account.sr_support_tickets").Int(0, 0);
+    CHECK(db.Query("SELECT count(*) FROM sro_vt_account.sr_support_tickets").Int(0, 0) == 1);
+
+    // Signed in: the bug report is the player's; screenshots and a video join it with the token; nothing else does.
+    Player w;
+    REQUIRE(SignIn(client, "walker", "walker-pass", &w).first == 200);
+    const auto made = client.Post("/api/support", w.Headers(false),
+                                  json{{"kind", "bug"}, {"category", "graphics"}, {"subject", "Water hides my legs"}, {"text", "Standing in the river, the legs vanish."}}.dump(),
+                                  "application/json");
+    REQUIRE(made->status == 201);
+    const json bug = json::parse(made->body);
+    const std::int64_t id = bug["id"];
+    const std::string token = bug["uploadToken"];
+    const std::string base = "/api/support/" + std::to_string(id) + "/files?name=shot.png&token=";
+    const std::string png = std::string("\x89PNG\r\n\x1A\n", 8) + std::string(200, 'p');
+    CHECK(upload(base + std::string(64, '0'), png)->status == 403);
+    CHECK(upload(base + token, "MZ this is a program")->status == 400);
+    CHECK(upload(base + token, png)->status == 201);
+    const std::string mp4 = std::string("\0\0\0\x18" "ftypmp42", 12) + std::string(500, 'v');
+    CHECK(json::parse(upload(base + token, mp4)->body)["mime"] == "video/mp4");
+    for (int i = 0; i < 3; ++i) CHECK(upload(base + token, png)->status == 201);
+    CHECK(upload(base + token, png)->status == 409); // five a ticket
+    // The attachments are not under the public files.
+    CHECK(client.Get("/files/" + std::to_string(id))->status != 200);
+
+    // The limit per address: three tickets an hour here (two sent).
+    CHECK(send(contact) == 201);
+    CHECK(send(contact) == 429);
+
+    // The staff: the list, the ticket with its files, a note and an answer; the player sees the answer, not the note.
+    const auto login = client.Post("/api/admin/login",
+                                   json{{"name", "boss"}, {"password", "boss-long-password"}, {"code", server::TotpCode(server::FromBase32(secret), std::int64_t(std::time(nullptr)))}}.dump(),
+                                   "application/json");
+    REQUIRE(login->status == 200);
+    Player staff{&client, login->get_header_value("Set-Cookie").substr(0, login->get_header_value("Set-Cookie").find(';')), json::parse(login->body)["csrf"]};
+    const auto admin = [&](const char* method, const std::string& path, const json& body = json::object()) {
+        const std::string url = "/api/admin" + path;
+        if (std::string_view(method) == "GET") return client.Get(url, staff.Headers(false));
+        if (std::string_view(method) == "PUT") return client.Put(url, staff.Headers(), body.dump(), "application/json");
+        if (std::string_view(method) == "DELETE") return client.Delete(url, staff.Headers(), body.dump(), "application/json");
+        return client.Post(url, staff.Headers(), body.dump(), "application/json");
+    };
+    const json list = json::parse(admin("GET", "/tickets?status=open")->body);
+    CHECK(list["tickets"].size() == 3);
+    CHECK(list["counts"]["bug"]["open"] == 1);
+    CHECK(json::parse(admin("GET", "/tickets?q=legs")->body)["tickets"].size() == 1);
+    const std::string ticket = "/tickets/" + std::to_string(id);
+    const json one = json::parse(admin("GET", ticket)->body)["ticket"];
+    CHECK(one["account"] == "walker");
+    REQUIRE(one["attachments"].size() == 5);
+    const std::string fileUrl = "/api/admin" + ticket + "/files/" + std::to_string(one["attachments"][0]["id"].get<std::int64_t>());
+    const auto file = client.Get(fileUrl, staff.Headers(false));
+    REQUIRE(file);
+    CHECK(file->status == 200);
+    CHECK(file->body == png);
+    CHECK(file->get_header_value("Content-Type") == "image/png");
+    CHECK(client.Get(fileUrl)->status == 401);
+    CHECK(admin("POST", ticket + "/messages", {{"text", "Looks like the water's depth. Checking."}, {"note", true}})->status == 200);
+    CHECK(admin("POST", ticket + "/messages", {{"text", "Thanks, fixed in 0.1.3."}})->status == 200);
+    CHECK(json::parse(admin("GET", ticket)->body)["ticket"]["status"] == "answered");
+    CHECK(admin("DELETE", "/tickets/" + std::to_string(first))->status == 403); // a moderator does not delete
+    const json board = json::parse(admin("GET", "/dashboard")->body);
+    CHECK(board["support"]["contact"]["open"] == 2);
+    CHECK(board["accounts"]["total"] == 1);
+    CHECK(board["registrations"].size() == 30);
+
+    json mine = json::parse(client.Get("/api/account/tickets", w.Headers(false))->body)["tickets"];
+    REQUIRE(mine.size() == 1);
+    REQUIRE(mine[0]["conversation"].size() == 1);
+    CHECK(mine[0]["conversation"][0]["text"] == "Thanks, fixed in 0.1.3.");
+    CHECK(mine[0]["fileNames"].size() == 5);
+    CHECK(mine.dump().find("depth") == std::string::npos);
+    // The player answers: the ticket opens again; another's is not its; a closed one takes no more.
+    const auto reply = [&](std::int64_t which, const char* text) {
+        return client.Post("/api/account/tickets/" + std::to_string(which) + "/reply", w.Headers(), json{{"text", text}}.dump(), "application/json")->status;
+    };
+    CHECK(reply(first, "?") == 404);
+    CHECK(reply(id, "Still there in caves.") == 200);
+    CHECK(json::parse(admin("GET", ticket)->body)["ticket"]["status"] == "open");
+    CHECK(admin("PUT", ticket, {{"status", "closed"}})->status == 200);
+    CHECK(reply(id, "Again") == 404);
+    web.Stop();
+    std::filesystem::remove_all(c.supportDir);
+}

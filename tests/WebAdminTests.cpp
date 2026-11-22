@@ -3,6 +3,7 @@
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <string>
 #include <thread>
@@ -166,7 +167,7 @@ TEST_CASE("Web admin: logins with a password and a code, sessions, the page's to
     CHECK(json::parse(b.Send("GET", "/api/admin/news")->body)["news"].size() == 1);
     CHECK(b.Send("DELETE", "/api/admin/news/" + std::to_string(news))->status == 200);
 
-    // Uploads: an image by its first bytes, the client by its kind; stored under random names, served from /files.
+    // Uploads: images only, by their first bytes; stored under random names, served from /files. (The client is SroDeploy's.)
     const std::string png = std::string("\x89PNG\r\n\x1A\n", 8) + std::string(100, 'x');
     auto upload = client.Post("/api/admin/files?kind=image&name=hero.png&label=Jangan", b.Headers(), png, "application/octet-stream");
     REQUIRE(upload);
@@ -178,26 +179,16 @@ TEST_CASE("Web admin: logins with a password and a code, sessions, the page's to
     REQUIRE(served);
     CHECK(served->body == png);
     CHECK(client.Post("/api/admin/files?kind=image&name=evil.png", b.Headers(), "<svg onload=alert(1)>", "application/octet-stream")->status == 400);
-    CHECK(client.Post("/api/admin/files?kind=client&name=setup.bat", b.Headers(), "echo", "application/octet-stream")->status == 400);
-    CHECK(client.Post("/api/admin/files?kind=client&name=c.zip", Browser{&client, b.cookie, "wrong"}.Headers(), "PK", "application/octet-stream")->status == 403);
-    const std::string zip = "PK\x03\x04 the client";
-    upload = client.Post("/api/admin/files?kind=client&name=SroReimagined-0.1.zip&label=Beta%200.1", b.Headers(), zip, "application/octet-stream");
-    REQUIRE(upload);
-    REQUIRE(upload->status == 201);
-    const std::string clientUrl = json::parse(upload->body)["url"];
-    const auto download = client.Get(clientUrl);
-    REQUIRE(download);
-    CHECK(download->body == zip);
-    CHECK(download->get_header_value("Content-Disposition") == "attachment");
+    CHECK(client.Post("/api/admin/files?kind=client&name=c.zip", b.Headers(), "PK\x03\x04", "application/octet-stream")->status == 400);
+    CHECK(client.Post("/api/admin/files?kind=image&name=h.png", Browser{&client, b.cookie, "wrong"}.Headers(), png, "application/octet-stream")->status == 403);
     for (int i = 0; i < 100; ++i) {
         site = json::parse(client.Get("/api/site")->body);
-        if (site["downloads"].size() == 1 && site["images"].size() == 1) break;
+        if (site["images"].size() == 1) break;
         std::this_thread::sleep_for(20ms);
     }
-    REQUIRE(site["downloads"].size() == 1);
-    CHECK(site["downloads"][0]["sha256"] == server::Hex(server::Sha256({reinterpret_cast<const std::uint8_t*>(zip.data()), zip.size()})));
-    CHECK(site["downloads"][0]["label"] == "Beta 0.1");
+    REQUIRE(site["images"].size() == 1);
     CHECK(site["images"][0]["label"] == "Jangan");
+    CHECK(site["client"].is_null()); // no web-patch-dir
 
     // Players: a search, a ban (with the game servers told to put it out), its lifting, a new password.
     REQUIRE(server::CreateAccount(db, "player1", "secret1", error) == server::CreateAccountResult::Created);
@@ -272,6 +263,90 @@ TEST_CASE("Web admin: logins with a password and a code, sessions, the page's to
     web.Stop();
     std::error_code ec;
     std::filesystem::remove_all(files, ec);
+}
+
+TEST_CASE("Web admin: the allowed addresses: exact, ranges, IPv6, this machine however it is reached") {
+    CHECK(server::AddressAllowed({}, "198.51.100.7"));
+    CHECK(server::AddressAllowed({"127.0.0.1"}, "127.0.0.1"));
+    CHECK(server::AddressAllowed({"127.0.0.1"}, "::1"));            // a browser on the server opening localhost
+    CHECK(server::AddressAllowed({"127.0.0.1"}, "::ffff:127.0.0.1"));
+    CHECK(server::AddressAllowed({"::1"}, "127.0.0.1"));
+    CHECK(server::AddressAllowed({"localhost"}, "::1"));
+    CHECK_FALSE(server::AddressAllowed({"127.0.0.1"}, "198.51.100.7"));
+    CHECK(server::AddressAllowed({"127.0.0.1", "198.51.100.7"}, "198.51.100.7"));
+    CHECK(server::AddressAllowed({"10.0.0.0/8"}, "::ffff:10.20.30.40"));
+    CHECK_FALSE(server::AddressAllowed({"10.0.0.0/8"}, "11.0.0.1"));
+    CHECK(server::AddressAllowed({"198.51.100.0/24"}, "198.51.100.250"));
+    CHECK(server::AddressAllowed({"2a02:8070:1234::/48"}, "2a02:8070:1234:5:6:7:8:9"));
+    CHECK_FALSE(server::AddressAllowed({"2a02:8070:1234::/48"}, "2a02:8070:1235::1"));
+    CHECK(server::AddressAllowed({"2001:db8::7"}, "2001:0db8:0000::0007")); // the same address written another way
+    CHECK_FALSE(server::AddressAllowed({"2001:db8::7"}, "198.51.100.7"));
+    CHECK_FALSE(server::AddressAllowed({"bogus", "10.0.0.0/99"}, "10.1.1.1"));
+}
+
+TEST_CASE("Web admin: the client's download is SroDeploy's zip, its VirusTotal link automatic or set") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error, secret;
+    REQUIRE_MESSAGE(server::MigrateSchema(t.Db(), error), error);
+    REQUIRE(server::MakeAdmin(t.Db(), "boss", "admin", "boss-long-password", secret, error));
+    const Admin boss{"boss", "boss-long-password", server::FromBase32(secret)};
+    const std::filesystem::path patch = std::filesystem::temp_directory_path() / "sr-web-patch";
+    std::filesystem::remove_all(patch);
+    std::filesystem::create_directories(patch / "windows-x64");
+    const std::string sha(64, 'a');
+    {
+        std::ofstream out(patch / "windows-x64" / "client.json");
+        out << json{{"version", "0.1.2"}, {"channel", "windows-x64"}, {"file", "SroReimagined-0.1.2.zip"}, {"size", 8434674},
+                    {"unpacked", 21753678}, {"files", 12}, {"sha256", sha}, {"created", "2026-11-22T02:43:21Z"}}
+                   .dump();
+    }
+    server::WebConfig c;
+    c.databaseUrl = t.Url();
+    c.port = 0;
+    c.filesDir = (std::filesystem::temp_directory_path() / "sr-web-files-client").string();
+    c.secureCookie = false;
+    c.patchDir = patch.string();
+    server::WebServer web;
+    REQUIRE_MESSAGE(web.Start(c, error), error);
+    httplib::Client client("127.0.0.1", web.Port());
+    json site = json::parse(client.Get("/api/site")->body);
+    REQUIRE(site["client"].is_object());
+    CHECK(site["client"]["version"] == "0.1.2");
+    CHECK(site["client"]["url"] == "/patch/windows-x64/SroReimagined-0.1.2.zip");
+    CHECK(site["client"]["size"] == 8434674);
+    CHECK(site["client"]["sha256"] == sha);
+    CHECK(site["client"]["virustotal"] == "https://www.virustotal.com/gui/file/" + sha);
+    CHECK(site["client"]["virustotalAuto"] == true);
+
+    Browser b;
+    REQUIRE(Login(client, boss, Code(boss), &b).first == 200);
+    CHECK(b.Send("PUT", "/api/admin/client", {{"virustotal", "https://evil.example/scan"}})->status == 400);
+    const std::string link = "https://www.virustotal.com/gui/file-analysis/abc";
+    CHECK(b.Send("PUT", "/api/admin/client", {{"virustotal", link}})->status == 200);
+    for (int i = 0; i < 100; ++i) {
+        site = json::parse(client.Get("/api/site")->body);
+        if (site["client"]["virustotal"] == link) break;
+        std::this_thread::sleep_for(20ms);
+    }
+    CHECK(site["client"]["virustotal"] == link);
+    CHECK(site["client"]["virustotalAuto"] == false);
+    CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["client"]["virustotal"] == link);
+
+    // A new version: the link set by hand was for the file before, so the new one's is automatic again.
+    {
+        std::ofstream out(patch / "windows-x64" / "client.json");
+        out << json{{"version", "0.1.3"}, {"file", "SroReimagined-0.1.3.zip"}, {"size", 1}, {"sha256", std::string(64, 'b')}}.dump();
+    }
+    CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["client"]["virustotalAuto"] == true);
+    // A name that is not a plain file's: no download rather than a link elsewhere.
+    {
+        std::ofstream out(patch / "windows-x64" / "client.json");
+        out << json{{"version", "0.1.4"}, {"file", "../../secret.zip"}, {"size", 1}, {"sha256", sha}}.dump();
+    }
+    CHECK(json::parse(b.Send("GET", "/api/admin/client")->body)["client"].is_null());
+    web.Stop();
+    std::filesystem::remove_all(patch);
 }
 
 TEST_CASE("Web admin: the API answers only the listed addresses; the address limit on logins") {

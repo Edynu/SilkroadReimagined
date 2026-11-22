@@ -14,11 +14,11 @@
 //   - roles: "admin" does everything, "moderator" only the players (the list, bans) and the announcements, "tester"
 //     only the developer pages (/dev: the skill lab) and its own password;
 //   - everything done is written to sr_web_audit, with who and from where;
-//   - uploads: images only as JPEG, PNG or WebP by their first bytes (8 MB), the client only as .zip, .7z, .rar, .exe
-//     or .msi (web-upload-max-mb), stored under random names, their SHA-256 shown on the download page;
+//   - uploads: images only, as JPEG, PNG or WebP by their first bytes (8 MB), stored under random names. The client is
+//     not uploaded here: SroDeploy makes its zip when a patch is published (web-patch-dir);
 //   - the site's texts are data: the page shows them as text, and links must be http(s) or the site's own paths.
 //
-// The public side reads it all at /api/site (the texts, the visible news, images and downloads).
+// The public side reads it all at /api/site (the texts, the visible news and images, the client's download).
 
 #include <cstdint>
 #include <functional>
@@ -51,8 +51,13 @@ class WebAdmin;
 // The admin routes on `http`; what it returns lives as long as they are served.
 std::shared_ptr<WebAdmin> RegisterAdmin(httplib::Server& http, const AdminHost& host);
 
-// /api/site's answer: the texts (sr_site_content "site"), the visible news, images and downloads.
-std::optional<std::string> SiteJson(Database& db);
+// /api/site's answer: the texts (sr_site_content "site"), the visible news and images, and "client": the players' zip
+// from SroDeploy's patch folder (null without one): its version, address, size, SHA-256 and VirusTotal link.
+std::optional<std::string> SiteJson(Database& db, const WebConfig& config);
+
+// Whether `address` is one `allow` lists (empty: any): exact addresses and CIDR ranges, IPv4 and IPv6; an IPv4 address
+// seen as ::ffff:a.b.c.d is that address; 127.0.0.1, ::1 and "localhost" each stand for this machine.
+bool AddressAllowed(const std::vector<std::string>& allow, const std::string& address);
 
 // The command line's (SroWeb --make-admin ...): an admin account and its authenticator secret (Base32, shown once).
 bool ValidAdminName(std::string_view name);

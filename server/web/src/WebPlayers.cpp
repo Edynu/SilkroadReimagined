@@ -1,15 +1,19 @@
 #include "WebPlayers.h"
 
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <mutex>
 #include <unordered_map>
 
 #include "sr/core/Log.h"
 #include "sr/server/Crypto.h"
 #include "sr/server/Service.h"
+#include "sr/server/SilkStore.h"
 #include "sr/server/Store.h"
 #include "sr/server/WebServer.h"
 #include "WebCommon.h"
+#include "WebSupport.h"
 
 namespace sr::server {
 
@@ -38,6 +42,64 @@ std::vector<Character> CharactersOf(Database& db, std::int64_t jid) {
     return out;
 }
 
+// The player's own page (/account): its account and each character in more detail. Race and sex from the character's
+// model (characterdata: 1907-1919 Chinese men, 1920-1932 women; 14875-14887 European men, 14888-14900 women), the job
+// from _chartrijob (1 trader, 2 thief, 3 hunter), "online" from the game servers' sessions.
+json ProfileJson(Database& db, std::int64_t jid) {
+    json account = json::object();
+    const QueryResult u = db.Query("SELECT struserid, coalesce(email, ''), coalesce(floor(extract(epoch FROM regtime))::bigint, 0) "
+                                   "FROM sro_vt_account.tb_user WHERE jid = $1",
+                                   {jid});
+    if (!u.Ok() || u.Rows() != 1) return nullptr;
+    const std::string email = u.Text(0, 1);
+    // The address shown masked (the page is the player's, but a screen may be shared): j***@example.com.
+    std::string masked;
+    if (const auto at = email.find('@'); at != std::string::npos && at > 0) masked = email.substr(0, 1) + "***" + email.substr(at);
+    account = {{"name", u.Text(0, 0)}, {"email", masked}, {"hasEmail", !email.empty()}, {"created", u.Int(0, 2)}};
+    SilkBalance silk;
+    std::string error;
+    if (LoadSilk(db, jid, silk, error)) account["silk"] = {{"own", silk.own}, {"gift", silk.gift}, {"point", silk.point}};
+
+    json characters = json::array();
+    const QueryResult c = db.Query(
+        "SELECT c.charname16, c.curlevel, c.refobjid, c.remaingold, c.remainskillpoint, c.strength, c.intellect, c.hp, c.mp, "
+        "       coalesce(g.name, ''), coalesce(j.jobtype, 0), coalesce(j.level, 0), floor(extract(epoch FROM c.lastlogout))::bigint, "
+        "       EXISTS (SELECT 1 FROM sro_vt_account.sr_online_sessions o WHERE o.character_id = c.charid), c.nickname16, c.totalpk, "
+        "       c.remainstatpoint, c.maxlevel "
+        "FROM _user u JOIN _char c ON c.charid = u.charid "
+        "LEFT JOIN _guild g ON g.id = c.guildid AND c.guildid <> 0 "
+        "LEFT JOIN _chartrijob j ON j.charid = c.charid "
+        "WHERE u.userjid = $1 AND c.deleted = 0 AND c.charid <> 0 ORDER BY c.curlevel DESC, c.charid",
+        {jid});
+    static const char* jobs[] = {"", "Trader", "Thief", "Hunter"};
+    for (int i = 0; c.Ok() && i < c.Rows(); ++i) {
+        const std::int64_t model = c.Int(i, 2);
+        const bool european = model >= 14875;
+        const bool woman = european ? model >= 14888 : model >= 1920;
+        const std::int64_t job = c.Int(i, 10);
+        characters.push_back({{"name", c.Text(i, 0)},
+                              {"level", c.Int(i, 1)},
+                              {"maxLevel", c.Int(i, 17)},
+                              {"race", european ? "European" : "Chinese"},
+                              {"sex", woman ? "female" : "male"},
+                              {"gold", c.Int(i, 3)},
+                              {"skillPoints", c.Int(i, 4)},
+                              {"statPoints", c.Int(i, 16)},
+                              {"strength", c.Int(i, 5)},
+                              {"intellect", c.Int(i, 6)},
+                              {"hp", c.Int(i, 7)},
+                              {"mp", c.Int(i, 8)},
+                              {"guild", c.Text(i, 9)},
+                              {"job", job >= 0 && job <= 3 ? jobs[job] : ""},
+                              {"jobLevel", c.Int(i, 11)},
+                              {"jobAlias", c.Text(i, 14)},
+                              {"pk", c.Int(i, 15)},
+                              {"lastPlayed", c.Int(i, 12)},
+                              {"online", c.Bool(i, 13)}});
+    }
+    return {{"account", account}, {"characters", characters}};
+}
+
 json CharactersJson(const std::vector<Character>& list) {
     json a = json::array();
     for (const Character& c : list) a.push_back({{"name", c.name}, {"level", c.level}, {"race", c.race}});
@@ -60,7 +122,8 @@ std::string BlockedWords(const AccountRow& a) {
 class WebPlayers {
 public:
     explicit WebPlayers(const AdminHost& host)
-        : host_(host), addressLimiter_(10, std::chrono::minutes(15)), accountLimiter_(10, std::chrono::minutes(15)) {}
+        : host_(host), addressLimiter_(10, std::chrono::minutes(15)), accountLimiter_(10, std::chrono::minutes(15)),
+          supportLimiter_(std::max(1, host.config->supportAttempts), std::chrono::hours(1)) {}
 
     struct Session {
         std::int64_t jid = 0;
@@ -104,11 +167,146 @@ private:
     }
 
     void Login(const httplib::Request& req, httplib::Response& res);
+    // The account's current password, for a change (the login's limits apply); false: the refusal is written.
+    bool CheckCurrent(const httplib::Request& req, httplib::Response& res, const Session& who, const std::string& current);
 
     AdminHost host_;
     std::mutex limiterMutex_;
     AttemptLimiter addressLimiter_, accountLimiter_;
+    AttemptLimiter supportLimiter_;
+
+    void SupportTicket(const httplib::Request& req, httplib::Response& res);
+    void SupportFile(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader);
 };
+
+void WebPlayers::SupportTicket(const httplib::Request& req, httplib::Response& res) {
+    const auto body = Body(req, res);
+    if (!body) return;
+    const std::string address = host_.visitor(req);
+    // A field people never see: a robot fills it in, and is thanked without a ticket.
+    if (!Field(*body, "website").empty()) return Answer(res, 201, {{"id", 0}, {"uploadToken", ""}});
+    NewTicket t;
+    t.kind = Field(*body, "kind");
+    t.category = Field(*body, "category");
+    t.subject = Field(*body, "subject");
+    t.body = Field(*body, "text");
+    t.name = Field(*body, "name");
+    t.email = Field(*body, "email");
+    t.clientInfo = Field(*body, "clientInfo");
+    t.source = Field(*body, "source").empty() ? std::string("site") : Field(*body, "source");
+    t.address = address;
+    if (const auto who = Find(req)) {
+        t.jid = who->jid;
+        if (t.name.empty()) t.name = who->account;
+    }
+    if (const auto why = CheckTicket(t)) return Refuse(res, 400, "invalid", *why);
+    if (Config().supportAttempts > 0) {
+        const std::lock_guard lock(limiterMutex_);
+        if (!supportLimiter_.Allow(address)) return Refuse(res, 429, "too-many", "Too many messages from here; try again in an hour.");
+    }
+    const auto made = OnPool<std::optional<std::pair<std::int64_t, std::string>>>(Pool(), [t](Database& db) { return CreateTicket(db, t); });
+    if (!made || !*made) return Refuse(res, 503, "busy", "The message could not be saved; try again.");
+    core::LogInfo("SroWeb: support ticket #{} ({}, {}) from {}", (*made)->first, t.kind, t.category, address);
+    Answer(res, 201, {{"id", (*made)->first}, {"uploadToken", (*made)->second}});
+}
+
+void WebPlayers::SupportFile(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+    namespace fs = std::filesystem;
+    const std::int64_t id = std::atoll(req.matches[1].str().c_str());
+    const std::vector<std::uint8_t> token = FromHex(req.get_param_value("token"));
+    std::string original = fs::path(req.get_param_value("name")).filename().string().substr(0, 200);
+    if (original.empty()) original = "file";
+    const std::string lengthHeader = req.get_header_value("Content-Length");
+    const std::int64_t length = lengthHeader.empty() ? -1 : std::atoll(lengthHeader.c_str());
+    if (length <= 0) return Refuse(res, 411, "length", "The upload must say its size.");
+    if (length > kSupportVideoMax) return Refuse(res, 413, "too-big", std::format("A file is up to {} MB.", kSupportVideoMax >> 20));
+    if (token.size() != 32) return Refuse(res, 403, "token", "This upload is not allowed.");
+    // The ticket's token, still good, and room for one more.
+    const auto room = OnPool<int>(Pool(), [id, hash = Sha256(token)](Database& db) {
+        const QueryResult r = db.Query(std::format("SELECT (SELECT count(*) FROM sro_vt_account.sr_support_files f WHERE f.ticket_id = t.id) "
+                                                   "FROM sro_vt_account.sr_support_tickets t WHERE t.id = $1 AND t.upload_token = $2 "
+                                                   "AND t.created_at > now() - make_interval(hours => {})",
+                                                   kSupportUploadHours),
+                                       {id, Param::Bytes(hash)});
+        if (!r.Ok() || r.Rows() != 1) return -1;
+        return kSupportFilesMax - int(r.Int(0, 0));
+    });
+    if (!room) return Refuse(res, 503, "busy", "The server is busy; try again.");
+    if (*room < 0) return Refuse(res, 403, "token", "This upload is not allowed (or its time is over).");
+    if (*room == 0) return Refuse(res, 409, "full", std::format("A ticket takes {} files.", kSupportFilesMax));
+
+    std::error_code ec;
+    const fs::path dir = fs::absolute(Config().supportDir) / std::to_string(id);
+    fs::create_directories(dir, ec);
+    const std::string random = Hex(RandomBytes(16));
+    const fs::path part = dir / (random + ".part");
+    std::ofstream out(part, std::ios::binary);
+    if (!out) return Refuse(res, 500, "disk", "The upload folder cannot be written.");
+    Sha256Stream hash;
+    std::int64_t got = 0;
+    std::string head;
+    const bool read = reader([&](const char* data, std::size_t size) {
+        got += std::int64_t(size);
+        if (got > length) return false;
+        if (head.size() < 16) head.append(data, std::min<std::size_t>(size, 16 - head.size()));
+        out.write(data, std::streamsize(size));
+        hash.Add({reinterpret_cast<const std::uint8_t*>(data), size});
+        return bool(out);
+    });
+    out.close();
+    const auto fail = [&](int status, const char* code, const std::string& message) {
+        fs::remove(part, ec);
+        Refuse(res, status, code, message);
+    };
+    if (!read || got != length) return fail(400, "incomplete", "The upload did not arrive whole.");
+    const std::string mime = SupportFileType(head);
+    if (mime.empty()) return fail(400, "type", "Screenshots (JPEG, PNG, WebP) and videos (MP4, WebM) only.");
+    if (mime.starts_with("image/") && got > kSupportImageMax) return fail(413, "too-big", std::format("A screenshot is up to {} MB.", kSupportImageMax >> 20));
+    const std::string stored = std::to_string(id) + "/" + random + SupportFileExtension(mime);
+    fs::rename(part, fs::absolute(Config().supportDir) / stored, ec);
+    if (ec) return fail(500, "disk", "The file could not be stored.");
+    const std::string sha = Hex(hash.Finish());
+    const auto row = OnPool<std::int64_t>(Pool(), [id, stored, original, mime, got, sha](Database& db) -> std::int64_t {
+        // Counted again inside the insert: two uploads at once cannot pass the limit.
+        const QueryResult r = db.Query(std::format("INSERT INTO sro_vt_account.sr_support_files (ticket_id, stored, original, mime, bytes, sha256) "
+                                                   "SELECT $1, $2, $3, $4, $5, $6 WHERE (SELECT count(*) FROM sro_vt_account.sr_support_files "
+                                                   "WHERE ticket_id = $1) < {} RETURNING id",
+                                                   kSupportFilesMax),
+                                       {id, stored, original, mime, got, sha});
+        return r.Ok() && r.Rows() == 1 ? r.Int(0, 0) : 0;
+    });
+    if (!row || *row == 0) {
+        fs::remove(fs::absolute(Config().supportDir) / stored, ec);
+        return Refuse(res, 409, "full", std::format("A ticket takes {} files.", kSupportFilesMax));
+    }
+    Answer(res, 201, {{"id", *row}, {"mime", mime}, {"bytes", got}});
+}
+
+bool WebPlayers::CheckCurrent(const httplib::Request& req, httplib::Response& res, const Session& who, const std::string& current) {
+    {
+        const std::lock_guard lock(limiterMutex_);
+        if (!addressLimiter_.Allow(host_.visitor(req)) || !accountLimiter_.Allow(Lower(who.account))) {
+            Refuse(res, 429, "too-many", "Too many tries; wait 15 minutes.");
+            return false;
+        }
+    }
+    const auto right = OnPool<bool>(Pool(), [name = who.account, current](Database& db) {
+        bool ok = false;
+        const auto account = FindAccount(db, name, ok);
+        if (!account || current.empty() || current.size() > 64) return false;
+        if (!account->passwordHash.empty()) return VerifyPassword(current, account->passwordHash);
+        return !account->legacyHash.empty() && VerifyLegacyPassword(current, account->legacyHash);
+    });
+    if (!right) {
+        Refuse(res, 503, "busy", "The server is busy; try again.");
+        return false;
+    }
+    if (!*right) {
+        Refuse(res, 403, "wrong", "The current password is wrong.");
+        return false;
+    }
+    return true;
+}
 
 void WebPlayers::Login(const httplib::Request& req, httplib::Response& res) {
     const auto body = Body(req, res);
@@ -181,6 +379,78 @@ void WebPlayers::Register(httplib::Server& http) {
         if (!who) return Refuse(res, 401, "login", "Please log in.");
         const auto characters = OnPool<std::vector<Character>>(Pool(), [jid = who->jid](Database& db) { return CharactersOf(db, jid); });
         Answer(res, 200, {{"name", who->account}, {"csrf", who->csrf}, {"characters", CharactersJson(characters ? *characters : std::vector<Character>{})}});
+    });
+    // The player's own page: the account and its characters.
+    http.Get("/api/account/profile", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Find(req);
+        if (!who) return Refuse(res, 401, "login", "Please log in.");
+        const auto profile = OnPool<json>(Pool(), [jid = who->jid](Database& db) { return ProfileJson(db, jid); });
+        if (!profile || profile->is_null()) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        res.set_header("Cache-Control", "no-store");
+        Answer(res, 200, *profile);
+    });
+    // A new password: the current one first (as a login: the same limits). Every other session of the account ends.
+    http.Post("/api/account/password", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res);
+        if (!who) return;
+        const auto body = Body(req, res);
+        if (!body) return;
+        const std::string current = Field(*body, "current"), password = Field(*body, "password");
+        if (!ValidPassword(password)) return Refuse(res, 400, "password", "Passwords are 6 to 64 characters.");
+        if (!CheckCurrent(req, res, *who, current)) return;
+        const auto ok = OnPool<bool>(Pool(), [jid = who->jid, password, legacy = Config().legacyPasswords, keep = Sha256(FromHex(CookieValue(req, kCookie)))](Database& db) {
+            if (!StorePasswordHash(db, jid, HashPassword(password), LegacyPasswords::Clear)) return false;
+            if (legacy == LegacyPasswords::Keep) db.Query("UPDATE sro_vt_account.tb_user SET password = $2 WHERE jid = $1", {jid, LegacyPasswordHash(password)});
+            db.Query("DELETE FROM sro_vt_account.sr_player_sessions WHERE jid = $1 AND token_hash <> $2", {jid, Param::Bytes(keep)});
+            return true;
+        });
+        if (!ok || !*ok) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        core::LogInfo("SroWeb: player {} changed the password from {}", who->account, host_.visitor(req));
+        Answer(res, 200, {{"ok", true}});
+    });
+    // A new e-mail address (or none): the password first.
+    http.Post("/api/account/email", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res);
+        if (!who) return;
+        const auto body = Body(req, res);
+        if (!body) return;
+        const std::string current = Field(*body, "current"), email = Field(*body, "email");
+        if (!email.empty() && !ValidEmail(email)) return Refuse(res, 400, "email", "That e-mail address does not look right.");
+        if (!CheckCurrent(req, res, *who, current)) return;
+        const auto ok = OnPool<bool>(Pool(), [jid = who->jid, email](Database& db) {
+            return db.Query("UPDATE sro_vt_account.tb_user SET email = nullif($2, '') WHERE jid = $1", {jid, email}).Ok();
+        });
+        if (!ok || !*ok) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        core::LogInfo("SroWeb: player {} changed the e-mail address", who->account);
+        Answer(res, 200, {{"ok", true}});
+    });
+    // Support: a ticket, then its files (WebSupport.h); a signed-in player's own tickets and its answers.
+    http.Post("/api/support", [this](const httplib::Request& req, httplib::Response& res) { SupportTicket(req, res); });
+    http.Post(R"(/api/support/(\d+)/files)", [this](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+        SupportFile(req, res, reader);
+    });
+    http.Get("/api/account/tickets", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Find(req);
+        if (!who) return Refuse(res, 401, "login", "Please log in.");
+        const auto list = OnPool<json>(Pool(), [jid = who->jid](Database& db) { return PlayerTickets(db, jid); });
+        if (!list) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        res.set_header("Cache-Control", "no-store");
+        Answer(res, 200, {{"tickets", *list}});
+    });
+    http.Post("/api/account/tickets/:id/reply", [this](const httplib::Request& req, httplib::Response& res) {
+        const auto who = Guard(req, res);
+        if (!who) return;
+        const auto body = Body(req, res);
+        if (!body) return;
+        std::string text = Field(*body, "text");
+        text.erase(0, text.find_first_not_of(" \t\r\n"));
+        text.erase(text.find_last_not_of(" \t\r\n") + 1);
+        if (text.empty() || text.size() > 5000) return Refuse(res, 400, "text", "The answer is 1 to 5000 characters.");
+        const std::int64_t id = std::atoll(req.path_params.at("id").c_str());
+        const auto ok = OnPool<bool>(Pool(), [jid = who->jid, id, name = who->account, text](Database& db) { return PlayerReply(db, jid, id, name, text); });
+        if (!ok) return Refuse(res, 503, "busy", "The server is busy; try again.");
+        if (!*ok) return Refuse(res, 404, "ticket", "No such open ticket of yours.");
+        Answer(res, 200, {{"ok", true}});
     });
     http.Post("/api/account/logout", [this](const httplib::Request& req, httplib::Response& res) {
         if (!Guard(req, res)) return;
