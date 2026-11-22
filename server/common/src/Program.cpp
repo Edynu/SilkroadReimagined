@@ -6,6 +6,17 @@
 #include <format>
 #include <csignal>
 #include <cstdlib>
+#include <thread>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include "sr/server/Service.h"
 
@@ -92,6 +103,17 @@ void InstallStopHandler() {
     std::signal(SIGTERM, OnStopSignal);
 #ifdef SIGBREAK
     std::signal(SIGBREAK, OnStopSignal);
+#endif
+#ifdef _WIN32
+    // A supervisor's stop (a Windows service has no console to send Ctrl+C through): SR_STOP_EVENT names an event
+    // (Global\... or Local\...); set, the program stops as on Ctrl+C, saving what it holds. Linux has SIGTERM.
+    if (const char* name = std::getenv("SR_STOP_EVENT"); name != nullptr && *name != 0) {
+        if (HANDLE event = CreateEventA(nullptr, TRUE, FALSE, name); event != nullptr) {
+            std::thread([event] {
+                if (WaitForSingleObject(event, INFINITE) == WAIT_OBJECT_0) gStop.store(true);
+            }).detach();
+        }
+    }
 #endif
 }
 

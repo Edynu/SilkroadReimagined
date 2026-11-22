@@ -88,8 +88,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package-client.ps1
 
 CMake keeps the values: later builds need only the second and third lines. The package
 (`build\client-release\package\SroReimagined-<version>.zip`) holds the exe, its DLLs and the Visual C++ runtime, so
-players install nothing. A new version: `-DSR_CLIENT_VERSION=0.1.1` on the first line (the exe's version resource and
-the package's name).
+players install nothing. A new version: the `VERSION` of `project()` in the root `CMakeLists.txt` (the exe's version
+resource and the package's name), then configure again.
 
 **The shard it plays on** (the configure line):
 

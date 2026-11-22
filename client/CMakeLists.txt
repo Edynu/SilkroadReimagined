@@ -130,7 +130,8 @@ endif()
 
 # The players' build (the client-release preset): a window program without a console, started beside its exe
 # (src/PlayerStart.h), with its version resource and application manifest.
-set(SR_CLIENT_VERSION "0.1.0" CACHE STRING "The client's version (major.minor.patch)")
+# Its version: the project's (the root CMakeLists.txt), the one place it is set.
+set(SR_CLIENT_VERSION "${PROJECT_VERSION}")
 # The shard a players' build plays on, built into the exe (res/PlayerServer.h.in): its gateway, the servers'
 # certificate (the .pem the servers made, its certificate alone) and the name it was made for.
 set(SR_PLAYER_GATEWAY "" CACHE STRING "The players' build: the shard's gateway, host:port")
