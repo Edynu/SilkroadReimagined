@@ -2213,8 +2213,18 @@ struct BuffHost : server::AcademyHost {
     std::vector<std::pair<std::uint64_t, std::pair<proto::MessageId, std::vector<std::byte>>>> sent;
     void AcademySend(std::uint64_t peer, proto::MessageId m, const std::vector<std::byte>& payload) override { sent.push_back({peer, {m, payload}}); }
     std::optional<server::AcademyActor> AcademyPlayerAt(std::uint32_t) const override { return std::nullopt; }
-    bool AcademyTakeGold(std::uint64_t, std::uint64_t) override { return true; }
-    void AcademyGiveGold(std::uint64_t, std::uint64_t) override {}
+    void AcademyPay(std::int64_t, std::uint64_t, server::PaymentWork work, server::PaymentDone done) override {
+        std::string error;
+        std::uint64_t credit = 0;
+        const bool ok = db->Transaction(
+            [&](server::Database& tx) {
+                const auto got = work(tx);
+                if (got) credit = *got;
+                return got.has_value();
+            },
+            error);
+        done(ok, credit);
+    }
     void AcademySubmit(std::function<void(server::Database&)> task, std::function<void()> done) override {
         task(*db);
         done();

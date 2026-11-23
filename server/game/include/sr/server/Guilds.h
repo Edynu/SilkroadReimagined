@@ -28,6 +28,7 @@
 #include "sr/game/Guild.h"
 #include "sr/game/GuildProtocol.h"
 #include "sr/game/WorldProtocol.h"
+#include "sr/server/Payment.h"
 #include "sr/server/GuildStore.h"
 
 namespace sr::server {
@@ -69,6 +70,8 @@ public:
         return false;
     }
     virtual bool TakeSkillPoints(std::uint64_t peer, std::uint32_t points) = 0;
+    // A payment of `character`'s with its work in one transaction (Payment.h), in its order of saves.
+    virtual void GuildPay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) = 0;
     // A guild owns a fortress; a fortress war is on and the guild is in it.
     virtual bool GuildHoldsFortress(std::uint32_t guild) const {
         (void)guild;

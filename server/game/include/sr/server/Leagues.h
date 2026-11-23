@@ -29,6 +29,7 @@
 
 #include "sr/game/JobProtocol.h"
 #include "sr/game/Jobs.h"
+#include "sr/server/Payment.h"
 
 namespace sr::server {
 
@@ -55,8 +56,9 @@ public:
     virtual game::JobType LeagueKeeperNear(std::uint32_t entity, std::uint32_t npc) const = 0;
     // The name rules' letters (an alias's length is checked apart).
     virtual bool AliasLettersOk(std::string_view alias) const = 0;
-    virtual bool LeagueTakeGold(std::uint64_t peer, std::uint64_t amount) = 0;
-    virtual void LeagueGiveGold(std::uint64_t peer, std::uint64_t amount) = 0;
+    // A payment of `character`'s with its work in one transaction (Payment.h), in its order of saves, after every write
+    // before it (as LeagueDatabase).
+    virtual void LeaguePay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) = 0;
     virtual void LeagueSend(std::uint64_t peer, game::proto::MessageId id, const std::vector<std::byte>& payload) = 0;
     // The player's league or alias changed: the host tells it (JobInfoMessage) and those near.
     virtual void LeagueChanged(std::uint32_t entity) = 0;

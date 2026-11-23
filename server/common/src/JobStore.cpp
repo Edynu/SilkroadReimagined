@@ -90,7 +90,8 @@ bool LeaveLeague(Database& db, std::int64_t character, std::int64_t leftAt) {
     std::string error;
     const bool ok = db.Transaction(
         [&](Database& tx) {
-            return tx.Query("UPDATE _chartrijob SET jobtype = 0, level = 1, exp = 0 WHERE charid = $1", {character}).Ok() &&
+            // The week's contribution and the reward unclaimed go too (the original's leave zeroes its job record).
+            return tx.Query("UPDATE _chartrijob SET jobtype = 0, level = 1, exp = 0, contribution = 0, reward = 0 WHERE charid = $1", {character}).Ok() &&
                    tx.Query("UPDATE _char SET nickname16 = '' WHERE charid = $1", {character}).Ok() &&
                    tx.Query("DELETE FROM _chartrijobsafetrade WHERE charid = $1", {character}).Ok() &&
                    tx.Query("DELETE FROM _timedjob WHERE charid = $1 AND category = $2 AND jobid = $3",
@@ -239,7 +240,7 @@ const char* JobTableWord(game::JobType type) {
 
 bool LoadBargainLock(Database& db, std::int64_t character, std::int64_t& until, std::string& error) {
     until = 0;
-    const QueryResult r = db.Query("SELECT coalesce(max(data1), 0) FROM _timedjob WHERE charid = $1 AND category = 100 AND jobid = 7", {character});
+    const QueryResult r = db.Query("SELECT coalesce(max(until), 0) FROM sr_bargain_lock WHERE charid = $1", {character});
     if (!r.Ok()) {
         error = r.Error();
         return false;
@@ -249,17 +250,10 @@ bool LoadBargainLock(Database& db, std::int64_t character, std::int64_t& until, 
 }
 
 void SaveBargainLock(Database& db, std::int64_t character, std::int64_t until) {
-    std::string error;
-    const bool ok = db.Transaction(
-        [&](Database& tx) {
-            return tx.Query("DELETE FROM _timedjob WHERE charid = $1 AND category = 100 AND jobid = 7", {character}).Ok() &&
-                   tx.Query("INSERT INTO _timedjob (charid, category, jobid, timetokeep, data1, data2, serial64, jid) "
-                            "VALUES ($1, 100, 7, 600, $2, 0, 0, coalesce((SELECT userjid FROM _user WHERE charid = $1), 0))",
-                            {character, until})
-                       .Ok();
-        },
-        error);
-    if (!ok) core::LogWarning("the bargain goods' lock-out ({}): {}", character, error);
+    // Ours (the original keeps the bargain hours' lock-out in its own memory): sr_bargain_lock, never the original's _timedjob.
+    const QueryResult r = db.Query("INSERT INTO sr_bargain_lock (charid, until) VALUES ($1, $2) ON CONFLICT (charid) DO UPDATE SET until = EXCLUDED.until",
+                                   {character, until});
+    if (!r.Ok()) core::LogWarning("the bargain goods' lock-out ({}): {}", character, r.Error());
 }
 
 bool LoadSafeTrade(Database& db, std::int64_t character, std::optional<SafeTradeRow>& out, std::string& error) {

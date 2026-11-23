@@ -22,6 +22,7 @@
 
 #include "sr/game/AcademyProtocol.h"
 #include "sr/game/WorldProtocol.h"
+#include "sr/server/Payment.h"
 
 namespace sr::server {
 
@@ -47,8 +48,8 @@ public:
     // A player in the world by its entity (the one invited must be on this server: the original's target is in view).
     virtual std::optional<AcademyActor> AcademyPlayerAt(std::uint32_t entity) const = 0;
     // The founding's fee (100,000 gold, reason 0x16); false when the player has too little; and back.
-    virtual bool AcademyTakeGold(std::uint64_t peer, std::uint64_t gold) = 0;
-    virtual void AcademyGiveGold(std::uint64_t peer, std::uint64_t gold) = 0;
+    // A payment of `character`'s with its work in one transaction (Payment.h), in its order of saves.
+    virtual void AcademyPay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) = 0;
     // `task` on a database thread, then `done` on the server's.
     virtual void AcademySubmit(std::function<void(Database&)> task, std::function<void()> done) = 0;
     // The shard's bus: this server's id, whether there is one, and publishing on it.

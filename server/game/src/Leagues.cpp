@@ -61,27 +61,32 @@ void Leagues::Join(std::uint32_t entity, const proto::JobJoin& r) {
     const std::uint64_t fee = game::JobJoinFee(m->level);
     if (m->gold < fee) return refuse(JobCode::NotEnoughGold);
     if (*m->leftAt != 0 && host_.LeagueNow() - *m->leftAt < game::kJobRejoinSeconds) return refuse(JobCode::RejoinWait);
-    // The fee is taken now and given back if the database refuses.
-    if (fee > 0 && !host_.LeagueTakeGold(m->peer, fee)) return refuse(JobCode::NotEnoughGold);
+    // The fee and the join in one transaction (the original charges once its job has succeeded, and saves both together).
     waiting_.insert(entity);
-    auto joined = std::make_shared<std::pair<bool, game::JobInfo>>();
+    struct Joined {
+        bool ran = false;
+        game::JobInfo info;
+    };
+    auto joined = std::make_shared<Joined>();
     const std::int64_t character = m->character;
-    host_.LeagueDatabase([joined, character, type](Database& db) { joined->first = JoinLeague(db, character, type, joined->second); },
-                         [this, joined, entity, character, fee] {
+    host_.LeaguePay(character, fee,
+                    [joined, character, type](Database& tx) -> std::optional<std::uint64_t> {
+                        joined->ran = true;
+                        if (!JoinLeague(tx, character, type, joined->info)) return std::nullopt;
+                        return 0;
+                    },
+                    [this, joined, entity, character](bool ok, std::uint64_t) {
                              const auto again = Again(entity, character);
-                             if (!joined->first) {
-                                 if (again) {
-                                     if (fee > 0) host_.LeagueGiveGold(again->peer, fee);
-                                     Answer(again->peer, JobRequest::Join, JobCode::Failed);
-                                 }
+                             if (!ok) {
+                                 if (again) Answer(again->peer, JobRequest::Join, joined->ran ? JobCode::Failed : JobCode::NotEnoughGold);
                                  return;
                              }
                              if (!again) return; // gone: the database has it for its next entry
                              const game::JobInfo before = *again->job;
-                             *again->job = joined->second;
+                             *again->job = joined->info;
                              again->job->reward = before.reward;
                              *again->leftAt = 0;
-                             core::LogInfo("leagues: {} joined league {} at job level {}", character, int(joined->second.type), joined->second.level);
+                             core::LogInfo("leagues: {} joined league {} at job level {}", character, int(joined->info.type), joined->info.level);
                              Answer(again->peer, JobRequest::Join, JobCode::Ok);
                              host_.LeagueChanged(entity);
                          });
@@ -106,9 +111,7 @@ void Leagues::Leave(std::uint32_t entity, const proto::JobLeave& r) {
                              if (!again) return;
                              if (!*left) return Answer(again->peer, JobRequest::Leave, JobCode::Failed);
                              const game::JobInfo before = *again->job;
-                             *again->job = {};
-                             again->job->contribution = before.contribution;
-                             again->job->reward = before.reward;
+                             *again->job = {}; // the contribution and the reward too (LeaveLeague), as the original's leave
                              again->alias->clear();
                              *again->leftAt = now;
                              core::LogInfo("leagues: {} left league {}", character, int(before.type));
@@ -141,19 +144,24 @@ void Leagues::Alias(std::uint32_t entity, const proto::JobAlias& r) {
                              });
         return;
     }
-    // A change costs level x 50,000 (the first alias is free), taken now and given back if it is not given.
+    // A change costs level x 50,000 (the first alias is free), in one transaction with the alias.
     const std::uint64_t fee = m->alias->empty() ? 0 : game::AliasChangeFee(m->level);
     if (m->gold < fee) return refuse(JobCode::NotEnoughGold);
-    if (fee > 0 && !host_.LeagueTakeGold(m->peer, fee)) return refuse(JobCode::NotEnoughGold);
     waiting_.insert(entity);
-    auto given = std::make_shared<int>(0);
-    host_.LeagueDatabase([given, character, name = r.name](Database& db) { *given = AssignAlias(db, character, name); },
-                         [this, given, entity, character, fee, code, name = r.name] {
+    auto given = std::make_shared<std::pair<bool, int>>(false, 0); // ran, AssignAlias's answer
+    host_.LeaguePay(character, fee,
+                    [given, character, name = r.name](Database& tx) -> std::optional<std::uint64_t> {
+                        given->first = true;
+                        given->second = AssignAlias(tx, character, name);
+                        if (given->second != 1) return std::nullopt;
+                        return 0;
+                    },
+                    [this, given, entity, character, code, name = r.name](bool ok, std::uint64_t) {
                              const auto again = Again(entity, character);
                              if (!again) return;
-                             if (*given != 1) {
-                                 if (fee > 0) host_.LeagueGiveGold(again->peer, fee);
-                                 return Answer(again->peer, JobRequest::Alias, code(*given), proto::kAliasSet);
+                             if (!ok) {
+                                 return Answer(again->peer, JobRequest::Alias, given->first ? code(given->second == 1 ? 0 : given->second) : JobCode::NotEnoughGold,
+                                               proto::kAliasSet);
                              }
                              *again->alias = name;
                              core::LogInfo("leagues: {} took the alias {}", character, name);
@@ -225,28 +233,32 @@ void Leagues::Outcome(std::uint32_t entity, const proto::JobOutcome& r) {
     if (league != game::JobType::Thief && league != game::JobType::Hunter) return refuse(JobCode::NotInLeague);
     if (keeper != league || r.action > 1) return refuse(JobCode::NotOffered);
     waiting_.insert(entity);
-    auto amount = std::make_shared<std::int64_t>(0);
     const std::int64_t character = m->character;
-    const bool collect = r.action == 1;
-    host_.LeagueDatabase(
-        [amount, character, collect](Database& db) {
-            if (collect) {
-                *amount = TakeJobReward(db, character);
-            } else {
-                *amount = db.Query("SELECT reward FROM _chartrijob WHERE charid = $1", {character}).Int(0, 0);
-            }
-        },
-        [this, amount, entity, character, r, collect] {
-            const auto again = Again(entity, character);
-            if (!again) return;
-            if (collect && *amount <= 0) return Answer(again->peer, JobRequest::Outcome, JobCode::NoOutcome, r.action);
-            const std::uint32_t paid = std::uint32_t(std::clamp<std::int64_t>(*amount, 0, 0xFFFFFFFF));
-            if (collect) {
-                host_.LeagueGiveGold(again->peer, paid);
-                again->job->reward = 0;
-            }
-            host_.LeagueSend(again->peer, proto::JobOutcomeAnswer::kId, proto::Encode(proto::JobOutcomeAnswer{r.npc, r.action, paid}));
-        });
+    if (r.action == 1) {
+        // Collected: the reward out of the row and into the gold in one transaction (the original pays it and clears it
+        // with one character save).
+        host_.LeaguePay(character, 0,
+                        [character](Database& tx) -> std::optional<std::uint64_t> {
+                            return std::uint64_t(std::clamp<std::int64_t>(TakeJobReward(tx, character), 0, 0xFFFFFFFF));
+                        },
+                        [this, entity, character, r](bool ok, std::uint64_t paid) {
+                            const auto again = Again(entity, character);
+                            if (!again) return;
+                            if (!ok || paid == 0) return Answer(again->peer, JobRequest::Outcome, JobCode::NoOutcome, r.action);
+                            again->job->reward = 0;
+                            host_.LeagueSend(again->peer, proto::JobOutcomeAnswer::kId,
+                                             proto::Encode(proto::JobOutcomeAnswer{r.npc, r.action, std::uint32_t(paid)}));
+                        });
+        return;
+    }
+    auto amount = std::make_shared<std::int64_t>(0);
+    host_.LeagueDatabase([amount, character](Database& db) { *amount = db.Query("SELECT reward FROM _chartrijob WHERE charid = $1", {character}).Int(0, 0); },
+                         [this, amount, entity, character, r] {
+                             const auto again = Again(entity, character);
+                             if (!again) return;
+                             const std::uint32_t paid = std::uint32_t(std::clamp<std::int64_t>(*amount, 0, 0xFFFFFFFF));
+                             host_.LeagueSend(again->peer, proto::JobOutcomeAnswer::kId, proto::Encode(proto::JobOutcomeAnswer{r.npc, r.action, paid}));
+                         });
 }
 
 } // namespace sr::server

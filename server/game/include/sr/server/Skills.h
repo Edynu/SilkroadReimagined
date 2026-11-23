@@ -332,6 +332,8 @@ public:
     // its speed, its stat panel).
     virtual void VitalsChanged(std::uint32_t caster) = 0;
     virtual void StatsChanged(std::uint32_t player) = 0;
+    // A buff a logout keeps (OutlivesLogout: a scroll's) began, was renewed or ended on `player`: written now.
+    virtual void KeptBuffsChanged(std::uint32_t player) { (void)player; }
     // A reuse of five minutes or more began: it is written, so a logout or a change of server does not end it.
     virtual void LongCooldownStarted(std::uint32_t player, std::uint32_t skill) {
         (void)player;

@@ -45,21 +45,20 @@ Storage::MoveResult Storage::Move(const assets::ItemTable& items, Inventory& inv
     const auto touch = [&](Side side, std::uint8_t place) {
         (side == Side::Storage ? result.storageTouched : result.inventoryTouched).push_back(place);
     };
-    const bool leavesInventory = fromSide == Side::Inventory && toSide == Side::Storage;
     const auto d = dst.find(to);
     const int maxStack = MaxStack(*row);
 
     if (d == dst.end()) {
-        // An empty place: all of it, or a split.
+        // An empty place: all of it (the same item, its serial kept, as the original moves one item id), or a split (a new
+        // item, serial 0).
         ItemInstance moved = s->second;
         moved.count = count;
         if (count == s->second.count) {
-            if (leavesInventory) result.gone.push_back(s->second.serial);
             src.erase(s);
         } else {
             s->second.count = std::uint16_t(s->second.count - count);
+            moved.serial = 0;
         }
-        moved.serial = toSide == Side::Inventory ? 0 : moved.serial;
         dst[to] = std::move(moved);
     } else if (d->second.refId == s->second.refId && maxStack > 1) {
         // The same stackable: topped up to its stack size, the rest stays.
@@ -68,22 +67,15 @@ Storage::MoveResult Storage::Move(const assets::ItemTable& items, Inventory& inv
         const std::uint16_t moved = std::uint16_t(std::min<int>(room, count));
         d->second.count = std::uint16_t(d->second.count + moved);
         if (moved == s->second.count) {
-            if (fromSide == Side::Inventory) result.gone.push_back(s->second.serial);
+            result.gone.push_back(s->second.serial);
             src.erase(s);
         } else {
             s->second.count = std::uint16_t(s->second.count - moved);
         }
     } else {
-        // Anything else: the two swap (whole stacks only).
+        // Anything else: the two swap (whole stacks only), each keeping its serial.
         if (count != s->second.count) return refuse(ItemStatus::BadSlot);
         std::swap(s->second, d->second);
-        if (fromSide != toSide) {
-            // What went to the inventory gets a new serial; what left it is no longer its row.
-            ItemInstance& intoInventory = fromSide == Side::Inventory ? s->second : d->second;
-            ItemInstance& intoStorage = fromSide == Side::Inventory ? d->second : s->second;
-            result.gone.push_back(intoStorage.serial);
-            intoInventory.serial = 0;
-        }
     }
     touch(fromSide, from);
     touch(toSide, to);

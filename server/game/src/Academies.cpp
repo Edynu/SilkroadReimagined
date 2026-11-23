@@ -598,25 +598,33 @@ struct Academies::State {
         if (a.gold < academy::kFoundGold) return Refuse(a.peer, proto::AcademyFound::kId, code::kGold);
         if (o->academy != 0) return Refuse(a.peer, proto::AcademyFound::kId, code::kOtherAcademy);
         if (const std::int64_t left = WaitLeft(*o, academy::kWaitFound)) return Refuse(a.peer, proto::AcademyFound::kId, code::kFoundWait, left);
-        if (!host.AcademyTakeGold(a.peer, academy::kFoundGold)) return Refuse(a.peer, proto::AcademyFound::kId, code::kGold);
+        // The academy's rows and the 100,000 in one transaction (the original charges once _TRAINING_CAMP_CREATE has stood).
         ++writes;
         auto made = std::make_shared<std::uint32_t>(0);
-        auto result = std::make_shared<AcademyWrite>(AcademyWrite::Failed);
+        auto result = std::make_shared<std::pair<bool, AcademyWrite>>(false, AcademyWrite::Failed); // ran, FoundAcademy's answer
         const std::int64_t character = a.character;
         const std::uint64_t peer = a.peer;
         const std::string name = a.name;
         const int level = a.level, maxLevel = a.maxLevel;
-        host.AcademySubmit(
-            [character, level, maxLevel, made, result](Database& db) {
+        host.AcademyPay(
+            character, academy::kFoundGold,
+            [character, level, maxLevel, made, result](Database& tx) -> std::optional<std::uint64_t> {
+                result->first = true;
                 std::string error;
-                *result = FoundAcademy(db, character, level, maxLevel, *made, error);
-                if (*result != AcademyWrite::Ok) core::LogWarning("academy: founding for {}: {}", character, error);
+                result->second = FoundAcademy(tx, character, level, maxLevel, *made, error);
+                if (result->second != AcademyWrite::Ok) {
+                    core::LogWarning("academy: founding for {}: {}", character, error);
+                    return std::nullopt;
+                }
+                return 0;
             },
-            [this, character, peer, name, made, result] {
+            [this, character, peer, name, made, result](bool ok, std::uint64_t) {
                 --writes;
-                if (*result != AcademyWrite::Ok) {
-                    host.AcademyGiveGold(peer, academy::kFoundGold);
-                    return Refuse(peer, proto::AcademyFound::kId, *result == AcademyWrite::AlreadyMember ? code::kOtherAcademy : code::kFailed);
+                if (!ok) {
+                    return Refuse(peer, proto::AcademyFound::kId,
+                                  !result->first                               ? code::kGold
+                                  : result->second == AcademyWrite::AlreadyMember ? code::kOtherAcademy
+                                                                                  : code::kFailed);
                 }
                 core::LogInfo("academy: {} founds academy {}", name, *made);
                 if (Online* x = Find(character)) x->academy = *made;

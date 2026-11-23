@@ -719,7 +719,7 @@ bool DeleteCharacterData(Database& tx, std::int64_t character) {
         if (!FreeItem(tx, items.Int(k, 0))) return false;
     }
     for (const char* table : {"_inventory", "_inventoryforavatar", "_charskill", "_charskillmastery", "_charquest", "_clientconfig", "_timedjob",
-                              "_staticavatar", "_chartrijob", "_deletedchar", "_charnamelist", "_user", "sr_char_state", "sr_auto_potion", "sr_char_records",
+                              "_staticavatar", "_chartrijob", "_deletedchar", "_charnamelist", "_user", "sr_char_state", "sr_auto_potion", "sr_char_records", "sr_bargain_lock",
                               "_charcollectionbook", "_charinstanceworlddata", "_char"}) {
         if (!tx.Query(std::format("DELETE FROM {} WHERE charid = $1", table), {character}).Ok()) return false;
     }
@@ -871,6 +871,40 @@ CreateCharacterResult CreateCharacter(Database& db, std::int64_t account, std::u
                 if (!WriteItem(tx, ids[k], item, error) ||
                     !run("UPDATE _inventory SET itemid = $3 WHERE charid = $1 AND slot = $2", {id, int(worn.slot), ids[k]})) {
                     return false;
+                }
+            }
+            // The original's gifts to every new character: the 60 % and the 100 % experience helps and 20 beginner's return
+            // scrolls, in the bag's first places from 13 (when the reference table has them in service: an import's).
+            QueryResult reference = tx.Query("SELECT count(*) = 2 FROM pg_attribute WHERE attrelid = to_regclass('_refobjcommon') "
+                                             "AND attname IN ('codename128', 'service') AND NOT attisdropped");
+            if (!reference.Ok()) {
+                error = reference.Error();
+                return false;
+            }
+            if (reference.Bool(0, 0)) {
+                static constexpr std::pair<std::string_view, std::uint16_t> kGifts[] = {
+                    {"ITEM_ETC_E060118_60EXP_HELP", 1}, {"ITEM_ETC_E060118_100EXP_HELP", 1}, {"ITEM_ETC_SCROLL_RETURN_NEWBIE_01", 20}};
+                int place = 13;
+                for (const auto& [codename, count] : kGifts) {
+                    QueryResult ref = tx.Query("SELECT id FROM _refobjcommon WHERE codename128 = $1 AND service = 1", {std::string(codename)});
+                    if (!ref.Ok()) {
+                        error = ref.Error();
+                        return false;
+                    }
+                    if (ref.Rows() == 0) continue;
+                    const std::vector<std::int64_t> gift = AllocItems(tx, 1);
+                    if (gift.size() != 1) {
+                        error = "no item ids";
+                        return false;
+                    }
+                    StoredItem item;
+                    item.refId = std::uint32_t(ref.Int(0, 0));
+                    item.quantity = count;
+                    item.counted = true;
+                    if (!WriteItem(tx, gift[0], item, error) || !run("UPDATE _inventory SET itemid = $3 WHERE charid = $1 AND slot = $2", {id, place, gift[0]})) {
+                        return false;
+                    }
+                    ++place;
                 }
             }
             result = CreateCharacterResult::Created;
@@ -1271,6 +1305,7 @@ bool SaveItems(Database& db, std::int64_t character, const std::vector<StoredIte
             // Another character's, a storage's or a pet bag's item is never touched from here.
             const auto foreign = [&](std::int64_t id) {
                 QueryResult q = tx.Query("SELECT 1 FROM _inventory WHERE itemid = $1 AND charid <> $2 UNION ALL SELECT 1 FROM _chest WHERE itemid = $1 "
+                                         "UNION ALL SELECT 1 FROM _guildchest WHERE itemid = $1 "
                                          "UNION ALL SELECT 1 FROM _inventoryforavatar WHERE itemid = $1 AND charid <> $2 "
                                          "UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 UNION ALL SELECT 1 FROM _inventoryforlinkedstorage WHERE itemid = $1 "
                                          "UNION ALL SELECT 1 FROM _openmarket WHERE itemid = $1", // held by the Open Market
@@ -1625,7 +1660,8 @@ bool SaveSidesIn(Database& tx, const ExchangeSaveSide& a, const ExchangeSaveSide
             // Anywhere but these two characters' inventories: another character's, a storage's.
             const auto foreign = [&](std::int64_t id) {
                 QueryResult q = tx.Query("SELECT 1 FROM _inventory WHERE itemid = $1 AND charid <> $2 AND charid <> $3 "
-                                         "UNION ALL SELECT 1 FROM _chest WHERE itemid = $1 UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 "
+                                         "UNION ALL SELECT 1 FROM _chest WHERE itemid = $1 UNION ALL SELECT 1 FROM _guildchest WHERE itemid = $1 "
+                                         "UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 "
                                          "UNION ALL SELECT 1 FROM _inventoryforlinkedstorage WHERE itemid = $1 UNION ALL SELECT 1 FROM _openmarket WHERE itemid = $1",
                                          {id, a.character, b.character});
                 return !q.Ok() || q.Rows() > 0;
@@ -1682,6 +1718,25 @@ bool SaveExchange(Database& db, const ExchangeSaveSide& a, const ExchangeSaveSid
     std::string error;
     const bool ok = db.Transaction([&](Database& tx) { return SaveSidesIn(tx, a, b, error, true); }, error);
     if (!ok) core::LogWarning("exchange of characters {} and {}: {}", a.character, b.character, error);
+    return ok;
+}
+
+bool SaveShopDeal(Database& db, const ExchangeSaveSide& side, std::int64_t honorSpent) {
+    std::string error;
+    // One side: the other is the same character with nothing moved (its gold the same).
+    ExchangeSaveSide none;
+    none.character = side.character;
+    none.gold = side.gold;
+    const bool ok = db.Transaction(
+        [&](Database& tx) {
+            if (honorSpent > 0 &&
+                !tx.Query("UPDATE _trainingcampmember SET honorpoint = greatest(honorpoint - $2, 0) WHERE charid = $1", {side.character, honorSpent}).Ok()) {
+                return false;
+            }
+            return SaveSidesIn(tx, side, none, error, true);
+        },
+        error);
+    if (!ok) core::LogWarning("shop deal of character {}: {}", side.character, error);
     return ok;
 }
 
@@ -1760,7 +1815,7 @@ std::vector<std::int64_t> ReserveItemIds(Database& db, int count) {
 std::optional<StorageRow> LoadStorage(Database& db, std::int64_t account, std::uint16_t) {
     QueryResult size = db.Query("SELECT chestsize FROM _chestinfo WHERE jid = $1", {account});
     QueryResult gold = db.Query("SELECT gold FROM _accountjid WHERE jid = $1", {account});
-    QueryResult items = db.Query(std::format("SELECT c.slot, {} FROM _chest c JOIN _items it ON it.id64 = c.itemid "
+    QueryResult items = db.Query(std::format("SELECT c.slot, c.itemid, {} FROM _chest c JOIN _items it ON it.id64 = c.itemid "
                                              "WHERE c.userjid = $1 AND c.itemid <> 0 ORDER BY c.slot",
                                              ItemSelect("it")),
                                  {account});
@@ -1771,7 +1826,8 @@ std::optional<StorageRow> LoadStorage(Database& db, std::int64_t account, std::u
     for (int k = 0; k < items.Rows(); ++k) {
         StoredItem item;
         item.slot = std::uint8_t(items.Int(k, 0));
-        ReadItem(items, k, 1, item);
+        item.id = items.Int(k, 1);
+        ReadItem(items, k, 2, item);
         row.items.push_back(std::move(item));
     }
     return row;
@@ -1779,7 +1835,7 @@ std::optional<StorageRow> LoadStorage(Database& db, std::int64_t account, std::u
 
 std::optional<StorageRow> LoadGuildChest(Database& db, std::uint32_t guild) {
     QueryResult gold = db.Query("SELECT gold FROM _guild WHERE id = $1", {std::int64_t(guild)});
-    QueryResult items = db.Query(std::format("SELECT c.slot, {} FROM _guildchest c JOIN _items it ON it.id64 = c.itemid "
+    QueryResult items = db.Query(std::format("SELECT c.slot, c.itemid, {} FROM _guildchest c JOIN _items it ON it.id64 = c.itemid "
                                              "WHERE c.guildid = $1 AND c.itemid <> 0 ORDER BY c.slot",
                                              ItemSelect("it")),
                                  {std::int64_t(guild)});
@@ -1789,83 +1845,119 @@ std::optional<StorageRow> LoadGuildChest(Database& db, std::uint32_t guild) {
     for (int k = 0; k < items.Rows(); ++k) {
         StoredItem item;
         item.slot = std::uint8_t(items.Int(k, 0));
-        ReadItem(items, k, 1, item);
+        item.id = items.Int(k, 1);
+        ReadItem(items, k, 2, item);
         row.items.push_back(std::move(item));
     }
     return row;
 }
 
-bool SaveGuildChest(Database& db, std::uint32_t guild, const std::vector<StoredItem>& present, const std::vector<std::uint8_t>& emptied,
-                    std::uint64_t gold) {
+bool SaveStorageMove(Database& db, const ExchangeSaveSide& bag, const StorageSaveSide& storage, bool gold) {
     std::string error;
-    const std::int64_t g = guild;
+    const std::int64_t character = bag.character;
+    const bool guildChest = storage.guild != 0;
+    // The storage's own table, its owner's column and its owner.
+    const char* table = guildChest ? "_guildchest" : "_chest";
+    const char* owner = guildChest ? "guildid" : "userjid";
+    const std::int64_t holder = guildChest ? std::int64_t(storage.guild) : storage.account;
     const bool ok = db.Transaction(
         [&](Database& tx) {
-            if (!tx.Query("UPDATE _guild SET gold = $2 WHERE id = $1", {g, std::int64_t(gold)}).Ok()) return false;
-            for (std::uint8_t slot : emptied) {
-                QueryResult was = tx.Query("SELECT coalesce(itemid, 0) FROM _guildchest WHERE guildid = $1 AND slot = $2 FOR UPDATE", {g, int(slot)});
-                if (!was.Ok()) return false;
-                if (was.Rows() == 0) continue;
-                if (!tx.Query("UPDATE _guildchest SET itemid = 0 WHERE guildid = $1 AND slot = $2", {g, int(slot)}).Ok() || !FreeItem(tx, was.Int(0, 0))) {
+            if (gold) {
+                // Both gold columns together (the original's procedures update both or neither).
+                if (!tx.Query("UPDATE _char SET remaingold = $2 WHERE charid = $1", {character, std::int64_t(bag.gold)}).Ok()) return false;
+                if (guildChest) {
+                    QueryResult g = tx.Query("UPDATE _guild SET gold = $2 WHERE id = $1", {holder, std::int64_t(storage.gold)});
+                    if (!g.Ok() || g.Affected() != 1) return false;
+                } else if (!tx.Query("INSERT INTO _accountjid (accountid, jid, gold) SELECT u.struserid, u.jid, $2 FROM sro_vt_account.tb_user u WHERE u.jid = $1 "
+                                     "ON CONFLICT (accountid) DO UPDATE SET jid = EXCLUDED.jid, gold = EXCLUDED.gold",
+                                     {holder, std::int64_t(storage.gold)})
+                                .Ok()) {
                     return false;
                 }
             }
-            for (const StoredItem& i : present) {
-                // The place's row is the guild's from its creation (one per _RefDummySlot row): its item
-                // rewritten, or a new one; a place without a row gets one (no key to lean on: the import's).
-                QueryResult was = tx.Query("SELECT coalesce(itemid, 0) FROM _guildchest WHERE guildid = $1 AND slot = $2 FOR UPDATE", {g, int(i.slot)});
-                if (!was.Ok()) return false;
-                std::int64_t id = was.Rows() > 0 ? was.Int(0, 0) : 0;
-                if (id == 0) {
-                    const std::vector<std::int64_t> fresh = AllocItems(tx, 1);
-                    if (fresh.size() != 1) return false;
-                    id = fresh[0];
-                }
-                if (!WriteItem(tx, id, i, error)) return false;
-                const char* sql = was.Rows() > 0 ? "UPDATE _guildchest SET itemid = $3 WHERE guildid = $1 AND slot = $2"
-                                                 : "INSERT INTO _guildchest (guildid, slot, itemid) VALUES ($1, $2, $3)";
-                if (!tx.Query(sql, {g, int(i.slot), id}).Ok()) return false;
-            }
-            return true;
-        },
-        error);
-    return ok;
-}
-
-bool SaveStorage(Database& db, std::int64_t account, std::uint16_t, const std::vector<StoredItem>& present, const std::vector<std::uint8_t>& emptied,
-                 std::uint64_t gold) {
-    std::string error;
-    const bool ok = db.Transaction(
-        [&](Database& tx) {
-            // The storage's gold by the account's name (_accountjid), its size (_chestinfo).
-            if (!tx.Query("INSERT INTO _accountjid (accountid, jid, gold) SELECT u.struserid, u.jid, $2 FROM sro_vt_account.tb_user u WHERE u.jid = $1 "
-                          "ON CONFLICT (accountid) DO UPDATE SET jid = EXCLUDED.jid, gold = EXCLUDED.gold",
-                          {account, std::int64_t(gold)})
-                     .Ok() ||
-                !tx.Query("INSERT INTO _chestinfo (jid, chestsize) SELECT $1, 150 WHERE NOT EXISTS (SELECT 1 FROM _chestinfo WHERE jid = $1)", {account}).Ok()) {
+            // An account's storage has its size's row from its first use (_chestinfo).
+            if (!guildChest &&
+                !tx.Query("INSERT INTO _chestinfo (jid, chestsize) SELECT $1, 150 WHERE NOT EXISTS (SELECT 1 FROM _chestinfo WHERE jid = $1)", {holder}).Ok()) {
                 return false;
             }
-            for (std::uint8_t slot : emptied) {
-                QueryResult was = tx.Query("SELECT coalesce(itemid, 0) FROM _chest WHERE userjid = $1 AND slot = $2 FOR UPDATE", {account, int(slot)});
+            std::unordered_set<std::int64_t> kept;
+            for (const StoredItem& i : bag.present) kept.insert(i.id);
+            for (const StoredItem& i : storage.present) kept.insert(i.id);
+            // Held anywhere but this character's bag and avatars and this storage: another character's, another storage,
+            // a pet's bag, a cube, the Open Market.
+            const std::string elsewhere = std::format("SELECT 1 FROM _inventory WHERE itemid = $1 AND charid <> $2 "
+                                                      "UNION ALL SELECT 1 FROM _inventoryforavatar WHERE itemid = $1 AND charid <> $2 "
+                                                      "UNION ALL SELECT 1 FROM _chest WHERE itemid = $1 AND {} "
+                                                      "UNION ALL SELECT 1 FROM _guildchest WHERE itemid = $1 AND {} "
+                                                      "UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 "
+                                                      "UNION ALL SELECT 1 FROM _inventoryforlinkedstorage WHERE itemid = $1 "
+                                                      "UNION ALL SELECT 1 FROM _openmarket WHERE itemid = $1",
+                                                      guildChest ? "true" : "userjid <> $3", guildChest ? "guildid <> $3" : "true");
+            const auto foreign = [&](std::int64_t id) {
+                QueryResult q = tx.Query(elsewhere, {id, character, holder});
+                return !q.Ok() || q.Rows() > 0;
+            };
+            // The places either side emptied first (what went to the other side is placed below).
+            std::vector<std::int64_t> left;
+            for (std::uint8_t slot : bag.emptied) {
+                QueryResult was = tx.Query("SELECT itemid FROM _inventory WHERE charid = $1 AND slot = $2 FOR UPDATE", {character, int(slot)});
                 if (!was.Ok()) return false;
                 if (was.Rows() == 0) continue;
-                if (!tx.Query("UPDATE _chest SET itemid = 0 WHERE userjid = $1 AND slot = $2", {account, int(slot)}).Ok() || !FreeItem(tx, was.Int(0, 0))) {
+                if (!tx.Query("UPDATE _inventory SET itemid = 0 WHERE charid = $1 AND slot = $2", {character, int(slot)}).Ok()) return false;
+                if (!was.IsNull(0, 0)) left.push_back(was.Int(0, 0));
+            }
+            for (std::uint8_t slot : storage.emptied) {
+                QueryResult was = tx.Query(std::format("SELECT itemid FROM {} WHERE {} = $1 AND slot = $2 FOR UPDATE", table, owner), {holder, int(slot)});
+                if (!was.Ok()) return false;
+                if (was.Rows() == 0) continue;
+                if (!tx.Query(std::format("UPDATE {} SET itemid = 0 WHERE {} = $1 AND slot = $2", table, owner), {holder, int(slot)}).Ok()) return false;
+                if (!was.IsNull(0, 0)) left.push_back(was.Int(0, 0));
+            }
+            // What merged away, or left both sides, goes.
+            left.insert(left.end(), bag.gone.begin(), bag.gone.end());
+            for (std::int64_t id : left) {
+                if (id == 0 || kept.contains(id) || foreign(id)) continue;
+                if (!tx.Query("UPDATE _inventory SET itemid = 0 WHERE charid = $1 AND itemid = $2", {character, id}).Ok() ||
+                    !tx.Query(std::format("UPDATE {} SET itemid = 0 WHERE {} = $1 AND itemid = $2", table, owner), {holder, id}).Ok() || !FreeItem(tx, id)) {
                     return false;
                 }
             }
-            for (const StoredItem& i : present) {
-                // The item already in the place is rewritten; a place without one gets a new item.
-                QueryResult was = tx.Query("SELECT coalesce(itemid, 0) FROM _chest WHERE userjid = $1 AND slot = $2 FOR UPDATE", {account, int(i.slot)});
-                if (!was.Ok()) return false;
-                std::int64_t id = was.Rows() > 0 ? was.Int(0, 0) : 0;
+            // Each item where it is now, with its own id, and nowhere else of the two sides.
+            for (const StoredItem& i : bag.present) {
+                if (i.id == 0) continue;
+                if (foreign(i.id)) {
+                    core::LogWarning("storage move of character {}: item {} belongs elsewhere; not saved", character, i.id);
+                    continue;
+                }
+                if (!WriteItem(tx, i.id, i, error)) return false;
+                if (!tx.Query(std::format("UPDATE {} SET itemid = 0 WHERE {} = $1 AND itemid = $2", table, owner), {holder, i.id}).Ok() ||
+                    !tx.Query("UPDATE _inventoryforavatar SET itemid = 0 WHERE charid = $1 AND itemid = $2", {character, i.id}).Ok() ||
+                    !tx.Query("UPDATE _inventory SET itemid = 0 WHERE charid = $1 AND itemid = $2 AND slot <> $3", {character, i.id, int(i.slot)}).Ok() ||
+                    !tx.Query("INSERT INTO _inventory (charid, slot, itemid) VALUES ($1, $2, $3) ON CONFLICT (charid, slot) DO UPDATE SET itemid = EXCLUDED.itemid",
+                              {character, int(i.slot), i.id})
+                         .Ok()) {
+                    return false;
+                }
+            }
+            for (const StoredItem& stored : storage.present) {
+                std::int64_t id = stored.id;
                 if (id == 0) {
+                    // Every item the game server sends has its id; one without gets a new row rather than be lost.
                     const std::vector<std::int64_t> fresh = AllocItems(tx, 1);
                     if (fresh.size() != 1) return false;
                     id = fresh[0];
+                } else if (foreign(id)) {
+                    core::LogWarning("storage move of character {}: item {} belongs elsewhere; not saved", character, id);
+                    continue;
                 }
-                if (!WriteItem(tx, id, i, error) ||
-                    !tx.Query("INSERT INTO _chest (userjid, slot, itemid) VALUES ($1, $2, $3) ON CONFLICT (userjid, slot) DO UPDATE SET itemid = EXCLUDED.itemid",
-                              {account, int(i.slot), id})
+                if (!WriteItem(tx, id, stored, error)) return false;
+                if (!tx.Query("UPDATE _inventory SET itemid = 0 WHERE charid = $1 AND itemid = $2", {character, id}).Ok() ||
+                    !tx.Query("UPDATE _inventoryforavatar SET itemid = 0 WHERE charid = $1 AND itemid = $2", {character, id}).Ok() ||
+                    !tx.Query(std::format("UPDATE {} SET itemid = 0 WHERE {} = $1 AND itemid = $2 AND slot <> $3", table, owner), {holder, id, int(stored.slot)})
+                         .Ok() ||
+                    !tx.Query(std::format("INSERT INTO {0} ({1}, slot, itemid) VALUES ($1, $2, $3) ON CONFLICT ({1}, slot) DO UPDATE SET itemid = EXCLUDED.itemid",
+                                          table, owner),
+                              {holder, int(stored.slot), id})
                          .Ok()) {
                     return false;
                 }
@@ -1873,7 +1965,7 @@ bool SaveStorage(Database& db, std::int64_t account, std::uint16_t, const std::v
             return true;
         },
         error);
-    if (!ok) core::LogWarning("storage of account {}: {}", account, error);
+    if (!ok) core::LogWarning("storage move of character {} ({} {}): {}", character, guildChest ? "guild" : "account", holder, error);
     return ok;
 }
 
@@ -2044,6 +2136,7 @@ bool SaveCosItems(Database& db, const ExchangeSaveSide& inventory, std::int64_t 
             // Anywhere but this character's inventory and this pet's bag: another's, a storage, another pet's bag.
             const auto foreign = [&](std::int64_t id) {
                 QueryResult q = tx.Query("SELECT 1 FROM _inventory WHERE itemid = $1 AND charid <> $2 UNION ALL SELECT 1 FROM _chest WHERE itemid = $1 "
+                                         "UNION ALL SELECT 1 FROM _guildchest WHERE itemid = $1 "
                                          "UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 AND cosid <> $3 UNION ALL SELECT 1 FROM _openmarket WHERE itemid = $1",
                                          {id, character, cos});
                 return !q.Ok() || q.Rows() > 0;

@@ -493,8 +493,10 @@ void Skills::EndBuff(SkillCaster& holder, std::size_t index) {
     std::vector<SkillState::Buff>& buffs = holder.state.buffs;
     if (index >= buffs.size()) return;
     const std::uint32_t token = buffs[index].token;
+    const assets::SkillRow* ended = table_ != nullptr ? table_->Find(buffs[index].skill) : nullptr;
     host_.ToCaster(holder.entity, proto::BuffRemoved{token});
     buffs.erase(buffs.begin() + std::ptrdiff_t(index));
+    if (ended != nullptr && OutlivesLogout(*ended)) host_.KeptBuffsChanged(holder.entity);
     // Its transform's: the look and speeds back (0x3208).
     if (SkillState::Transform& t = holder.state.transform; t.token != 0 && t.token == token) {
         const bool looked = t.mode == 1 || t.mode == 2;
@@ -582,6 +584,7 @@ bool Skills::InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets:
     const std::uint32_t ms = skill.hasDuration && skill.buffDurationMs > 0 ? game::ExtendedMs(skill.buffDurationMs, boosts) : toggle ? 0u : 5000u;
     holder.state.buffs.push_back(MakeBuff(holder, skill, ms, now, &boosts));
     holder.state.buffs.back().own = holder.entity == caster.entity;
+    if (OutlivesLogout(skill)) host_.KeptBuffsChanged(holder.entity);
     // A transform's buff takes the holder's transform slot (modes 3 and 4: the slot alone, 33 5).
     if (const assets::SkillParam change = assets::FindSkillParam(skill, assets::SkillTag("msch")); change && (change[0] == 3 || change[0] == 4)) {
         holder.state.transform = {int(change[0]), 0, 0, 0, holder.state.buffs.back().token};
@@ -851,6 +854,7 @@ const SkillState::Buff* Skills::AddBuff(SkillCaster& holder, const assets::Skill
     if (auto it = std::find_if(buffs.begin(), buffs.end(), [&](const SkillState::Buff& b) { return b.skill == skill.id; }); it != buffs.end()) {
         it->until = now + std::chrono::milliseconds(ms);
         host_.ToCaster(holder.entity, BuffMessage(*it, now));
+        if (OutlivesLogout(skill)) host_.KeptBuffsChanged(holder.entity);
         return &*it;
     }
     std::vector<const assets::SkillRow*> running;
@@ -863,6 +867,7 @@ const SkillState::Buff* Skills::AddBuff(SkillCaster& holder, const assets::Skill
     buffs.push_back(MakeBuff(holder, skill, ms, now));
     const std::uint32_t token = buffs.back().token;
     host_.ToCaster(holder.entity, BuffMessage(buffs.back(), now));
+    if (OutlivesLogout(skill)) host_.KeptBuffsChanged(holder.entity);
     // Its numbers made again may end it (a buff its holder's equipment does not fit: the game server's EndUnfitBuffs)
     // and move the others: found again by its token (null: gone already).
     host_.StatsChanged(holder.entity);

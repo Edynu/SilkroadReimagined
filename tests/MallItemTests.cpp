@@ -687,3 +687,100 @@ TEST_CASE("Game server: a gold ticket doubles a kill's experience and skill expe
     CHECK(doubled.experience == plain.experience * 2);
     CHECK(doubled.skillExperience == plain.skillExperience * 2);
 }
+
+TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is a new item, a merge frees the one merged away; the gold in one transaction") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    ItemServer s(t);
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    auto p = s.Make("Vaulter", {Stored(kReturnHigh, 10), Stored(kBooth, 1)});
+    const auto settle = [&](const std::function<bool()>& done) {
+        for (int i = 0; i < 500 && !done(); ++i) s.game.Poll(2ms);
+        return done();
+    };
+    const auto bagId = [&](std::uint8_t place) {
+        return t.Db().Query("SELECT coalesce(max(itemid), 0) FROM _inventory WHERE charid = $1 AND slot = $2", {p.character, int(place)}).Int(0, 0);
+    };
+    const auto chestId = [&](std::uint8_t place) {
+        return t.Db().Query("SELECT coalesce(max(itemid), 0) FROM _chest WHERE userjid = $1 AND slot = $2", {p.account, int(place)}).Int(0, 0);
+    };
+    const auto item = [&](std::int64_t id) {
+        const auto q = t.Db().Query("SELECT refitemid, data FROM _items WHERE id64 = $1", {id});
+        return std::pair<std::int64_t, std::int64_t>{q.Int(0, 0), q.Int(0, 1)};
+    };
+    const auto gold = [&] {
+        return std::pair<std::int64_t, std::int64_t>{t.Db().Query("SELECT remaingold FROM _char WHERE charid = $1", {p.character}).Int(0, 0),
+                                                     t.Db().Query("SELECT coalesce(max(gold), 0) FROM _accountjid WHERE jid = $1", {p.account}).Int(0, 0)};
+    };
+    const auto open = [&] {
+        std::uint32_t keeper = 0;
+        while (keeper == 0) {
+            const auto m = Next<proto::EntityAppeared>(p);
+            if (m.character.model == kKeeper) keeper = m.entity;
+        }
+        p.client->Send(proto::StorageOpen{keeper, 0});
+        (void)Next<proto::StorageList>(p);
+    };
+    const auto move = [&](bool fromStorage, std::uint8_t from, bool toStorage, std::uint8_t to, std::uint16_t quantity = 0) {
+        proto::StorageMove m;
+        m.fromStorage = fromStorage;
+        m.from = from;
+        m.toStorage = toStorage;
+        m.to = to;
+        m.quantity = quantity;
+        p.client->Send(m);
+        return Next<proto::StorageMoved>(p).status;
+    };
+    const std::uint8_t scrolls = s.PlaceOf(p, kReturnHigh), booth = s.PlaceOf(p, kBooth);
+    const std::int64_t scrollId = bagId(scrolls), boothId = bagId(booth);
+    REQUIRE(scrollId != 0);
+    REQUIRE(boothId != 0);
+    open();
+
+    // In: the same item in the storage's place, gone from the bag (the original's _STRG_MOVE_ITEM moves one item id).
+    CHECK(move(false, booth, true, 0) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return chestId(0) == boothId; }));
+    CHECK(bagId(booth) == 0);
+    CHECK(item(boothId).first == kBooth);
+    // Out again: the same item back.
+    CHECK(move(true, 0, false, booth) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return bagId(booth) == boothId; }));
+    CHECK(chestId(0) == 0);
+    CHECK(item(boothId).first == kBooth);
+
+    // The scrolls in whole, then 4 of them out: the 4 a new item, the 6 still the same one.
+    CHECK(move(false, scrolls, true, 1) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return chestId(1) == scrollId; }));
+    CHECK(move(true, 1, false, scrolls, 4) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return bagId(scrolls) != 0; }));
+    const std::int64_t split = bagId(scrolls);
+    CHECK(split != scrollId);
+    CHECK(item(split) == std::pair<std::int64_t, std::int64_t>{kReturnHigh, 4});
+    CHECK(chestId(1) == scrollId);
+    CHECK(item(scrollId) == std::pair<std::int64_t, std::int64_t>{kReturnHigh, 6});
+    // The 6 onto the 4: the bag's item holds 10, the one merged away is freed.
+    CHECK(move(true, 1, false, scrolls) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return chestId(1) == 0 && item(split).second == 10; }));
+    CHECK(bagId(scrolls) == split);
+    CHECK(item(scrollId).first == 0);
+
+    // The gold: the character's and the storage's written together.
+    p = s.Relog(p, [&] { REQUIRE(t.Db().Query("UPDATE _char SET remaingold = 10000 WHERE charid = $1", {p.character}).Ok()); });
+    open();
+    p.client->Send(proto::StorageGold{true, 3000, 0});
+    CHECK(Next<proto::StorageGoldChanged>(p).gold == 3000);
+    CHECK(Next<proto::GoldChanged>(p).gold == 7000);
+    CHECK(settle([&] { return gold() == std::pair<std::int64_t, std::int64_t>{7000, 3000}; }));
+    p.client->Send(proto::StorageGold{false, 1000, 0});
+    CHECK(Next<proto::StorageGoldChanged>(p).gold == 2000);
+    CHECK(settle([&] { return gold() == std::pair<std::int64_t, std::int64_t>{8000, 2000}; }));
+    // One transaction: a storage that cannot be written leaves the character's gold as it was.
+    server::ExchangeSaveSide bag;
+    bag.character = p.character;
+    bag.gold = 1;
+    server::StorageSaveSide missing;
+    missing.guild = 0x7FFFFFF0;
+    missing.gold = 5;
+    CHECK_FALSE(server::SaveStorageMove(t.Db(), bag, missing, true));
+    CHECK(gold() == std::pair<std::int64_t, std::int64_t>{8000, 2000});
+}

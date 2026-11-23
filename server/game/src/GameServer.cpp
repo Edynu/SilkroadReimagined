@@ -236,6 +236,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // Its connection gone, the character still in the world until `logoutAt` (the original's dropped connection,
         // 5 s, 20 s in combat in a suit, 60 s with goods in a COS).
         bool dropped = false;
+        // A dropped connection's session, held until the character has left and its saves have landed.
+        std::int64_t heldAccount = 0, heldSession = 0;
         // Its name in the world (whispers find it by it), and its chat: when its lines came, until
         // when it may not chat.
         std::string name;
@@ -530,7 +532,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (model == 0) return;
         player.inventory.gold -= drop.amount;
         SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
-        database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+        QueueGoldSave(player.selected, player.inventory.gold);
         PutOnGround(player, {}, drop.amount, model);
     }
 
@@ -641,7 +643,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 auto [to, toPeer] = receiver(entity);
                 to->inventory.gold += amount;
                 SendMessage(*toPeer->connection, proto::GoldChanged{to->inventory.gold});
-                database.Submit([character = to->selected, gold = to->inventory.gold](Database& db) { SaveGold(db, character, gold); });
+                QueueGoldSave(to->selected, to->inventory.gold);
                 if (split.size() > 1) {
                     parties->TellLoot(to->entity, 0, 0, amount);
                 } else {
@@ -736,6 +738,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         s.gold = row.gold;
         for (const StoredItem& i : row.items) {
             game::ItemInstance item;
+            item.serial = i.id; // its _items row: kept wherever it is moved
             item.refId = i.refId;
             item.plus = i.plus;
             item.variance = i.variance;
@@ -758,7 +761,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // each move are what the next opening sees).
     // A guild's storage: its holder here, its contents while this server holds its lock across the shard
     // (sr_guild_storage_lock; dropped with the lock: another server may change it then), and its
-    // database work one task at a time in the order asked (the lock, the load, the saves, the release).
+    // lock's work one task at a time in the order asked (the lock and the load, the release). A move's save is a
+    // barrier submitted at once (SaveStorageMove), so it lands before the release asked after it.
     struct GuildChest {
         std::uint64_t user = 0; // the peer holding it
         std::string userName;
@@ -905,35 +909,45 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto storageBefore = storage->places;
         game::Storage::MoveResult r = storage->Move(*config.rules->items, player.inventory, m.fromStorage ? Side::Storage : Side::Inventory, m.from,
                                                     m.toStorage ? Side::Storage : Side::Inventory, m.to, m.quantity);
-        // What arrives in the inventory takes one of the reserved ids (none left: undone).
-        for (std::uint8_t place : r.inventoryTouched) {
-            auto it = player.inventory.places.find(place);
-            if (r.status != proto::ItemStatus::Ok || it == player.inventory.places.end() || it->second.serial != 0) continue;
-            if (freeItemIds.empty()) {
-                player.inventory.places = inventoryBefore;
-                storage->places = storageBefore;
-                r.status = proto::ItemStatus::Failed;
-                break;
-            }
+        // An item keeps its id on either side; the part a split takes is a new item: one of the reserved ids (none left: undone).
+        const auto giveId = [&](std::map<std::uint8_t, game::ItemInstance>& places, std::uint8_t place) {
+            const auto it = places.find(place);
+            if (it == places.end() || it->second.serial != 0) return true;
+            if (freeItemIds.empty()) return false;
             it->second.serial = freeItemIds.back();
             freeItemIds.pop_back();
+            return true;
+        };
+        bool ids = true;
+        if (r.status == proto::ItemStatus::Ok) {
+            for (std::uint8_t place : r.inventoryTouched) ids = ids && giveId(player.inventory.places, place);
+            for (std::uint8_t place : r.storageTouched) ids = ids && giveId(storage->places, place);
         }
+        if (!ids) {
+            player.inventory.places = inventoryBefore;
+            storage->places = storageBefore;
+            r.status = proto::ItemStatus::Failed;
+        }
+        TopUpItemIds();
         answer.status = r.status;
         if (r.status != proto::ItemStatus::Ok) {
             SendMessage(*peer.connection, answer);
             return;
         }
-        std::vector<StoredItem> present;
-        std::vector<std::uint8_t> emptied;
+        StorageSaveSide side;
+        if (m.guild != 0) {
+            side.guild = player.guildChest;
+        } else {
+            side.account = peer.account;
+        }
+        side.gold = storage->gold;
         for (std::uint8_t place : r.storageTouched) {
             if (const game::ItemInstance* i = storage->At(place)) {
                 answer.storageChanged.push_back(storage->Record(place));
-                StoredItem stored{0, place, i->refId, i->plus, i->variance, i->durability, i->count, {}, Counted(i->refId, i->durability)}; stored.advanced = i->advanced; stored.advancedRecipe = i->advancedRecipe; stored.sockets = i->sockets; stored.bound = i->bound;
-                for (const game::ItemInstance::Option& o : i->options) stored.magic.push_back(std::uint64_t(o.id) | std::uint64_t(o.value) << 32);
-                present.push_back(std::move(stored));
+                side.present.push_back(StoredOf(place, *i));
             } else {
                 answer.storageEmptied.push_back(place);
-                emptied.push_back(place);
+                side.emptied.push_back(place);
             }
         }
         for (std::uint8_t place : r.inventoryTouched) {
@@ -944,18 +958,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
         }
         SendMessage(*peer.connection, answer);
-        if (m.guild != 0) {
-            ChestTask(player.guildChest, [guild = player.guildChest, present = std::move(present), emptied = std::move(emptied), gold = storage->gold](Database& db) {
-                SaveGuildChest(db, guild, present, emptied, gold);
-            });
-        } else {
-            database.Submit([account = peer.account, server = config.id, present = std::move(present), emptied = std::move(emptied),
-                             gold = storage->gold](Database& db) { SaveStorage(db, account, server, present, emptied, gold); });
-        }
-        if (!r.inventoryTouched.empty()) QueueItemSave(player.selected, player.inventory, r.inventoryTouched, r.gone);
+        // Both sides in one transaction (the original's _STRG_MOVE_ITEM), after everything submitted before it, with the bag's
+        // own saves still waiting folded in (SaveSideOf): neither side's earlier saves can land after it.
+        ExchangeSaveSide bag = SaveSideOf(player.selected, player.inventory, r.inventoryTouched);
+        bag.gone.insert(bag.gone.end(), r.gone.begin(), r.gone.end());
+        database.SubmitBarrier([bag = std::move(bag), side = std::move(side)](Database& db) { SaveStorageMove(db, bag, side, false); });
     }
 
-    // Gold into or out of the open storage: both saved (the character's and the account's).
+    // Gold into or out of the open storage: both columns in one transaction (the original's _UPDATE_USER_N_CHAR_GOLD /
+    // _UPDATE_GUILD_N_CHAR_GOLD), in the order the moves were made.
     void MoveStorageGold(Peer& peer, PlayerWorld& player, const proto::StorageGold& g) {
         game::Storage* storage = StorageFor(peer, player, g.guild != 0);
         if (storage == nullptr || g.amount == 0) return;
@@ -966,18 +977,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         to += g.amount;
         SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         SendMessage(*peer.connection, proto::StorageGoldChanged{storage->gold, g.guild});
+        ExchangeSaveSide bag;
+        bag.character = player.selected;
+        bag.gold = player.inventory.gold;
+        GoldNow(player.selected, bag.gold);
+        StorageSaveSide side;
         if (g.guild != 0) {
-            ChestTask(player.guildChest, [character = player.selected, guild = player.guildChest, gold = player.inventory.gold, stored = storage->gold](Database& db) {
-                SaveGold(db, character, gold);
-                SaveGuildChest(db, guild, {}, {}, stored);
-            });
-            return;
+            side.guild = player.guildChest;
+        } else {
+            side.account = peer.account;
         }
-        database.Submit([character = player.selected, account = peer.account, server = config.id, gold = player.inventory.gold,
-                         stored = storage->gold](Database& db) {
-            SaveGold(db, character, gold);
-            SaveStorage(db, account, server, {}, {}, stored);
-        });
+        side.gold = storage->gold;
+        database.SubmitBarrier([bag = std::move(bag), side = std::move(side)](Database& db) { SaveStorageMove(db, bag, side, true); });
     }
 
     // --- Shops (C7i) ---
@@ -1005,9 +1016,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
     }
 
-    // The deal done: the places it changed, the gold, both saved.
+    // The deal done: the places it changed and the gold (and a purchase's honour points) saved in one transaction, after
+    // everything submitted before it, with the bag's own saves still waiting folded in (SaveSideOf).
     void FinishDeal(Peer& peer, PlayerWorld& player, proto::ShopAnswer& answer, const std::vector<std::uint8_t>& touched,
-                    const std::vector<std::int64_t>& gone) {
+                    const std::vector<std::int64_t>& gone, std::int64_t honorSpent = 0) {
         for (std::uint8_t place : touched) {
             if (player.inventory.At(place)) {
                 answer.changed.push_back(player.inventory.Record(place));
@@ -1018,8 +1030,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         Buyback(player, answer);
         SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         SendMessage(*peer.connection, answer);
-        database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
-        if (!touched.empty()) QueueItemSave(player.selected, player.inventory, touched, gone);
+        ExchangeSaveSide side = SaveSideOf(player.selected, player.inventory, touched);
+        side.gone.insert(side.gone.end(), gone.begin(), gone.end());
+        database.SubmitBarrier([side = std::move(side), honorSpent](Database& db) { SaveShopDeal(db, side, honorSpent); });
     }
 
     void RefuseDeal(Peer& peer, const PlayerWorld& player, std::uint32_t entity, proto::ItemStatus status) {
@@ -1139,17 +1152,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         player.inventory.gold -= price;
         CollectTax(taxFortress, tax);
         if (points != 0) guilds->SpendPoints(player.selected, points, game::kGpReasonGuildItems);
-        if (honor > 0) {
-            player.honorPoints -= honor;
-            database.Submit([character = player.selected, honor](Database& db) {
-                db.Query("UPDATE _trainingcampmember SET honorpoint = greatest(honorpoint - $2, 0) WHERE charid = $1", {character, honor});
-            });
-        }
+        if (honor > 0) player.honorPoints -= honor; // saved with the deal
         core::LogInfo("{}: {} buys {} x{} for {}, {} guild points, {} honour points{}", config.name, player.name, row->codename, count, price, points, honor,
                       tokens.empty() ? std::string() : std::format(" and {} x{}", tokens.front().item, tokens.front().count));
         proto::ShopAnswer answer;
         answer.entity = buy.entity;
-        FinishDeal(peer, player, answer, touched, {});
+        FinishDeal(peer, player, answer, touched, {}, honor);
         if (!tokens.empty()) QuestTake(player.entity, tokens); // the tokens out of their stacks (counted above)
     }
 
@@ -1285,7 +1293,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         core::LogInfo("{}: {} has {} pieces repaired at {} for {} gold", config.name, player.name, touched.size(), it->second->codename, spent);
         SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         SendMessage(*peer.connection, answer);
-        database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+        QueueGoldSave(player.selected, player.inventory.gold);
         if (!touched.empty()) QueueItemSave(player.selected, player.inventory, touched, {});
     }
 
@@ -1490,7 +1498,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (guilds) guilds->LevelChanged(player.selected, player.level);
             if (academies) academies->LevelChanged(player.selected, player.level, player.maxLevel);
             // Saved at once: a level is worth keeping.
-            database.Submit([p = ProgressOf(player)](Database& db) { SaveProgress(db, {p}); });
+            QueueProgressSave(player);
             player.progressDirty = false;
         }
         SendProgress(peer, player);
@@ -1525,7 +1533,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         player.skillPoints -= game::MasteryCost(config.masteryCosts, level);
         player.book.masteries[r.mastery] = level + 1;
         player.progressDirty = true;
-        database.Submit([character = player.selected, mastery = r.mastery, next = level + 1, p = ProgressOf(player)](Database& db) {
+        CharacterWrite(player.selected, [character = player.selected, mastery = r.mastery, next = level + 1, p = ProgressOf(player)](Database& db) {
             SaveMastery(db, character, mastery, next);
             SaveProgress(db, {p});
         });
@@ -1552,7 +1560,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto had = player.book.groups.find(skill->group);
         const assets::SkillRow* before = had != player.book.groups.end() ? config.skills->GroupLevel(skill->group, had->second) : nullptr;
         player.book.groups[skill->group] = skill->level;
-        database.Submit([character = player.selected, previous = before ? before->id : 0u, id = skill->id, p = ProgressOf(player)](Database& db) {
+        CharacterWrite(player.selected, [character = player.selected, previous = before ? before->id : 0u, id = skill->id, p = ProgressOf(player)](Database& db) {
             SaveSkill(db, character, previous, id);
             SaveProgress(db, {p});
         });
@@ -3416,8 +3424,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const game::NameCheck check = config.rules->names.Check(alias);
         return check == game::NameCheck::Ok || check == game::NameCheck::BadLength;
     }
-    bool LeagueTakeGold(std::uint64_t peer, std::uint64_t amount) override { return TakeGold(peer, amount); }
-    void LeagueGiveGold(std::uint64_t peer, std::uint64_t amount) override { GiveGold(peer, amount); }
+    void LeaguePay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) override {
+        Payment(character, fee, std::move(work), std::move(done), true);
+    }
     void LeagueSend(std::uint64_t peerId, proto::MessageId id, const std::vector<std::byte>& payload) override {
         if (Peer* peer = peers->Find(peerId)) peer->connection->Send(id, payload);
     }
@@ -4003,7 +4012,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (g.item.refId == 0) {
             p->inventory.gold += g.gold; // gold to its owner
             SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
-            database.Submit([character = p->selected, gold = p->inventory.gold](Database& db) { SaveGold(db, character, gold); });
+            QueueGoldSave(p->selected, p->inventory.gold);
             SendMessage(*peer->connection, proto::ItemGained{0, 0, g.gold}); // its owner's line, as for its own pick-up
         } else {
             if (freeItemIds.empty()) return Picked::Gone; // no id for it yet: it stays for now
@@ -4091,6 +4100,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         ExchangeSaveSide s;
         s.character = character;
         s.gold = bag.gold;
+        GoldNow(character, bag.gold);
         std::set<std::uint8_t> places(touched.begin(), touched.end());
         if (const auto q = itemSaves.find(character); q != itemSaves.end()) {
             places.insert(q->second.dirty.begin(), q->second.dirty.end());
@@ -4517,7 +4527,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (p == nullptr || peer == nullptr || p->inventory.gold < gold) return false;
         p->inventory.gold -= gold;
         SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
-        database.Submit([character = p->selected, left = p->inventory.gold](Database& db) { SaveGold(db, character, left); });
+        QueueGoldSave(p->selected, p->inventory.gold);
         return true;
     }
     bool QuestRoom(std::uint32_t entity, const std::vector<game::QuestGoal::Items>& items) override {
@@ -4615,7 +4625,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (r.gold != 0) {
             p->inventory.gold += r.gold;
             SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
-            database.Submit([character = p->selected, gold = p->inventory.gold](Database& db) { SaveGold(db, character, gold); });
+            QueueGoldSave(p->selected, p->inventory.gold);
         }
         if (r.inventory != 0) {
             p->inventory.size = std::uint8_t(std::min<int>(game::Inventory::kMaxSize, p->inventory.size + int(r.inventory)));
@@ -5067,7 +5077,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         return true;
     }
     void InstanceSaveEntry(std::int64_t character, const InstanceEntry& entry) override {
-        database.Submit([character, entry](Database& db) {
+        CharacterWrite(character, [character, entry](Database& db) {
             std::string error;
             if (!SaveInstanceEntry(db, character, entry, error)) core::LogWarning("instances: the entry of {}: {}", character, error);
         });
@@ -5161,10 +5171,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         ExchangeSave(owner, ownerBag, {ownerPlace}, buyer, buyerBag, {buyerPlace});
     }
     void StallSaveGold(std::int64_t character, std::uint64_t gold, std::function<void()> saved) override {
-        database.SubmitBarrier([this, character, gold, saved = std::move(saved)](Database& db) {
-            SaveGold(db, character, gold);
-            completions->Post(saved);
-        });
+        GoldNow(character, gold);
+        CharacterWrite(character, [character, gold](Database& db) { SaveGold(db, character, gold); }, std::move(saved), true);
     }
     void StallSaveFarSale(const FarSale& sale, std::function<void(bool)> done) override {
         database.SubmitBarrier([this, sale, done = std::move(done)](Database& db) {
@@ -5192,6 +5200,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // Which game server runs each region (empty: this one runs them all).
     std::unordered_map<std::uint16_t, std::uint16_t> regionOwner;
 
+    // The buffs a logout keeps (a scroll's: its skill has 'cbuf'), with the time each has left.
+    std::vector<CharacterRow::Buff> KeptBuffs(const PlayerWorld& player) const {
+        std::vector<CharacterRow::Buff> kept;
+        const auto now = Clock::now();
+        for (const auto& b : player.combat.buffs) {
+            const assets::SkillRow* skill = config.skills ? config.skills->Find(b.skill) : nullptr;
+            if (skill == nullptr || !Skills::OutlivesLogout(*skill) || b.until <= now || b.until == Clock::time_point::max()) continue;
+            kept.push_back({b.skill, std::uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(b.until - now).count())});
+        }
+        return kept;
+    }
+    // A kept buff began or ended: its timed jobs written now, in the character's order (the original adds the row as
+    // the buff starts and deletes it as it ends; a crash keeps what was running).
+    void KeptBuffsChanged(std::uint32_t entity) override {
+        const auto it = players.find(world->PeerOf(entity));
+        if (it == players.end() || it->second.entity != entity) return;
+        CharacterWrite(it->second.selected, [character = it->second.selected, kept = KeptBuffs(it->second)](Database& db) { SaveBuffs(db, character, kept); });
+    }
     void LongCooldownStarted(std::uint32_t entity, std::uint32_t skill) override {
         const auto it = players.find(world->PeerOf(entity));
         if (it == players.end() || it->second.entity != entity) return;
@@ -5272,7 +5298,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // the next server reads only the database.
     void FinishMoves(Clock::time_point now) {
         for (auto it = moves.begin(); it != moves.end();) {
-            if (itemSaves.contains(it->character)) {
+            if (itemSaves.contains(it->character) || characterWrites.contains(it->character)) {
                 ++it;
                 continue;
             }
@@ -5335,22 +5361,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (it == players.end() || it->second.entity != entity) return std::nullopt;
         return AcademyActorOf(peerId, it->second);
     }
-    bool AcademyTakeGold(std::uint64_t peerId, std::uint64_t gold) override {
-        const auto it = players.find(peerId);
-        if (it == players.end() || it->second.inventory.gold < gold) return false;
-        PlayerWorld& player = it->second;
-        player.inventory.gold -= gold;
-        if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::GoldChanged{player.inventory.gold});
-        database.Submit([character = player.selected, g = player.inventory.gold](Database& db) { SaveGold(db, character, g); });
-        return true;
-    }
-    void AcademyGiveGold(std::uint64_t peerId, std::uint64_t gold) override {
-        const auto it = players.find(peerId);
-        if (it == players.end()) return;
-        PlayerWorld& player = it->second;
-        player.inventory.gold += gold;
-        if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::GoldChanged{player.inventory.gold});
-        database.Submit([character = player.selected, g = player.inventory.gold](Database& db) { SaveGold(db, character, g); });
+    void AcademyPay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) override {
+        Payment(character, fee, std::move(work), std::move(done));
     }
     void AcademySubmit(std::function<void(Database&)> task, std::function<void()> done) override { GuildSubmit(std::move(task), std::move(done)); }
     std::uint16_t AcademyServer() const override { return config.id; }
@@ -5425,7 +5437,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (it == players.end()) return;
         it->second.inventory.gold = gold;
         if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::GoldChanged{gold});
-        database.Submit([character = it->second.selected, gold](Database& db) { SaveGold(db, character, gold); });
+        QueueGoldSave(it->second.selected, gold);
     }
     const game::ItemInstance* OpenMarketBagItem(std::uint64_t peerId, std::uint8_t place) const override {
         const auto it = players.find(peerId);
@@ -5865,7 +5877,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 player.experience = below > rest ? below - rest : 0;
                 core::LogInfo("{}: {} goes down to level {}", config.name, player.name, player.level);
                 UpdateStats(nullptr, player);
-                database.Submit([p = ProgressOf(player)](Database& db) { SaveProgress(db, {p}); });
+                QueueProgressSave(player);
             }
             // A murderer's skill points too: 20 to a player, 60 to a monster, at most what it has.
             std::uint32_t spLost = 0;
@@ -6775,7 +6787,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
         if (player.inventory.gold != before) {
             SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
-            database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+            QueueGoldSave(player.selected, player.inventory.gold);
             core::LogInfo("{}: {} repairs for {} gold", config.name, player.name, before - player.inventory.gold);
         }
         if (statsChanged) UpdateStats(&peer, player);
@@ -6897,14 +6909,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (out.gold > 0) {
             player.inventory.gold -= out.gold;
             SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
-            database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+            QueueGoldSave(player.selected, player.inventory.gold);
         }
         player.skillPoints += out.skillPoints;
         std::uint32_t told = 0;
         if (w.mastery != 0) {
             player.book.masteries[w.id] = w.level;
             told = w.level;
-            database.Submit([character = player.selected, mastery = w.id, level = w.level, p = ProgressOf(player)](Database& db) {
+            CharacterWrite(player.selected, [character = player.selected, mastery = w.id, level = w.level, p = ProgressOf(player)](Database& db) {
                 SaveMastery(db, character, mastery, level);
                 SaveProgress(db, {p});
             });
@@ -6917,7 +6929,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 player.book.groups[skill->group] = w.level;
             }
             told = out.skillNow;
-            database.Submit([character = player.selected, previous = had != nullptr ? had->id : 0u, now = out.skillNow, p = ProgressOf(player)](Database& db) {
+            CharacterWrite(player.selected, [character = player.selected, previous = had != nullptr ? had->id : 0u, now = out.skillNow, p = ProgressOf(player)](Database& db) {
                 SaveSkillWithdrawal(db, character, previous, now);
                 SaveProgress(db, {p});
             });
@@ -7080,6 +7092,155 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::map<std::uint8_t, game::ItemInstance> avatars;
     };
     std::unordered_map<std::int64_t, ItemSaves> itemSaves;
+
+    // --- A character's own saves, in their order (the audit's U20-13) ---
+    // The pool runs a task on whichever of its threads is free, so two saves of one character's row could commit older-last
+    // (the original runs its jobs on one connection, in turn). Every save of a character's own rows goes through its writer:
+    // one task of it in flight at a time, the rest behind it in the order asked. The gold, the progress and the bag's places
+    // are written as they are when their task's turn comes (one of each waiting at most: the newest holds those between).
+    // A barrier save elsewhere (an exchange, a deal, a storage move) lands after the task in flight and before those
+    // waiting, which then write what is newer still. Kept past the player's leaving until done.
+    struct CharacterWrites {
+        struct Task {
+            std::function<std::function<void(Database&)>()> start; // on the server's thread at its turn: the database's part
+            std::function<void()> done;
+            bool barrier = false;
+        };
+        std::deque<Task> tasks;
+        bool busy = false;
+        bool goldQueued = false, progressQueued = false;
+        std::uint64_t gold = 0;      // the newest the game holds
+        CharacterProgress progress;  // the same
+        std::vector<std::function<void()>> drained; // once nothing is waiting or in flight
+    };
+    std::unordered_map<std::int64_t, CharacterWrites> characterWrites;
+    void CharacterTask(std::int64_t character, std::function<std::function<void(Database&)>()> start, std::function<void()> done = {},
+                       bool barrier = false) {
+        CharacterWrites& w = characterWrites[character];
+        w.tasks.push_back({std::move(start), std::move(done), barrier});
+        if (!w.busy) NextCharacterWrite(character);
+    }
+    void CharacterWrite(std::int64_t character, std::function<void(Database&)> task, std::function<void()> done = {}, bool barrier = false) {
+        CharacterTask(character, [task = std::move(task)]() mutable { return std::move(task); }, std::move(done), barrier);
+    }
+    void NextCharacterWrite(std::int64_t character) {
+        const auto it = characterWrites.find(character);
+        if (it == characterWrites.end()) return;
+        if (it->second.tasks.empty()) {
+            std::vector<std::function<void()>> drained = std::move(it->second.drained);
+            characterWrites.erase(it);
+            for (auto& then : drained) then();
+            return;
+        }
+        it->second.busy = true;
+        CharacterWrites::Task t = std::move(it->second.tasks.front());
+        it->second.tasks.pop_front();
+        std::function<void(Database&)> work = t.start ? t.start() : nullptr;
+        auto finished = [this, character, done = std::move(t.done)] {
+            if (done) done();
+            NextCharacterWrite(character);
+        };
+        if (!work) {
+            completions->Post(std::move(finished));
+            return;
+        }
+        auto run = [this, work = std::move(work), finished = std::move(finished)](Database& db) {
+            work(db);
+            completions->Post(finished);
+        };
+        if (t.barrier) {
+            database.SubmitBarrier(std::move(run));
+        } else {
+            database.Submit(std::move(run));
+        }
+    }
+    // The gold as the game holds it now, written in the character's order.
+    void QueueGoldSave(std::int64_t character, std::uint64_t gold) {
+        CharacterWrites& w = characterWrites[character];
+        w.gold = gold;
+        if (w.goldQueued) return;
+        w.goldQueued = true;
+        CharacterTask(character, [this, character]() -> std::function<void(Database&)> {
+            CharacterWrites& w = characterWrites[character];
+            w.goldQueued = false;
+            return [character, gold = w.gold](Database& db) { SaveGold(db, character, gold); };
+        });
+    }
+    // A barrier save wrote the gold as the game holds it now: a gold save still waiting writes nothing older.
+    void GoldNow(std::int64_t character, std::uint64_t gold) {
+        if (const auto it = characterWrites.find(character); it != characterWrites.end()) it->second.gold = gold;
+    }
+    // The experience, level, points and stats as they are now, written in the character's order.
+    void QueueProgressSave(const PlayerWorld& player) {
+        CharacterWrites& w = characterWrites[player.selected];
+        w.progress = ProgressOf(player);
+        if (w.progressQueued) return;
+        w.progressQueued = true;
+        CharacterTask(player.selected, [this, character = player.selected]() -> std::function<void(Database&)> {
+            CharacterWrites& w = characterWrites[character];
+            w.progressQueued = false;
+            return [p = w.progress](Database& db) { SaveProgress(db, {p}); };
+        });
+    }
+    // `then` once the character's saves asked so far have landed (none waiting: at once).
+    void AfterCharacterWrites(std::int64_t character, std::function<void()> then) {
+        const auto it = characterWrites.find(character);
+        if (it == characterWrites.end()) return then();
+        it->second.drained.push_back(std::move(then));
+    }
+    // A payment with its work in one transaction (Payment.h), in the character's order: the fee taken from the gold at
+    // its turn, the gold column written with the work (as the game holds it then, less the fee, plus the credit); the
+    // fee given back when it does not stand, the credit given once it has. A player gone meanwhile has them in its
+    // logout's save still waiting (that reads the writer's gold at its turn).
+    void Payment(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done, bool barrier = false) {
+        struct Outcome {
+            bool taken = false, ok = false;
+            std::uint64_t credit = 0;
+        };
+        auto outcome = std::make_shared<Outcome>();
+        CharacterTask(
+            character,
+            [this, character, fee, work = std::move(work), outcome]() -> std::function<void(Database&)> {
+                std::uint64_t peerId = 0;
+                PlayerWorld* p = PlayerOfCharacter(character, &peerId);
+                if (p == nullptr || p->inventory.gold < fee) return {};
+                p->inventory.gold -= fee;
+                outcome->taken = true;
+                if (fee != 0) {
+                    if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
+                }
+                GoldNow(character, p->inventory.gold);
+                return [character, gold = p->inventory.gold, work, outcome](Database& db) {
+                    std::string error;
+                    std::uint64_t credit = 0;
+                    outcome->ok = db.Transaction(
+                        [&](Database& tx) {
+                            const std::optional<std::uint64_t> got = work(tx);
+                            if (!got) return false;
+                            credit = *got;
+                            const QueryResult q = tx.Query("UPDATE _char SET remaingold = $2 WHERE charid = $1", {character, std::int64_t(gold + credit)});
+                            return q.Ok() && q.Affected() == 1;
+                        },
+                        error);
+                    outcome->credit = outcome->ok ? credit : 0;
+                };
+            },
+            [this, character, fee, outcome, done = std::move(done)] {
+                const std::uint64_t back = (outcome->taken && !outcome->ok ? fee : 0) + outcome->credit;
+                if (back != 0) {
+                    std::uint64_t peerId = 0;
+                    if (PlayerWorld* p = PlayerOfCharacter(character, &peerId)) {
+                        p->inventory.gold += back;
+                        if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
+                        QueueGoldSave(character, p->inventory.gold);
+                    } else if (const auto w = characterWrites.find(character); w != characterWrites.end()) {
+                        w->second.gold += back;
+                    }
+                }
+                if (done) done(outcome->ok, outcome->credit);
+            },
+            barrier);
+    }
     std::vector<std::int64_t> freeItemIds; // ids for new items, taken from the database in blocks
     bool reservingIds = false;
     std::unordered_map<std::uint64_t, PlayerWorld> players;
@@ -7610,6 +7771,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const game::NameCheck check = config.rules->names.Check(name);
         return check == game::NameCheck::Ok || check == game::NameCheck::BadLength;
     }
+    void GuildPay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) override {
+        Payment(character, fee, std::move(work), std::move(done));
+    }
     bool TakeGold(std::uint64_t peerId, std::uint64_t amount) override {
         const auto it = players.find(peerId);
         Peer* peer = peers->Find(peerId);
@@ -7617,7 +7781,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         PlayerWorld& player = it->second;
         player.inventory.gold -= amount;
         SendMessage(*peer->connection, proto::GoldChanged{player.inventory.gold});
-        database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+        QueueGoldSave(player.selected, player.inventory.gold);
         return true;
     }
     bool GiveGold(std::uint64_t peerId, std::uint64_t amount) override {
@@ -7627,7 +7791,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         PlayerWorld& player = it->second;
         player.inventory.gold += amount;
         SendMessage(*peer->connection, proto::GoldChanged{player.inventory.gold});
-        database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+        QueueGoldSave(player.selected, player.inventory.gold);
         return true;
     }
     bool TakeSkillPoints(std::uint64_t peerId, std::uint32_t points) override {
@@ -8635,7 +8799,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         CollectTax(taxFortress, tax);
         if (fee > 0) {
             player.inventory.gold -= fee;
-            database.Submit([character = player.selected, gold = player.inventory.gold](Database& db) { SaveGold(db, character, gold); });
+            QueueGoldSave(player.selected, player.inventory.gold);
             SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         }
         core::LogInfo("{}: {} through {} to {} ({},{}) for {} gold", config.name, peer.address, from->codename, to->codename, to->region & 0xFF,
@@ -8765,7 +8929,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             player.book.groups[best->group] = best->level;
             learned.push_back({before != nullptr ? before->id : 0u, best->id});
         }
-        database.Submit([character = player.selected, mastery = r.mastery, level = r.level, learned, p = ProgressOf(player)](Database& db) {
+        CharacterWrite(player.selected, [character = player.selected, mastery = r.mastery, level = r.level, learned, p = ProgressOf(player)](Database& db) {
             SaveMastery(db, character, mastery, level);
             for (const auto& [previous, id] : learned) SaveSkill(db, character, previous, id);
             SaveProgress(db, {p});
@@ -9077,6 +9241,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (!s.busy) FlushItems(character);
     }
 
+    // The bag's save in the character's order (CharacterTask): what changed, as it is when its turn comes.
     void FlushItems(std::int64_t character) {
         const auto it = itemSaves.find(character);
         if (it == itemSaves.end()) return;
@@ -9085,6 +9250,20 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             itemSaves.erase(it);
             return;
         }
+        s.busy = true;
+        CharacterTask(character, [this, character] { return ItemSaveTask(character); }, [this, character] {
+            if (const auto again = itemSaves.find(character); again != itemSaves.end()) {
+                again->second.busy = false;
+                FlushItems(character);
+            }
+        });
+    }
+    std::function<void(Database&)> ItemSaveTask(std::int64_t character) {
+        const auto it = itemSaves.find(character);
+        if (it == itemSaves.end()) return {};
+        ItemSaves& s = it->second;
+        // Taken meanwhile by a save of both sides (SaveSideOf): nothing left to write.
+        if (s.dirty.empty() && s.gone.empty() && s.avatarDirty.empty()) return {};
         const auto stored = [this](std::uint8_t place, const game::ItemInstance& i) {
             StoredItem out{i.serial, place, i.refId, i.plus, i.variance, i.durability, i.count, {}, Counted(i.refId, i.durability)};
             out.bound = i.bound;
@@ -9117,17 +9296,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         s.gone.clear();
         s.dirty.clear();
         s.avatarDirty.clear();
-        s.busy = true;
-        database.Submit([this, character, present = std::move(present), emptied = std::move(emptied), gone = std::move(gone),
-                         avatars = std::move(avatars)](Database& db) {
+        return [character, present = std::move(present), emptied = std::move(emptied), gone = std::move(gone), avatars = std::move(avatars)](Database& db) {
             SaveItems(db, character, present, emptied, gone, avatars);
-            completions->Post([this, character] {
-                if (const auto again = itemSaves.find(character); again != itemSaves.end()) {
-                    again->second.busy = false;
-                    FlushItems(character);
-                }
-            });
-        });
+        };
     }
 
     // An item moved in the inventory (the original's 0x706D kind 0): the
@@ -9746,6 +9917,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             LeaveWorld(otherId, false);
             players[otherId].selected = 0;
             if (players[otherId].dropped) { // its connection already gone: nothing more to close
+                if (players[otherId].heldAccount != 0) ReleaseSessionAfter(character, players[otherId].heldAccount, players[otherId].heldSession);
                 players.erase(otherId);
                 accountOf.erase(otherId);
                 continue;
@@ -10230,6 +10402,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         });
         for (const std::uint64_t peerId : gone) {
             LeaveWorld(peerId, false);
+            const PlayerWorld& player = players[peerId];
+            if (player.heldAccount != 0) ReleaseSessionAfter(player.selected, player.heldAccount, player.heldSession);
             players.erase(peerId);
             accountOf.erase(peerId);
         }
@@ -11321,8 +11495,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 });
             });
         };
-        if (held) database.SubmitBarrier(std::move(load));
-        else database.Submit(std::move(load));
+        // Its own saves still on their way (a logout a moment ago, the old connection's above): the load after them.
+        AfterCharacterWrites(player.selected, [this, held, load = std::move(load)]() mutable {
+            if (held) {
+                database.SubmitBarrier(std::move(load));
+            } else {
+                database.Submit(std::move(load));
+            }
+        });
     }
 
     // Out of the world (back to the lobby, or gone): its place is saved.
@@ -11367,10 +11547,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (moving) parties->MovedAway(player.entity);
             else parties->LeaveWorld(player.entity); // out of its party while the members still know it
         }
+        std::optional<CharacterPlace> leftAt;
         if (const auto place = moving ? std::nullopt : world->Where(player.entity)) {
             const proto::WorldPosition kept = KeptPlace(player.entity, place->position);
-            CharacterPlace saved{player.selected, {kept.region, kept.x, kept.y, kept.z, place->yaw}};
-            database.Submit([saved](Database& db) { SavePlaces(db, {saved}); });
+            leftAt = CharacterPlace{player.selected, {kept.region, kept.x, kept.y, kept.z, place->yaw}};
+            // Dead in an ordinary world (not an instance, not a fortress war's death): kept at its return point, as the
+            // original writes the town's recall position at the exit (it rises there, not where it fell).
+            if (player.dead && place->position.layer == 0 && !player.warDeathAt) {
+                if (const assets::TeleportPoint* to = ReturnArrival(player)) leftAt = CharacterPlace{player.selected, {to->region, to->x, to->y, to->z, place->yaw}};
+            }
         }
         if (instances) instances->Leave(player.entity);
         if (flagWorlds) flagWorlds->Leave(player.entity);
@@ -11378,26 +11563,28 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // The buffs the original keeps as timed jobs (a scroll's: its skill has 'cbuf') keep the time they have left
         // until the character is back; the skills' own end with
         // the logout.
-        {
-            std::vector<CharacterRow::Buff> kept;
-            const auto now = Clock::now();
-            for (const auto& b : player.combat.buffs) {
-                const assets::SkillRow* skill = config.skills ? config.skills->Find(b.skill) : nullptr;
-                if (skill == nullptr || !Skills::OutlivesLogout(*skill) || b.until <= now || b.until == Clock::time_point::max()) continue;
-                kept.push_back({b.skill, std::uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(b.until - now).count())});
-            }
-            database.Submit([character = player.selected, kept = std::move(kept)](Database& db) { SaveBuffs(db, character, kept); });
-            player.combat.buffs.clear();
-        }
-        database.Submit([character = player.selected, hp = player.hp, mp = player.mp, p = ProgressOf(player), dirty = player.progressDirty](Database& db) {
-            SaveVitals(db, character, hp, mp);
-            SaveLogout(db, character);
-            if (dirty) SaveProgress(db, {p});
-        });
+        std::vector<CharacterRow::Buff> kept = KeptBuffs(player);
+        player.combat.buffs.clear();
+        // Its saves as one task in the character's order, after everything submitted before it (a barrier: a SaveAll's
+        // batch of places still running lands first): the place, the buffs kept, the vitals, the progress not saved yet and the gold
+        // (the original's full save at the exit). The gold is the newest when its turn comes (a payment of its still
+        // under way changes it).
+        characterWrites[player.selected].gold = player.inventory.gold;
+        CharacterTask(player.selected, [this, character = player.selected, leftAt, kept = std::move(kept), hp = player.hp, mp = player.mp,
+                                        p = ProgressOf(player), dirty = player.progressDirty]() -> std::function<void(Database&)> {
+            return [character, leftAt, kept, hp, mp, p, dirty, gold = characterWrites[character].gold](Database& db) {
+                if (leftAt) SavePlaces(db, {*leftAt});
+                SaveBuffs(db, character, kept);
+                SaveVitals(db, character, hp, mp);
+                SaveLogout(db, character);
+                if (dirty) SaveProgress(db, {p}); // what changed since its last save (every other change is saved as it comes)
+                SaveGold(db, character, gold);
+            };
+        }, {}, true);
         player.progressDirty = false;
         CloseGuildStorage(peerId, player);
-        // The guild's points not given yet, given now; none for the dead.
-        if (guilds && player.guildPointsDue > 0 && !player.dead) guilds->PointsEarned(player.selected, player.guildPointsDue);
+        // The guild's points not given yet, given now, dead or alive (the original's exit donates them with no test of life).
+        if (guilds && player.guildPointsDue > 0) guilds->PointsEarned(player.selected, player.guildPointsDue);
         player.guildPointsDue = 0;
         if (guilds) {
             if (moving) guilds->MovedAway(player.selected);
@@ -11418,8 +11605,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         player.combat.StopFighting();
         if (const auto it = byName.find(NameKey(player.name)); it != byName.end() && it->second == peerId) byName.erase(it);
         player.loggingOut = false;
+        // Back to the lobby once its saves have landed (the original's LOBBYUSER_STATE_WAITFOR_DATA_SAVING): its next
+        // entry reads what they wrote.
         if (reply) {
-            if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::WorldLeft{});
+            AfterCharacterWrites(player.selected, [this, peerId] {
+                if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::WorldLeft{});
+            });
         }
     }
 
@@ -11490,17 +11681,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (kept.layer != 0) return;
             places.push_back({character, {kept.region, kept.x, kept.y, kept.z, p.yaw}});
         });
-        // And the experience gained since the last save.
-        std::vector<CharacterProgress> progress;
+        // And the experience gained since the last save, each in its character's order; the health and mana with the places
+        // (a crash keeps them as of the last save, not the last logout).
+        struct Vitals {
+            std::int64_t character = 0;
+            std::uint32_t hp = 0, mp = 0;
+        };
+        std::vector<Vitals> vitals;
         for (auto& [peerId, player] : players) {
-            if (player.entity == 0 || !player.progressDirty) continue;
-            progress.push_back(ProgressOf(player));
+            if (player.entity == 0) continue;
+            vitals.push_back({player.selected, player.hp, player.mp});
+            if (!player.progressDirty) continue;
+            QueueProgressSave(player);
             player.progressDirty = false;
         }
         saving = true;
-        database.Submit([this, places = std::move(places), progress = std::move(progress)](Database& db) {
+        database.Submit([this, places = std::move(places), vitals = std::move(vitals)](Database& db) {
             if (!SavePlaces(db, places)) core::LogWarning("{}: saving {} places failed", config.name, places.size());
-            if (!progress.empty() && !SaveProgress(db, progress)) core::LogWarning("{}: saving {} characters' experience failed", config.name, progress.size());
+            for (const Vitals& v : vitals) SaveVitals(db, v.character, v.hp, v.mp);
             completions->Post([this] {
                 saving = false;
                 nextSave = Clock::now() + config.saveInterval;
@@ -11578,14 +11776,32 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
 
     void Closed(Peer& peer) {
         bugReports.erase(peer.id); // a report half sent goes with its connection
-        if (!Linger(peer.id)) {
+        const bool lingering = Linger(peer.id);
+        std::int64_t character = 0;
+        if (!lingering) {
+            if (const auto it = players.find(peer.id); it != players.end()) character = it->second.selected;
             LeaveWorld(peer.id, false);
             players.erase(peer.id);
             accountOf.erase(peer.id);
         }
         if (peer.account == 0) return;
         --online;
-        database.Submit([account = peer.account, id = config.id, token = peer.session](Database& db) { ReleaseSession(db, account, id, token); });
+        // The session is held while the character still stands in the world (a login elsewhere would load it twice), and
+        // until its saves have landed (the next load reads them).
+        if (lingering) {
+            PlayerWorld& player = players[peer.id];
+            player.heldAccount = peer.account;
+            player.heldSession = peer.session;
+            return;
+        }
+        ReleaseSessionAfter(character, peer.account, peer.session);
+    }
+    void ReleaseSessionAfter(std::int64_t character, std::int64_t account, std::int64_t token) {
+        const auto release = [this, account, token] {
+            database.Submit([account, id = config.id, token](Database& db) { ReleaseSession(db, account, id, token); });
+        };
+        if (character == 0) return release();
+        AfterCharacterWrites(character, release);
     }
 };
 

@@ -72,7 +72,9 @@ public:
     QueryResult Query(std::string_view sql, const std::vector<Param>& params);
     // Several statements, no parameters (schema migrations).
     QueryResult Script(std::string_view sql);
-    // Runs `body` inside BEGIN / COMMIT; rolls back if it returns false or a statement fails.
+    // Runs `body` inside BEGIN / COMMIT; rolls back if it returns false or a statement fails. Inside another transaction
+    // (a store function called within a larger one) it is a savepoint: its work undone alone when `body` fails, kept or
+    // undone with the outer transaction otherwise.
     bool Transaction(const std::function<bool(Database&)>& body, std::string& error);
     // A COPY ... FROM STDIN statement fed by `next`, which fills its argument with the next piece of
     // the data (COPY's text format) and returns false when there is no more. The rows taken, or -1
@@ -96,6 +98,7 @@ private:
     QueryResult Collect(void* result); // takes a PGresult
     void* connection_; // PGconn
     std::string url_;
+    int transactionDepth_ = 0; // Transaction's nesting: 0 outside one
     std::vector<std::string> listening_; // listened to again after a reconnect
 };
 

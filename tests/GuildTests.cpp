@@ -1255,6 +1255,8 @@ TEST_CASE("Guilds: wars: the original's refusals, answered, the stakes paid, kil
         cid.c->Send(proto::GuildWarRewardQuery{cid.keeper});
         CHECK(ErrorOf(cid, GuildAction::WarReward) == GuildError::NoWarReward);
         rig.Settle();
+        // Paid with the booty taken, in one transaction: the guild's row empty, the master's gold up.
+        CHECK(t.Db().Query("SELECT booty FROM _guild WHERE name = 'Iron'").Int(0, 0) == 0);
         CHECK(gold("Ares") == 600'000'000 - std::int64_t(game::kGuildCreateGold) - 1'000'000 + 2'000'000);
 
         // A war of a day, its end passed while the server is down, even: it goes on (the shard manager's timer skips it).

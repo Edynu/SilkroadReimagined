@@ -193,7 +193,12 @@ struct Guilds::State {
     std::map<std::pair<std::uint8_t, std::uint32_t>, std::vector<std::uint8_t>> crests;
 
     // Writes, one at a time in the order made (the next goes when the last is done).
-    std::deque<std::pair<std::function<void(Database&)>, std::function<void()>>> writes;
+    struct PendingWrite {
+        std::function<void(Database&)> task;
+        std::function<void()> done;
+        std::function<void(std::function<void()>)> start; // a payment's (WritePaid): run at its turn, `next` once it is done
+    };
+    std::deque<PendingWrite> writes;
     bool writing = false;
     std::uint64_t mutations = 0; // writes of guild state asked so far
     void Write(std::function<void(Database&)> task, std::function<void()> done = {}) {
@@ -202,7 +207,19 @@ struct Guilds::State {
     }
     // In the same order, but not a change of a guild (the bus's messages, loads).
     void WriteQuiet(std::function<void(Database&)> task, std::function<void()> done = {}) {
-        writes.emplace_back(std::move(task), std::move(done));
+        writes.push_back({std::move(task), std::move(done), {}});
+        if (!writing) NextWrite();
+    }
+    // A payment's work on the guilds' rows (Payment.h), in the guilds' order of writes and its payer's order of saves
+    // both: at its turn here it is handed to the payer's (GuildHost::GuildPay), the next write after it.
+    void WritePaid(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) {
+        ++mutations;
+        writes.push_back({{}, {}, [this, character, fee, work = std::move(work), done = std::move(done)](std::function<void()> next) {
+                              host.GuildPay(character, fee, work, [done, next](bool ok, std::uint64_t credit) {
+                                  if (done) done(ok, credit);
+                                  next();
+                              });
+                          }});
         if (!writing) NextWrite();
     }
     void NextWrite() {
@@ -211,9 +228,10 @@ struct Guilds::State {
             return;
         }
         writing = true;
-        auto [task, done] = std::move(writes.front());
+        PendingWrite w = std::move(writes.front());
         writes.pop_front();
-        host.GuildSubmit(std::move(task), [this, done = std::move(done)] {
+        if (w.start) return w.start([this] { NextWrite(); });
+        host.GuildSubmit(std::move(w.task), [this, done = std::move(w.done)] {
             if (done) done();
             NextWrite();
         });
@@ -529,47 +547,59 @@ struct Guilds::State {
         names[key] = 0;
         creating.insert(a.character);
         auto made = std::make_shared<std::pair<std::uint32_t, bool>>(0, false);
+        auto ran = std::make_shared<bool>(false);
         const std::int64_t character = a.character;
         const std::uint64_t peer = a.peer;
-        Write([made, name = r.name, character, level](Database& db) {
-                  std::string error;
-                  made->first = CreateGuild(db, name, character, made->second, error);
-                  if (made->first == 0 && !made->second) core::LogWarning("guilds: creating '{}' failed: {}", name, error);
-                  if (made->first != 0 && level > 1) db.Query("UPDATE _guild SET lvl = $2 WHERE id = $1", {std::int64_t(made->first), level}); // a developer's
-              },
-              [this, made, name = r.name, key, character, peer, actor = a, takeGold, level] {
-                  creating.erase(character);
-                  if (made->first == 0) {
-                      names.erase(key);
-                      return Answer(peer, proto::GuildAction::Create, made->second ? GuildError::NameTaken : GuildError::CannotCreate);
-                  }
-                  // The gold is taken once the guild stands (500,000 off on success).
-                  if (takeGold) host.TakeGold(peer, game::kGuildCreateGold);
-                  Guild g;
-                  g.id = made->first;
-                  g.name = name;
-                  g.level = std::uint8_t(level);
-                  Member master;
-                  master.character = character;
-                  master.name = actor.name;
-                  master.memberClass = game::kGuildMaster;
-                  master.position = game::kPositionCommander;
-                  master.level = std::uint8_t(actor.level);
-                  master.permission = game::kGuildPermAll;
-                  master.model = actor.model;
-                  g.members.push_back(master);
-                  names[key] = g.id;
-                  memberOf[character] = g.id;
-                  const Guild& stored = guilds[g.id] = std::move(g);
-                  core::LogInfo("guilds: {} created guild {} '{}'", actor.name, stored.id, stored.name);
-                  SendTo(character, Info(stored));
-                  Answer(peer, proto::GuildAction::Create, GuildError::Ok);
-                  TellAppearance(character);
-                  // The shard's other servers: the new guild, its master online (it stands only now).
-                  if (online.contains(character)) PublishPresence(character, true);
-                  Touch(stored.id);
-                  PublishTouched();
-              });
+        auto work = [made, ran, name = r.name, character, level](Database& db) {
+            *ran = true;
+            std::string error;
+            made->first = CreateGuild(db, name, character, made->second, error);
+            if (made->first == 0 && !made->second) core::LogWarning("guilds: creating '{}' failed: {}", name, error);
+            if (made->first != 0 && level > 1) db.Query("UPDATE _guild SET lvl = $2 WHERE id = $1", {std::int64_t(made->first), level}); // a developer's
+        };
+        auto finish = [this, made, ran, name = r.name, key, character, peer, actor = a, level] {
+            creating.erase(character);
+            if (made->first == 0) {
+                names.erase(key);
+                return Answer(peer, proto::GuildAction::Create,
+                              !*ran ? GuildError::NoGold : made->second ? GuildError::NameTaken : GuildError::CannotCreate);
+            }
+            Guild g;
+            g.id = made->first;
+            g.name = name;
+            g.level = std::uint8_t(level);
+            Member master;
+            master.character = character;
+            master.name = actor.name;
+            master.memberClass = game::kGuildMaster;
+            master.position = game::kPositionCommander;
+            master.level = std::uint8_t(actor.level);
+            master.permission = game::kGuildPermAll;
+            master.model = actor.model;
+            g.members.push_back(master);
+            names[key] = g.id;
+            memberOf[character] = g.id;
+            const Guild& stored = guilds[g.id] = std::move(g);
+            core::LogInfo("guilds: {} created guild {} '{}'", actor.name, stored.id, stored.name);
+            SendTo(character, Info(stored));
+            Answer(peer, proto::GuildAction::Create, GuildError::Ok);
+            TellAppearance(character);
+            // The shard's other servers: the new guild, its master online (it stands only now).
+            if (online.contains(character)) PublishPresence(character, true);
+            Touch(stored.id);
+            PublishTouched();
+        };
+        if (!takeGold) return Write(std::move(work), std::move(finish)); // a developer's: no fee
+        // The guild's rows and the 500,000 in one transaction (the original charges once _Guild_Create has stood).
+        WritePaid(character, game::kGuildCreateGold,
+                  [work, made](Database& tx) -> std::optional<std::uint64_t> {
+                      work(tx);
+                      return made->first != 0 ? std::optional<std::uint64_t>(0) : std::nullopt;
+                  },
+                  [finish, made](bool ok, std::uint64_t) {
+                      if (!ok) made->first = 0; // not stood (the gold's write failed with it)
+                      finish();
+                  });
     }
 
     void Invite(const GuildActor& a, const proto::GuildInvite& r) {
@@ -842,13 +872,34 @@ struct Guilds::State {
         const std::uint32_t points = game::kGuildLevelUpPoints[std::size_t(g->level)];
         if (a.gold < gold) return refuse(GuildError::LevelUpGold);
         if (g->points < points) return refuse(GuildError::LevelUpPoints);
-        if (!host.TakeGold(a.peer, gold)) return refuse(GuildError::LevelUpGold);
+        // Raised now (the writes asked after this one see it), and written with the price and the history's row in one
+        // transaction at the writer's turn (the original raises the level, then charges on its success); given back if
+        // it does not stand.
         g->points -= points;
         ++g->level;
-        SavePoints(*g, 0, 0);
-        Write([id = g->id, name = a.name, points](Database& db) { AddGpHistory(db, id, name, points, game::kGpReasonGrowth); });
-        if (g->alliance != 0) TellUnion(g->alliance);
-        Answer(a.peer, proto::GuildAction::LevelUp, GuildError::Ok);
+        auto ran = std::make_shared<bool>(false);
+        WritePaid(a.character, gold,
+                  [ran, id = g->id, level = g->level, left = g->points, name = a.name, points](Database& tx) -> std::optional<std::uint64_t> {
+                      *ran = true;
+                      if (!SaveGuildPoints(tx, id, level, left, 0, 0) || !AddGpHistory(tx, id, name, points, game::kGpReasonGrowth)) return std::nullopt;
+                      return 0;
+                  },
+                  [this, ran, peer = a.peer, id = g->id, points](bool ok, std::uint64_t) {
+                      const auto it = guilds.find(id);
+                      if (!ok) {
+                          if (it != guilds.end()) {
+                              --it->second.level;
+                              it->second.points += points;
+                              SavePoints(it->second, 0, 0);
+                          }
+                          return Answer(peer, proto::GuildAction::LevelUp, *ran ? GuildError::Failed : GuildError::LevelUpGold);
+                      }
+                      if (it != guilds.end()) {
+                          ToGuild(it->second, proto::GuildPoints{std::uint8_t(it->second.level), it->second.points});
+                          if (it->second.alliance != 0) TellUnion(it->second.alliance);
+                      }
+                      Answer(peer, proto::GuildAction::LevelUp, GuildError::Ok);
+                  });
     }
 
     // A fortress position for a member (0x70FF, the checks in its order).
@@ -1472,12 +1523,17 @@ struct Guilds::State {
         const Member* me = g->Find(a.character);
         if (me == nullptr || me->memberClass != game::kGuildMaster) return refuse(GuildError::Denied);
         if (g->booty == 0) return refuse(GuildError::NoWarReward);
-        const std::uint32_t gold = g->booty;
-        if (!host.GiveGold(a.peer, gold)) return refuse(GuildError::Failed);
-        g->booty = 0;
-        Write([id = g->id](Database& db) { TakeGuildBooty(db, id); });
-        Answer(a.peer, proto::GuildAction::WarClaim, GuildError::Ok);
-        core::LogInfo("guilds: {} collects {} gold of war rewards for '{}'", a.name, gold, g->name);
+        // Out of the guild's row and into the master's gold in one transaction, what the database held paid (the
+        // original's shard manager empties the booty first; ours pays it once, never twice).
+        WritePaid(a.character, 0, [id = g->id](Database& tx) -> std::optional<std::uint64_t> { return TakeGuildBooty(tx, id); },
+                  [this, peer = a.peer, name = a.name, id = g->id](bool ok, std::uint64_t gold) {
+                      const auto it = guilds.find(id);
+                      if (ok && it != guilds.end()) it->second.booty = 0;
+                      if (!ok) return Answer(peer, proto::GuildAction::WarClaim, GuildError::Failed);
+                      if (gold == 0) return Answer(peer, proto::GuildAction::WarClaim, GuildError::NoWarReward);
+                      Answer(peer, proto::GuildAction::WarClaim, GuildError::Ok);
+                      core::LogInfo("guilds: {} collects {} gold of war rewards for '{}'", name, gold, it != guilds.end() ? it->second.name : std::string());
+                  });
     }
 
     void ReloadWars() {

@@ -1303,7 +1303,9 @@ TEST_CASE("Game server: the league at its NPC: join, the alias, leave, the previ
     CHECK(old.thiefExp == 8000);
     CHECK(old.hunterLevel == 6);
 
-    // Leave: at another league's keeper no; at its own, free; no league, the 7-day wait.
+    // Leave: at another league's keeper no; at its own, free; no league, the 7-day wait. The week's contribution and the
+    // reward not collected go with it (the original's leave zeroes its job record).
+    REQUIRE(t.Db().Query("UPDATE _chartrijob SET contribution = 77, reward = 88 WHERE charid = $1", {a.character}).Ok());
     a.client->Send(proto::JobLeave{thiefKeeper});
     CHECK(answer(a).code == proto::JobCode::NotOffered);
     a.client->Send(proto::JobLeave{doctor});
@@ -1320,6 +1322,7 @@ TEST_CASE("Game server: the league at its NPC: join, the alias, leave, the previ
     REQUIRE(server::LoadJob(t.Db(), a.character, job, kept, leftAt, error));
     CHECK(job.type == game::JobType::None);
     CHECK(leftAt != 0);
+    CHECK(t.Db().Query("SELECT contribution + reward FROM _chartrijob WHERE charid = $1", {a.character}).Int(0, 0) == 0);
     CHECK(kept.empty()); // the alias gone with the league, still taken (the list keeps it)
     CHECK(t.Db().Query("SELECT count(*) FROM _charnicknamelist WHERE nickname16 = 'Trade1'").Int(0, 0) == 1);
     CHECK(t.Db().Query("SELECT count(*) FROM _chartrijobsafetrade WHERE charid = $1", {a.character}).Int(0, 0) == 0);
@@ -1627,12 +1630,12 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     // The bargain hours run (they began at the server's start); a bargain good bought, then not again within 10 minutes.
     a.client->Send(proto::ShopBuy{ch, 0, 1, 1});
     CHECK(Next<proto::TradeAnswer>(a).code == proto::TradeCode::Ok);
-    // Its lock-out told (the buff board's kind 6) and kept as our timed job 100/7 (2/7 is the academy founding wait).
+    // Its lock-out told (the buff board's kind 6) and kept in our sr_bargain_lock (the original's _timedjob has no row for it).
     CHECK(Next<proto::TradeBargainLock>(a).seconds == 600);
     std::int64_t lockJobs = 0;
     for (int i = 0; i < 200 && lockJobs == 0; ++i) {
         s.game.Poll(2ms);
-        lockJobs = t.Db().Query("SELECT count(*) FROM _timedjob WHERE charid = $1 AND category = 100 AND jobid = 7 AND data1 > 0", {a.character}).Int(0, 0);
+        lockJobs = t.Db().Query("SELECT count(*) FROM sr_bargain_lock WHERE charid = $1 AND until > 0", {a.character}).Int(0, 0);
     }
     CHECK(lockJobs == 1);
     a.client->Send(proto::ShopBuy{ch, 0, 1, 1});
@@ -1690,6 +1693,25 @@ TEST_CASE("Game server: the fortress tax: on a shop's goods at a fortress's NPC,
         tax = t.Db().Query("SELECT tax FROM _siegefortress WHERE fortressid = 1").Int(0, 0);
     }
     CHECK(tax == 120'000);
+    // The sale saved whole, the gold with the emptied place (the original's _STRG_DEL_ITEM: one transaction); then
+    // bought back for what it fetched, the item and the gold together again.
+    const std::uint8_t sold = bag.changed.front().slot;
+    const auto saved = [&](std::int64_t gold, std::uint8_t place, bool held) {
+        bool ok = false;
+        for (int i = 0; i < 200 && !ok; ++i) {
+            s.game.Poll(2ms);
+            ok = t.Db().Query("SELECT remaingold FROM _char WHERE charid = $1", {a.character}).Int(0, 0) == gold &&
+                 (t.Db().Query("SELECT coalesce(max(itemid), 0) FROM _inventory WHERE charid = $1 AND slot = $2", {a.character, int(place)}).Int(0, 0) != 0) == held;
+        }
+        return ok;
+    };
+    CHECK(saved(10'000'000 - 1'100'000 + 180'000, sold, false));
+    CHECK(Next<proto::ShopAnswer>(a).emptied == std::vector<std::uint8_t>{sold});
+    a.client->Send(proto::ShopBuyback{npc, 0});
+    CHECK(Next<proto::GoldChanged>(a).gold == 10'000'000 - 1'100'000);
+    const auto back = Next<proto::ShopAnswer>(a);
+    REQUIRE(back.changed.size() == 1);
+    CHECK(saved(10'000'000 - 1'100'000, back.changed.front().slot, true));
     s.game.Stop();
 }
 

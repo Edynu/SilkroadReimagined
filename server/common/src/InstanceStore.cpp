@@ -73,16 +73,27 @@ bool LoadInstanceEntries(Database& db, std::int64_t character, std::vector<Insta
 }
 
 bool SaveInstanceEntry(Database& db, std::int64_t character, const InstanceEntry& e, std::string& error) {
-    QueryResult r = db.Query(
-        "INSERT INTO _charinstanceworlddata (charid, dungeonkeyid, worldid, layerid, openedtime, regionid, posx, posy, posz, isactivated, entercount, "
-        "lastentertime) VALUES ($1, $2, $3, $4, to_timestamp($5) AT TIME ZONE 'UTC', $6, $7, $8, $9, $10, $11, to_timestamp($12) AT TIME ZONE 'UTC') "
-        "ON CONFLICT (charid, worldid) DO UPDATE SET dungeonkeyid = EXCLUDED.dungeonkeyid, layerid = EXCLUDED.layerid, openedtime = EXCLUDED.openedtime, "
-        "regionid = EXCLUDED.regionid, posx = EXCLUDED.posx, posy = EXCLUDED.posy, posz = EXCLUDED.posz, isactivated = EXCLUDED.isactivated, "
-        "entercount = EXCLUDED.entercount, lastentertime = EXCLUDED.lastentertime",
-        {character, std::int64_t(e.key), std::int64_t(e.world), std::int64_t(e.layer), e.opened, std::int64_t(std::int16_t(e.region)), std::int64_t(e.x),
-         std::int64_t(e.y), std::int64_t(e.z), std::int64_t(e.active ? 1 : 0), std::int64_t(e.count), e.last});
-    if (!r.Ok()) error = r.Error();
-    return r.Ok();
+    // One transaction, as the original's _CharInstanceWorldDataUpdate: an active entry makes the character's others
+    // inactive, then this world's row is written (at most one active entry a character).
+    return db.Transaction(
+        [&](Database& tx) {
+            if (e.active && !tx.Query("UPDATE _charinstanceworlddata SET isactivated = 0 WHERE charid = $1 AND worldid <> $2 AND isactivated <> 0",
+                                      {character, std::int64_t(e.world)})
+                                 .Ok()) {
+                return false;
+            }
+            QueryResult r = tx.Query(
+                "INSERT INTO _charinstanceworlddata (charid, dungeonkeyid, worldid, layerid, openedtime, regionid, posx, posy, posz, isactivated, entercount, "
+                "lastentertime) VALUES ($1, $2, $3, $4, to_timestamp($5) AT TIME ZONE 'UTC', $6, $7, $8, $9, $10, $11, to_timestamp($12) AT TIME ZONE 'UTC') "
+                "ON CONFLICT (charid, worldid) DO UPDATE SET dungeonkeyid = EXCLUDED.dungeonkeyid, layerid = EXCLUDED.layerid, openedtime = EXCLUDED.openedtime, "
+                "regionid = EXCLUDED.regionid, posx = EXCLUDED.posx, posy = EXCLUDED.posy, posz = EXCLUDED.posz, isactivated = EXCLUDED.isactivated, "
+                "entercount = EXCLUDED.entercount, lastentertime = EXCLUDED.lastentertime",
+                {character, std::int64_t(e.key), std::int64_t(e.world), std::int64_t(e.layer), e.opened, std::int64_t(std::int16_t(e.region)), std::int64_t(e.x),
+                 std::int64_t(e.y), std::int64_t(e.z), std::int64_t(e.active ? 1 : 0), std::int64_t(e.count), e.last});
+            if (!r.Ok()) error = r.Error();
+            return r.Ok();
+        },
+        error);
 }
 
 } // namespace sr::server

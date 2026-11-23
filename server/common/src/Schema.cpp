@@ -1140,6 +1140,13 @@ CREATE TABLE IF NOT EXISTS sr_char_records (
     charid integer NOT NULL, name varchar(32) NOT NULL, count integer NOT NULL DEFAULT 0, PRIMARY KEY (charid, name)
 );
 )sql"},
+    // The bargain goods' lock-out (ours) out of the original's _timedjob, which has no category 100, into a table of ours.
+    {30, R"sql(
+CREATE TABLE IF NOT EXISTS sr_bargain_lock (charid integer PRIMARY KEY, until bigint NOT NULL);
+INSERT INTO sr_bargain_lock (charid, until) SELECT charid, max(data1) FROM _timedjob WHERE category = 100 AND jobid = 7 GROUP BY charid
+    ON CONFLICT (charid) DO NOTHING;
+DELETE FROM _timedjob WHERE category = 100;
+)sql"},
 };
 
 

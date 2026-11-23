@@ -707,3 +707,34 @@ TEST_CASE("Forgotten World: the layer travels in a position's world-wide coordin
     const proto::FlatPosition a = proto::ToFlat({32484, 100, 0, 100, 1}), b = proto::ToFlat({32484, 100, 0, 100, 2});
     CHECK(std::hypot(a.x - b.x, a.z - b.z) >= proto::kLayerFlatSpan);
 }
+
+TEST_CASE("Forgotten World: an entry saved active leaves the character's others inactive, in one transaction (the original's _CharInstanceWorldDataUpdate)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    server::InstanceEntry first;
+    first.key = 1;
+    first.world = 10;
+    first.layer = 1;
+    first.active = true;
+    first.count = 1;
+    server::InstanceEntry second = first;
+    second.key = 2;
+    second.world = 11;
+    const auto active = [&](std::int64_t character) {
+        return t.Db().Query("SELECT count(*), coalesce(max(worldid), 0) FROM _charinstanceworlddata WHERE charid = $1 AND isactivated <> 0", {character});
+    };
+    REQUIRE_MESSAGE(server::SaveInstanceEntry(t.Db(), 1, first, error), error);
+    REQUIRE_MESSAGE(server::SaveInstanceEntry(t.Db(), 1, second, error), error);
+    CHECK(active(1).Int(0, 0) == 1);
+    CHECK(active(1).Int(0, 1) == 11);
+    // Another character's entries are its own.
+    REQUIRE_MESSAGE(server::SaveInstanceEntry(t.Db(), 2, first, error), error);
+    CHECK(active(1).Int(0, 0) == 1);
+    CHECK(active(2).Int(0, 1) == 10);
+    // Left (inactive): the others stay as they are.
+    second.active = false;
+    REQUIRE_MESSAGE(server::SaveInstanceEntry(t.Db(), 1, second, error), error);
+    CHECK(active(1).Int(0, 0) == 0);
+    CHECK(t.Db().Query("SELECT count(*) FROM _charinstanceworlddata WHERE charid = 1").Int(0, 0) == 2);
+}

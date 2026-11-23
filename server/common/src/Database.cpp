@@ -196,12 +196,47 @@ QueryResult Database::Collect(void* pgResult) {
 }
 
 bool Database::Transaction(const std::function<bool(Database&)>& body, std::string& error) {
+    struct Depth {
+        int& depth;
+        explicit Depth(int& d) : depth(d) { ++depth; }
+        ~Depth() { --depth; }
+    };
+    if (transactionDepth_ > 0) {
+        // Within another transaction: a savepoint (a nested BEGIN would do nothing and its COMMIT end the outer one).
+        const std::string savepoint = "sr_nested_" + std::to_string(transactionDepth_);
+        QueryResult begin = Query("SAVEPOINT " + savepoint);
+        if (!begin.Ok()) {
+            error = begin.Error();
+            return false;
+        }
+        bool ok = false;
+        {
+            const Depth nested(transactionDepth_);
+            ok = body(*this);
+        }
+        if (!ok) {
+            Query("ROLLBACK TO SAVEPOINT " + savepoint);
+            if (error.empty()) error = "the transaction was rolled back";
+            return false;
+        }
+        QueryResult release = Query("RELEASE SAVEPOINT " + savepoint);
+        if (!release.Ok()) {
+            error = release.Error();
+            return false;
+        }
+        return true;
+    }
     QueryResult begin = Query("BEGIN");
     if (!begin.Ok()) {
         error = begin.Error();
         return false;
     }
-    if (!body(*this)) {
+    bool ok = false;
+    {
+        const Depth outer(transactionDepth_);
+        ok = body(*this);
+    }
+    if (!ok) {
         Query("ROLLBACK");
         if (error.empty()) error = "the transaction was rolled back";
         return false;

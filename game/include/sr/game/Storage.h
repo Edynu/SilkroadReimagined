@@ -29,11 +29,11 @@ struct Storage {
     struct MoveResult {
         proto::ItemStatus status = proto::ItemStatus::Ok;
         std::vector<std::uint8_t> storageTouched, inventoryTouched;
-        std::vector<std::int64_t> gone; // serials of items that left the inventory or merged away there
+        std::vector<std::int64_t> gone; // serials of items merged away into another stack (either side): their rows go
     };
     // Moves `quantity` (0: all) of what is at `from` on one side to `to` on the other (or the same)
-    // side; nothing changes unless Ok. Items arriving in the inventory carry serial 0 (the server
-    // gives them one).
+    // side; nothing changes unless Ok. An item keeps its serial whichever side it goes to (the original moves the
+    // same item id); the part a split takes is a new item with serial 0 (the server gives it one).
     MoveResult Move(const assets::ItemTable& items, Inventory& inventory, Side fromSide, std::uint8_t from, Side toSide, std::uint8_t to,
                     std::uint16_t quantity);
 };

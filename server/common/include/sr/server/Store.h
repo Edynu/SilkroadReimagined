@@ -399,6 +399,10 @@ struct ExchangeSaveSide {
     std::vector<std::int64_t> gone;
 };
 bool SaveExchange(Database& db, const ExchangeSaveSide& a, const ExchangeSaveSide& b);
+// A deal at an NPC's shop (a sale, a purchase, a buyback): the bag's places and the character's gold in one
+// transaction, as the original's _STRG_DEL_ITEM and _STRG_RESTORE_SOLDITEM_* make a sale and a buyback; a purchase's
+// honour points (`honorSpent`, _trainingcampmember) in it too.
+bool SaveShopDeal(Database& db, const ExchangeSaveSide& side, std::int64_t honorSpent = 0);
 // The same inside a transaction already open (a purchase in the item mall writes one side, `b` = `a`, with its silk);
 // `gold` false: the characters' gold is left as it is.
 // --- The item mall's services ---
@@ -494,17 +498,28 @@ std::vector<std::int64_t> ReserveItemIds(Database& db, int count);
 struct StorageRow {
     std::uint8_t size = 150;
     std::uint64_t gold = 0;
-    std::vector<StoredItem> items; // slot: the storage's place (id unused)
+    std::vector<StoredItem> items; // slot: the storage's place; id: the item's (_items.id64)
 };
 std::optional<StorageRow> LoadStorage(Database& db, std::int64_t account, std::uint16_t server);
-// The places that changed: each of `present` as it is now, those in `emptied` empty; the gold.
-bool SaveStorage(Database& db, std::int64_t account, std::uint16_t server, const std::vector<StoredItem>& present,
-                 const std::vector<std::uint8_t>& emptied, std::uint64_t gold);
 
 // A guild's storage (_GuildChest by guild, its gold in _Guild.Gold); `size` is not kept (the level's).
 std::optional<StorageRow> LoadGuildChest(Database& db, std::uint32_t guild);
-bool SaveGuildChest(Database& db, std::uint32_t guild, const std::vector<StoredItem>& present, const std::vector<std::uint8_t>& emptied,
-                    std::uint64_t gold);
+
+// A storage's side of a move: the account's (`_chest`, its gold in `_accountjid`) or, `guild` not 0, a guild's
+// (`_guildchest`, its gold in `_guild.gold`); its places that changed, each of `present` as it is now (with its item's
+// id), those in `emptied` empty.
+struct StorageSaveSide {
+    std::int64_t account = 0;
+    std::uint32_t guild = 0;
+    std::uint64_t gold = 0;
+    std::vector<StoredItem> present;
+    std::vector<std::uint8_t> emptied;
+};
+// A move between a character's bag and a storage (or within the storage), or gold between them, in one transaction
+// as the original's _STRG_MOVE_ITEM and _UPDATE_USER_N_CHAR_GOLD / _UPDATE_GUILD_N_CHAR_GOLD make it: the bag's side as
+// SaveExchange writes one, the storage's places; `gold`: both gold columns too. An item keeps its id on whichever side it
+// goes to; what merged away (the bag side's `gone`) is freed. Items held anywhere else are never touched from here.
+bool SaveStorageMove(Database& db, const ExchangeSaveSide& bag, const StorageSaveSide& storage, bool gold);
 
 // A character's running buffs as it leaves (all replaced).
 bool SaveBuffs(Database& db, std::int64_t character, const std::vector<CharacterRow::Buff>& buffs);
