@@ -211,6 +211,8 @@ public:
     // does not stand.
     bool PayWithPoints(std::uint32_t guild, std::uint32_t points, std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done);
     std::optional<Facts> FactsOfGuild(std::uint32_t guild) const;
+    // Is a member named `name` (any case) in `character`'s guild?
+    bool MemberNamed(std::int64_t character, std::string_view name) const;
     std::size_t Count() const;
     // Writes still to go (tests wait for them).
     bool Writing() const;

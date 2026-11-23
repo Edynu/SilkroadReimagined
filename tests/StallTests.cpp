@@ -292,7 +292,7 @@ TEST_CASE("Game server: a stall visited, chatted in and bought from, saved in on
     v.client->Send(proto::StallBuy{0});
     CHECK(Next<proto::StallBought>(v).code == Code::NotVisitor);
     f.client->Send(proto::StallVisit{o.entity});
-    CHECK(Refusal(f) == Code::Busy); // beyond the reach
+    CHECK(Refusal(f) == Code::TooFar); // beyond the original's reach (100 between the positions in 3D)
     o.client->Send(proto::StallVisit{o.entity});
     CHECK(Refusal(o) == Code::OwnerOnly);
     v.client->Send(proto::StallVisit{o.entity});

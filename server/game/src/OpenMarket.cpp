@@ -216,34 +216,40 @@ struct OpenMarket::State {
             left -= p.deposit;
             p.gold = left;
         }
+        // The items out of the bag and the deposits out of the gold first (the original's: nothing of them is left to
+        // move, sell or trade while the database works); back if their rows do not move.
+        std::vector<game::ItemInstance> aside;
+        for (const OpenMarketPut& p : puts) {
+            std::optional<game::ItemInstance> item = host.OpenMarketTakeAside(peer, p.place);
+            aside.push_back(item ? std::move(*item) : game::ItemInstance{});
+        }
+        host.OpenMarketSetGold(peer, left, false);
         busy.insert(a.entity);
         ++writes;
         auto made = std::make_shared<std::vector<std::optional<std::uint32_t>>>();
-        host.OpenMarketSubmit(
+        host.OpenMarketWrite(
+            a.character,
             [puts, made](Database& db) {
                 for (const OpenMarketPut& p : puts) {
                     made->push_back(PutOpenMarket(db, p));
                     if (!made->back()) break; // the rest not tried: the bag stays as it is
                 }
             },
-            [this, peer, entity = a.entity, puts, made, request = m.kId] {
+            [this, peer, entity = a.entity, puts, made, aside = std::move(aside), request = m.kId] {
                 --writes;
                 busy.erase(entity);
-                std::uint64_t paid = 0;
+                std::uint64_t unpaid = 0;
                 bool all = true;
                 for (std::size_t k = 0; k < puts.size(); ++k) {
                     if (k >= made->size() || !(*made)[k]) {
                         all = false;
+                        host.OpenMarketPutBack(peer, puts[k].place, aside[k]);
+                        unpaid += puts[k].deposit;
                         continue;
                     }
-                    host.OpenMarketTookFromBag(peer, puts[k].place);
-                    paid += puts[k].deposit;
                     core::LogInfo("open market: {} lists item {} x{} for {} (deposit {})", puts[k].seller, puts[k].refId, puts[k].count, puts[k].price, puts[k].deposit);
                 }
-                if (paid > 0) {
-                    const std::uint64_t now = host.OpenMarketGold(peer);
-                    host.OpenMarketSetGold(peer, now > paid ? now - paid : 0);
-                }
+                if (unpaid > 0) host.OpenMarketSetGold(peer, host.OpenMarketGold(peer) + unpaid);
                 Answer(peer, request, all ? code::kOk : code::kFailed);
                 Refresh(peer);
             });
@@ -266,7 +272,8 @@ struct OpenMarket::State {
             OpenMarketTake last = OpenMarketTake::Ok;
         };
         auto out = std::make_shared<Out>();
-        host.OpenMarketSubmit(
+        host.OpenMarketWrite(
+            a.character,
             [account = a.account, character = a.character, moves, out](Database& db) {
                 for (const auto& [listing, place] : moves) {
                     OpenMarketRecord r;
@@ -293,6 +300,8 @@ struct OpenMarket::State {
         if (gold < price) return Answer(peer, m.kId, code::kGold);
         const auto place = host.OpenMarketFreePlace(peer, {});
         if (!place) return Answer(peer, m.kId, code::kBagFull);
+        // The price out of the gold first (the purchase's transaction writes the gold left), back if it does not stand.
+        host.OpenMarketSetGold(peer, gold - price, false);
         busy.insert(a.entity);
         ++writes;
         struct Out {
@@ -301,7 +310,8 @@ struct OpenMarket::State {
             std::int64_t seller = 0;
         };
         auto out = std::make_shared<Out>();
-        host.OpenMarketSubmit(
+        host.OpenMarketWrite(
+            a.character,
             [account = std::int64_t(m.account), listing = m.listing, price, buyer = a.character, place = *place, left = gold - price, out](Database& db) {
                 out->result = BuyOpenMarket(db, account, listing, price, buyer, place, left, om::kKeepSeconds, out->record, out->seller);
             },
@@ -309,14 +319,13 @@ struct OpenMarket::State {
                 --writes;
                 busy.erase(entity);
                 if (out->result != OpenMarketTake::Ok) {
+                    host.OpenMarketSetGold(peer, host.OpenMarketGold(peer) + price);
                     if (const auto s = sessions.find(peer); s != sessions.end()) s->second.searched.erase(key);
                     const std::uint16_t c = out->result == OpenMarketTake::Expired    ? code::kExpired
                                             : out->result == OpenMarketTake::BagTaken ? code::kBagFull
                                                                                       : code::kNotOnSale;
                     return Answer(peer, request, c);
                 }
-                const std::uint64_t now = host.OpenMarketGold(peer);
-                host.OpenMarketSetGold(peer, now > price ? now - price : 0);
                 host.OpenMarketPutInBag(peer, place, out->record.item);
                 if (const auto s = sessions.find(peer); s != sessions.end()) s->second.searched.erase(key);
                 Answer(peer, request, code::kOk);
@@ -352,17 +361,24 @@ struct OpenMarket::State {
             payout += om::Payout(it->price, it->deposit, it->saleFee);
         }
         const std::uint64_t gold = host.OpenMarketGold(peer);
+        // The payout into the gold first (the original takes it into memory before its job; the settling's transaction
+        // writes the gold), taken back if the rows are not settled.
+        host.OpenMarketSetGold(peer, gold + payout, false);
         busy.insert(a.entity);
         ++writes;
         auto ok = std::make_shared<bool>(false);
-        host.OpenMarketSubmit(
+        host.OpenMarketWrite(
+            a.character,
             [account = a.account, listings = m.listings, payout, character = a.character, after = gold + payout, ok](Database& db) {
                 *ok = SettleOpenMarket(db, account, listings, payout, character, after);
             },
             [this, peer, entity = a.entity, payout, ok, request = m.kId] {
                 --writes;
                 busy.erase(entity);
-                if (*ok) host.OpenMarketSetGold(peer, host.OpenMarketGold(peer) + payout);
+                if (!*ok) {
+                    const std::uint64_t now = host.OpenMarketGold(peer);
+                    host.OpenMarketSetGold(peer, now > payout ? now - payout : 0);
+                }
                 Answer(peer, request, *ok ? code::kOk : code::kNotSold);
                 Refresh(peer);
             });
@@ -509,6 +525,7 @@ void OpenMarket::Left(std::uint64_t peer) {
 }
 
 bool OpenMarket::Busy(std::uint32_t entity) const { return s_->busy.contains(entity); }
+bool OpenMarket::InSession(std::uint64_t peer) const { return s_->sessions.contains(peer); }
 bool OpenMarket::Writing() const { return s_->writes > 0; }
 
 } // namespace sr::server

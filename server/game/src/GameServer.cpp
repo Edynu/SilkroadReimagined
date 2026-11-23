@@ -3911,10 +3911,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto place = world->Where(entity);
         if (it == players.end() || it->second.entity != entity || !place) return std::nullopt;
         PlayerWorld& p = it->second;
-        const bool free = !stalls || (!stalls->Owner(entity) && !stalls->Visiting(entity) && !stalls->Holding(entity));
-        return ExchangeHost::Trader{it->first, p.selected, p.name, !p.dead, free, place->position, &p.inventory};
+        // Free of other dealings: a stall (its owner, a visitor, a buyer from afar) and the Open Market's window.
+        const bool free = (!stalls || (!stalls->Owner(entity) && !stalls->Visiting(entity) && !stalls->Holding(entity))) &&
+                          !(openMarket && openMarket->InSession(it->first));
+        return ExchangeHost::Trader{it->first, p.selected, p.name, !p.dead, free, place->position, &p.inventory, stalls && stalls->Visiting(entity)};
     }
     void ExchangeSend(std::uint64_t peerId, proto::MessageId id, const std::vector<std::byte>& payload) override { GuildSend(peerId, id, payload); }
+    bool ExchangePetOut(std::uint32_t entity, std::uint8_t place) const override { return OpenMarketPetOut(world->PeerOf(entity), place); }
     const assets::ItemTable* ExchangeItems() const override { return config.rules->items.get(); }
 
     // --- COS (Coses.h) ---------------------------------------------------------------
@@ -5270,6 +5273,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::tolower(c)); });
         return name;
     }
+    bool StallPetOut(std::uint32_t entity, std::uint8_t place) const override { return OpenMarketPetOut(world->PeerOf(entity), place); }
+    void StallPlaceMoved(std::uint32_t entity, std::uint8_t place) override {
+        if (PlayerWorld* p = PlayerByEntity(entity)) QueueItemSave(p->selected, p->inventory, {place}, {});
+    }
+    void StallBagLost(std::uint32_t entity) override {
+        if (const PlayerWorld* p = PlayerByEntity(entity)) core::LogWarning("{}: {}'s bag filled while a far purchase landed: its session ends", config.name, p->name);
+        Disconnect(world->PeerOf(entity), proto::DisconnectReason::Kicked, "your bag changed while a purchase landed; please log in again");
+    }
     void StallSaveSale(std::int64_t owner, const game::Inventory& ownerBag, std::uint8_t ownerPlace, std::int64_t buyer, const game::Inventory& buyerBag,
                        std::uint8_t buyerPlace) override {
         ExchangeSave(owner, ownerBag, {ownerPlace}, buyer, buyerBag, {buyerPlace});
@@ -5506,6 +5517,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // --- The Open Market (OpenMarket.h) ---
     void OpenMarketSend(std::uint64_t peerId, proto::MessageId id, const std::vector<std::byte>& payload) override { GuildSend(peerId, id, payload); }
     void OpenMarketSubmit(std::function<void(Database&)> task, std::function<void()> done) override { GuildSubmit(std::move(task), std::move(done)); }
+    void OpenMarketWrite(std::int64_t character, std::function<void(Database&)> task, std::function<void()> done) override {
+        CharacterWrite(character, std::move(task), std::move(done));
+    }
     std::optional<OpenMarketActor> OpenMarketActorOf(std::uint64_t peerId) const override {
         const auto it = players.find(peerId);
         const Peer* peer = peers->Find(peerId);
@@ -5536,12 +5550,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto it = players.find(peerId);
         return it != players.end() ? it->second.inventory.gold : 0;
     }
-    void OpenMarketSetGold(std::uint64_t peerId, std::uint64_t gold) override {
+    void OpenMarketSetGold(std::uint64_t peerId, std::uint64_t gold, bool save) override {
         const auto it = players.find(peerId);
         if (it == players.end()) return;
         it->second.inventory.gold = gold;
         if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::GoldChanged{gold});
-        QueueGoldSave(it->second.selected, gold);
+        if (save) {
+            QueueGoldSave(it->second.selected, gold);
+        } else {
+            GoldNow(it->second.selected, gold); // the market's transaction writes it
+        }
     }
     const game::ItemInstance* OpenMarketBagItem(std::uint64_t peerId, std::uint8_t place) const override {
         const auto it = players.find(peerId);
@@ -5562,11 +5580,38 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         SendMessage(*peer->connection, answer);
         if (quests) quests->BagChanged(it->second.entity);
     }
-    void OpenMarketTookFromBag(std::uint64_t peerId, std::uint8_t place) override {
+    std::optional<game::ItemInstance> OpenMarketTakeAside(std::uint64_t peerId, std::uint8_t place) override {
+        const auto it = players.find(peerId);
+        if (it == players.end()) return std::nullopt;
+        const auto item = it->second.inventory.places.find(place);
+        if (item == it->second.inventory.places.end()) return std::nullopt;
+        game::ItemInstance out = std::move(item->second);
+        it->second.inventory.places.erase(item); // its rows the listing's transaction's: no save queued
+        OpenMarketBagTold(peerId, place);
+        return out;
+    }
+    // An item into the bag at `place`, or the first free place when that was filled meanwhile (a save of it there: its
+    // rows say `place`); none free: the session ends, its next entry reading the database (the original logs out).
+    void OpenMarketLand(std::uint64_t peerId, std::uint8_t place, game::ItemInstance item) {
         const auto it = players.find(peerId);
         if (it == players.end()) return;
-        it->second.inventory.places.erase(place); // its rows moved already: no save queued
-        OpenMarketBagTold(peerId, place);
+        PlayerWorld& player = it->second;
+        std::uint8_t at = place;
+        if (player.inventory.places.contains(place)) {
+            const int free = player.inventory.FreeBagPlace();
+            if (free < 0) {
+                core::LogWarning("{}: {}'s bag place {} was filled while the Open Market worked: its session ends", config.name, player.name, place);
+                Disconnect(peerId, proto::DisconnectReason::Kicked, "your bag changed while the Open Market worked; please log in again");
+                return;
+            }
+            at = std::uint8_t(free);
+        }
+        player.inventory.places[at] = std::move(item);
+        if (at != place) QueueItemSave(player.selected, player.inventory, {at}, {});
+        OpenMarketBagTold(peerId, at);
+    }
+    void OpenMarketPutBack(std::uint64_t peerId, std::uint8_t place, game::ItemInstance item) override {
+        if (item.refId != 0) OpenMarketLand(peerId, place, std::move(item));
     }
     void OpenMarketPutInBag(std::uint64_t peerId, std::uint8_t place, const StoredItem& s) override {
         const auto it = players.find(peerId);
@@ -5583,8 +5628,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         item.sockets = s.sockets;
         FromData(s, item);
         for (std::uint64_t m : s.magic) item.options.push_back({std::uint32_t(m & 0xFFFFFFFFu), std::uint32_t(m >> 32)});
-        it->second.inventory.places[place] = std::move(item); // its rows moved already: no save queued
-        OpenMarketBagTold(peerId, place);
+        OpenMarketLand(peerId, place, std::move(item)); // its rows moved already
     }
     std::optional<std::uint8_t> OpenMarketFreePlace(std::uint64_t peerId, const std::set<std::uint8_t>& taken) const override {
         const auto it = players.find(peerId);
@@ -5642,6 +5686,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void CommunityPublish(std::string text) override { BusSend(communityChannel, std::move(text)); }
     bool CommunityNameAllowed(std::string_view name) const override { return GuildNameAllowed(name); }
     bool CommunityTextAllowed(std::string_view text) const override { return config.rules->names.ChatAllowed(text); }
+    bool CommunityGuildMember(std::int64_t character, std::string_view name) const override { return guilds && guilds->MemberNamed(character, name); }
     int CommunityGuildLevel(std::int64_t character) const override {
         if (!guilds) return 0;
         const auto facts = guilds->FactsOf(character);
@@ -10799,9 +10844,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             // An open exchange holds the bag and the gold (the original's 0x1835: "Cannot use item during trade or
             // talking to NPC."): what would change them is refused; so does a stall (its owner's, a buyer's from afar).
             // Alchemy at work holds the bag too (its state lets nothing else through).
+            // So does the Open Market while its transaction runs (a pick-up too: it may fill the place a purchase takes).
+            if (player.entity != 0 && m.id == proto::PickUp::kId && ((openMarket && openMarket->Busy(player.entity)) || (stalls && stalls->Holding(player.entity)))) return;
             if (player.entity != 0 && ((exchanges && exchanges->Holding(player.entity)) || (stalls && stalls->Holding(player.entity)) ||
                                        (alchemy && alchemy->Busy(player.entity)) || (mall && mall->Busy(player.entity)) ||
-                                       (magicPop && magicPop->Busy(player.entity)))) {
+                                       (magicPop && magicPop->Busy(player.entity)) || (openMarket && openMarket->Busy(player.entity)))) {
                 switch (m.id) {
                 case proto::ItemMove::kId:
                 case proto::DropItem::kId:

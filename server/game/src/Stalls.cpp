@@ -248,10 +248,12 @@ void Stalls::VisitStall(std::uint32_t entity, std::uint32_t owner) {
     const auto o = host_.StallPlayer(owner);
     if (!p || !o) return refuse(Code::Closed);
     if (stalls_.contains(entity) || visiting_.contains(entity) || waiting_.contains(entity) || !p->alive || !p->free) return refuse(Code::Busy);
-    const double dx = double(p->position.x) - o->position.x, dz = double(p->position.z) - o->position.z;
-    // The original's 100 between the bodies (its hit range); ours between the centres with a body's
-    // room on each side, the walk up stopping short of the booth.
-    if (p->position.region != o->position.region || std::sqrt(dx * dx + dz * dz) > proto::kStallReach + 20.0) return refuse(Code::Busy);
+    // The original's reach: 100 between the two positions in 3D, across a region's border too; beyond it 4.
+    const proto::FlatPosition a = proto::ToFlat(p->position), b = proto::ToFlat(o->position);
+    const double dy = double(p->position.y) - double(o->position.y);
+    if (p->position.layer != o->position.layer || std::sqrt((a.x - b.x) * (a.x - b.x) + (a.z - b.z) * (a.z - b.z) + dy * dy) > proto::kStallReach) {
+        return refuse(Code::TooFar);
+    }
     if (s->visitors.size() + 1 >= proto::kStallPeople) return refuse(Code::Full);
     s->visitors.push_back(entity);
     visiting_[entity] = owner;
@@ -322,6 +324,7 @@ void Stalls::Put(std::uint32_t entity, const proto::StallPut& put) {
         const game::ItemInstance* item = p->inventory->At(put.place);
         if (item == nullptr) return refuse(Code::NotBagItem);
         if (const Code why = Sellable(*item); why != Code::Ok) return refuse(why);
+        if (host_.StallPetOut(entity, put.place)) return refuse(Code::PetSummoned);
         if (slot) return refuse(Code::Occupied);
         if (std::any_of(s->slots.begin(), s->slots.end(), [&](const std::optional<Slot>& o) { return o && o->place == put.place; })) {
             return refuse(Code::Occupied);
@@ -585,6 +588,7 @@ void Stalls::SellFar(std::uint16_t from, std::uint32_t request, std::int64_t buy
         if (present) {
             holder->inventory->places.erase(slot.place);
             holder->inventory->gold += price - commission;
+            host_.StallSaveGold(ownerCharacter, holder->inventory->gold, [] {}); // the newest, in the owner's order of saves
         } else {
             host_.StallRefundOffline(ownerCharacter, price - commission);
         }
@@ -621,8 +625,17 @@ void Stalls::Settle(std::uint32_t request, bool landed, const proto::ItemRecord&
         if (!here) return; // the database holds it in the bag already
         game::ItemInstance got = game::Inventory::FromRecord(item);
         got.serial = serial != 0 ? serial : w.serial;
-        b->inventory->places[w.place] = got;
-        Send(w.buyer, proto::StallBought{Code::Ok, 1, b->inventory->Record(w.place), b->inventory->gold});
+        // Its reserved place filled meanwhile (nothing held it against every path): the first free one, saved there; none
+        // free: the session ends, the next entry reading the database (the original logs out).
+        std::uint8_t at = w.place;
+        if (b->inventory->places.contains(at)) {
+            const int free = b->inventory->FreeBagPlace();
+            if (free < 0) return host_.StallBagLost(w.buyer);
+            at = std::uint8_t(free);
+        }
+        b->inventory->places[at] = got;
+        if (at != w.place) host_.StallPlaceMoved(w.buyer, at);
+        Send(w.buyer, proto::StallBought{Code::Ok, 1, b->inventory->Record(at), b->inventory->gold});
         core::LogInfo("stall: {} got listing {:x} through the network", b->name, w.listing);
         return;
     }

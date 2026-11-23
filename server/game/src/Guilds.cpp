@@ -2197,6 +2197,15 @@ bool Guilds::PayWithPoints(std::uint32_t guild, std::uint32_t points, std::int64
     return true;
 }
 
+bool Guilds::MemberNamed(std::int64_t character, std::string_view name) const {
+    const auto of = s_->memberOf.find(character);
+    if (of == s_->memberOf.end()) return false;
+    const auto g = s_->guilds.find(of->second);
+    if (g == s_->guilds.end()) return false;
+    const std::string key = Lower(std::string(name));
+    return std::any_of(g->second.members.begin(), g->second.members.end(), [&](const auto& m) { return Lower(m.name) == key; });
+}
+
 std::size_t Guilds::Count() const { return s_->guilds.size(); }
 bool Guilds::Writing() const { return s_->writing || !s_->writes.empty(); }
 

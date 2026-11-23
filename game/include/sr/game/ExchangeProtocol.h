@@ -50,7 +50,7 @@ enum class ExchangeCode : std::uint16_t {
     CannotTrade = 0x183A,    // the item's CanTrade is 0 (_RefObjCommon)
     PeerDead = 0x1840,       // the asked player died before answering
     TradeGoods = 0x1850,     // a trade good (TID 3/3/8)
-    PetSummoned = 0x18B6,    // a pet's summoning item while its pet is out (no pets yet)
+    PetSummoned = 0x18B6,    // a pet's summoning item while its pet is out
     Rented = 0x18FA,         // a rental whose period runs (_RentItemInfo; "Items in the awakening process cannot be traded.")
 };
 

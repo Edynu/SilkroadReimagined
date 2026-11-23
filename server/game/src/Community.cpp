@@ -434,6 +434,16 @@ struct Community::State {
         if (write.names.empty() || Letters(write.text) == 0 || Letters(write.text) > proto::kLetterChars || !host.CommunityTextAllowed(write.text)) {
             return Tell(actor.peer, Topic::LetterMany, Code::LetterFailed);
         }
+        // A filtered name ends the request (silently); a guild letter goes only to the guild's members (the others
+        // dropped); a union letter keeps every name (the original's).
+        proto::LetterWriteMany kept = write;
+        kept.names.clear();
+        for (const std::string& name : write.names) {
+            if (!host.CommunityTextAllowed(name)) return;
+            if (write.kind == 1 && !host.CommunityGuildMember(actor.character, name)) continue;
+            kept.names.push_back(name);
+        }
+        if (kept.names.empty()) return Tell(actor.peer, Topic::LetterMany, Code::LetterFailed);
         struct Reached {
             std::string name;
             LetterWriteResult result = LetterWriteResult::Failed;
@@ -442,7 +452,7 @@ struct Community::State {
         };
         auto reached = std::make_shared<std::vector<Reached>>();
         host.CommunitySubmit(
-            [write, from = actor.name, reached](Database& db) {
+            [write = std::move(kept), from = actor.name, reached](Database& db) {
                 for (const std::string& name : write.names) {
                     Reached r;
                     r.name = name;

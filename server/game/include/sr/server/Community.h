@@ -55,6 +55,12 @@ public:
         return true;
     }
     // The level of the guild a character is in (0: none).
+    // Is `name` a member of `character`'s guild?
+    virtual bool CommunityGuildMember(std::int64_t character, std::string_view name) const {
+        (void)character;
+        (void)name;
+        return true;
+    }
     virtual int CommunityGuildLevel(std::int64_t character) const {
         (void)character;
         return 0;

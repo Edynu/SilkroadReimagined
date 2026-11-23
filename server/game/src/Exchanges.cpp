@@ -135,6 +135,7 @@ void Exchanges::Ask(std::uint32_t entity, std::uint32_t target, Clock::time_poin
         const std::shared_ptr<Session> old = it->second;
         Close(old, entity, Code::Ok, Code::CancelledByUser);
     }
+    if (me->alive && me->visitor) return Refuse(entity, Code::AskerStalls);
     if (!me->alive || !me->free) return Refuse(entity, Code::SelfBusy);
     const auto them = host_.ExchangeTrader(target);
     if (!them) return Refuse(entity, Code::InvalidTarget);
@@ -162,6 +163,12 @@ void Exchanges::Reply(std::uint32_t entity, bool accept) {
     const auto asked = host_.ExchangeTrader(entity);
     if (!asker) return Close(s, entity, Code::PeerGone, Code::PeerGone);
     if (!asked || !asked->alive) return Close(s, entity, Code::Cancelled, Code::PeerDead);
+    // Still within reach (the original measures again on the yes: beyond it the session ends with 4).
+    {
+        const proto::FlatPosition a = proto::ToFlat(asker->position), b = proto::ToFlat(asked->position);
+        const double dy = double(asker->position.y) - double(asked->position.y);
+        if (std::sqrt((a.x - b.x) * (a.x - b.x) + (a.z - b.z) * (a.z - b.z) + dy * dy) >= proto::kExchangeReach) return Close(s, entity, Code::TooFar, Code::TooFar);
+    }
     if (!accept) {
         core::LogInfo("exchange: {} refuses {}", asked->name, asker->name);
         return Close(s, entity, Code::Ok, Code::Refused);
@@ -208,8 +215,9 @@ void Exchanges::Put(std::uint32_t entity, std::uint8_t place) {
     const assets::ItemRow* row = items != nullptr ? items->Find(item->refId) : nullptr;
     if (row == nullptr || !row->canTrade) return Refuse(entity, Code::CannotTrade);
     if (item->serial == 0) return Refuse(entity, Code::InvalidTarget); // an item never stored
-    // A rental whose period runs (the original's "awakening" check, 0x18FA). A pet's summoning item
-    // while its pet is out (0x18B6) comes with pets.
+    // A pet's summoning item while its pet is out (0x18B6); a rental whose period runs (the original's "awakening"
+    // check, 0x18FA).
+    if (host_.ExchangePetOut(entity, place)) return Refuse(entity, Code::PetSummoned);
     const std::int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     if (item->rentUntil != 0 && item->rentUntil > now) return Refuse(entity, Code::Rented);
     if (item->bound) return Refuse(entity, Code::Rented); // bound to its character (ours: the beta quests' weapons)

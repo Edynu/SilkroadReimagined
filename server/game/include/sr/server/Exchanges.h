@@ -45,13 +45,20 @@ public:
         std::int64_t character = 0;
         std::string name;
         bool alive = true;
-        bool free = true; // in no other dealing (a stall, ...)
+        bool free = true; // in no other dealing (a stall, the Open Market, ...)
         game::proto::WorldPosition position;
         game::Inventory* inventory = nullptr;
+        bool visitor = false; // at a stall as its visitor (0x1833)
     };
     virtual std::optional<Trader> ExchangeTrader(std::uint32_t entity) = 0;
     virtual void ExchangeSend(std::uint64_t peer, game::proto::MessageId id, const std::vector<std::byte>& payload) = 0;
     virtual const assets::ItemTable* ExchangeItems() const = 0;
+    // A pet's summoning item whose pet is out.
+    virtual bool ExchangePetOut(std::uint32_t entity, std::uint8_t place) const {
+        (void)entity;
+        (void)place;
+        return false;
+    }
     // A deal made: both bags and both golds are as they are in memory now; `touched` the places of
     // each bag that changed. The host saves both sides in one transaction.
     virtual void ExchangeSave(std::int64_t a, const game::Inventory& bagA, const std::vector<std::uint8_t>& touchedA, std::int64_t b,

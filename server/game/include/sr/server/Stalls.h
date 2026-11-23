@@ -49,6 +49,18 @@ namespace sr::server {
 
 class StallHost {
 public:
+    // A pet's summoning item whose pet is out; a place of the bag to be saved as it is now; the session to end (a far
+    // purchase that found no room: the next entry reads the database).
+    virtual bool StallPetOut(std::uint32_t entity, std::uint8_t place) const {
+        (void)entity;
+        (void)place;
+        return false;
+    }
+    virtual void StallPlaceMoved(std::uint32_t entity, std::uint8_t place) {
+        (void)entity;
+        (void)place;
+    }
+    virtual void StallBagLost(std::uint32_t entity) { (void)entity; }
     virtual ~StallHost() = default;
     // A player in this server's world as the stall needs it (none: not a player here).
     struct Player {

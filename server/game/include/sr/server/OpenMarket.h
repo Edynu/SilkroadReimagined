@@ -43,8 +43,10 @@ class OpenMarketHost {
 public:
     virtual ~OpenMarketHost() = default;
     virtual void OpenMarketSend(std::uint64_t peer, game::proto::MessageId id, const std::vector<std::byte>& payload) = 0;
-    // `task` on a database thread, then `done` on the server's.
+    // `task` on a database thread, then `done` on the server's (a read, or the account's listings aged).
     virtual void OpenMarketSubmit(std::function<void(Database&)> task, std::function<void()> done) = 0;
+    // The same in `character`'s order of saves (its bag and gold written by the task: after its saves asked before it).
+    virtual void OpenMarketWrite(std::int64_t character, std::function<void(Database&)> task, std::function<void()> done) = 0;
     // A player on this server by its connection, and by its account (0: none).
     virtual std::optional<OpenMarketActor> OpenMarketActorOf(std::uint64_t peer) const = 0;
     virtual std::uint64_t OpenMarketPeerOfAccount(std::int64_t account) const = 0;
@@ -53,13 +55,17 @@ public:
     // The bag held by something else (an exchange, a stall, alchemy) or a save of it still on its way.
     virtual bool OpenMarketBagBusy(std::uint32_t entity) const = 0;
     virtual std::uint64_t OpenMarketGold(std::uint64_t peer) const = 0;
-    // The gold in memory (its row is the store's: written in the same transaction), and told.
-    virtual void OpenMarketSetGold(std::uint64_t peer, std::uint64_t gold) = 0;
+    // The gold in memory, and told; `save`: written too (else the market's own transaction writes it).
+    virtual void OpenMarketSetGold(std::uint64_t peer, std::uint64_t gold, bool save = true) = 0;
     virtual const game::ItemInstance* OpenMarketBagItem(std::uint64_t peer, std::uint8_t place) const = 0;
     virtual std::uint8_t OpenMarketBagSize(std::uint64_t peer) const = 0;
-    // The item gone from the bag in memory (its rows moved already), and told.
-    virtual void OpenMarketTookFromBag(std::uint64_t peer, std::uint8_t place) = 0;
-    // An item into the bag in memory at a place (its rows moved already), and told.
+    // An item out of the bag in memory before its listing is written (its rows are the market's transaction's), and told.
+    virtual std::optional<game::ItemInstance> OpenMarketTakeAside(std::uint64_t peer, std::uint8_t place) = 0;
+    // An item set aside back into its place (its rows never moved), or the first free place when that was filled
+    // meanwhile (then saved there), and told.
+    virtual void OpenMarketPutBack(std::uint64_t peer, std::uint8_t place, game::ItemInstance item) = 0;
+    // An item into the bag in memory at a place (its rows moved already), or the first free place when that was filled
+    // meanwhile (then saved there), and told.
     virtual void OpenMarketPutInBag(std::uint64_t peer, std::uint8_t place, const StoredItem& item) = 0;
     // A free bag place (none: the bag is full).
     virtual std::optional<std::uint8_t> OpenMarketFreePlace(std::uint64_t peer, const std::set<std::uint8_t>& taken) const = 0;
@@ -99,6 +105,8 @@ public:
     void Left(std::uint64_t peer);
     // A request under way for this player (its bag held).
     bool Busy(std::uint32_t entity) const;
+    // The player's market window open (its session).
+    bool InSession(std::uint64_t peer) const;
     // Writes under way (tests wait for them).
     bool Writing() const;
 

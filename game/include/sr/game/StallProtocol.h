@@ -34,6 +34,8 @@ constexpr std::uint64_t kNetworkCommissionPercent = 1;  // a sale through the ne
 enum class StallCode : std::uint16_t {
     Ok = 0,
     SaleUnderWay = 2,        // another sale of that stall is being made (the original's quiet refusal)
+    TooFar = 4,              // a visit beyond the original's reach (no text)
+    PetSummoned = 0x18B6,    // a pet's summoning item while its pet is out
     Self = 5,                // the owner buying from its own stall (quiet)
     NotBagItem = 0x3C06,     // not an item of the bag (or one that may not be sold: bound, rented, trade goods)
     Occupied = 0x3C07,       // the slot holds an item already, or the bag's item is up in another slot
