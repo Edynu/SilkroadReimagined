@@ -10,6 +10,7 @@ add_library(sr_server STATIC
     common/src/Crypto.cpp
     common/src/Store.cpp
     common/src/SupportStore.cpp
+    common/src/GameLog.cpp
     common/src/ClientGate.cpp
     common/src/AdminStore.cpp
     common/src/GuildStore.cpp

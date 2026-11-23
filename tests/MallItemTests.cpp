@@ -811,6 +811,19 @@ TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is 
     missing.gold = 5;
     CHECK_FALSE(server::SaveStorageMove(t.Db(), bag, missing, true));
     CHECK(gold() == std::pair<std::int64_t, std::int64_t>{8000, 2000});
+
+    // The game's logs (the original's _LogEventItem, _LogEventChar), written about once a second: the items into the
+    // storage (20, its storage 3), the gold into it (22) and out (23), the entries (4) and the leave of the relog (6).
+    const auto logged = [&](const char* sql) { return t.Db().Query(sql, {p.character}).Int(0, 0); };
+    const auto later = [&](const std::function<bool()>& done) {
+        for (int i = 0; i < 400 && !done(); ++i) s.game.Poll(10ms);
+        return done();
+    };
+    CHECK(later([&] { return logged("SELECT count(*) FROM sro_vt_log._logeventitem WHERE charid = $1 AND operation = 23 AND gold = 1000") == 1; }));
+    CHECK(logged("SELECT count(*) FROM sro_vt_log._logeventitem WHERE charid = $1 AND operation = 22 AND gold = 3000") == 1);
+    CHECK(logged("SELECT count(*) FROM sro_vt_log._logeventitem WHERE charid = $1 AND operation = 20 AND targetstorage = 3") >= 2);
+    CHECK(logged("SELECT count(*) FROM sro_vt_log._logeventchar WHERE charid = $1 AND eventid = 4") >= 2);
+    CHECK(logged("SELECT count(*) FROM sro_vt_log._logeventchar WHERE charid = $1 AND eventid = 6") >= 1);
 }
 
 TEST_CASE("Game server: a save that does not land ends the session (the original's 'AQ Failed! Log out!!'); the next entry reads the database") {

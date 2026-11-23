@@ -54,6 +54,7 @@
 #include "sr/game/MallServices.h"
 #include "sr/server/Database.h"
 #include "sr/server/SupportStore.h"
+#include "sr/server/GameLog.h"
 #include "sr/server/Fortress.h"
 #include "sr/game/Academy.h"
 #include "sr/server/Academies.h"
@@ -530,6 +531,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         answer.emptied.push_back(drop.place);
         SendMessage(*peer.connection, answer);
         QueueItemSave(player.selected, player.inventory, {drop.place}, {serial});
+        LogItem(player, logs::ItemOp::Drop, item.refId, serial, item.count, drop.place, logs::kNoSlot);
         item.serial = 0;
         const std::uint32_t model = item.refId;
         core::LogInfo("{}: {} drops item {} x{}", config.name, player.name, model, item.count);
@@ -547,6 +549,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         player.inventory.gold -= drop.amount;
         SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         QueueGoldSave(player.selected, player.inventory.gold);
+        LogGold(player, logs::ItemOp::DropGold, std::int64_t(drop.amount));
         PutOnGround(player, {}, drop.amount, model);
     }
 
@@ -686,6 +689,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             answer.changed.push_back(to->inventory.Record(std::uint8_t(place)));
             SendMessage(*toPeer->connection, answer);
             QueueItemSave(to->selected, to->inventory, {std::uint8_t(place)}, {});
+            if (const game::ItemInstance* got = to->inventory.At(std::uint8_t(place)))
+                LogItem(*to, logs::ItemOp::PickUp, got->refId, got->serial, g.item.count, logs::kNoSlot, std::uint8_t(place));
             // The party hears what went to whom (the original's loot notice for a party's pick-ups); out of one, the
             // picker its "item [...] gained." line.
             const std::uint16_t count = std::uint16_t(std::min<std::uint32_t>(g.item.count, 0xFFFF));
@@ -992,6 +997,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
         const auto inventoryBefore = player.inventory.places;
         const auto storageBefore = storage->places;
+        // What crosses between the bag and the storage, for the logs (the original's 20 into it, 21 out).
+        std::optional<game::ItemInstance> crossing;
+        if (m.fromStorage != m.toStorage) {
+            if (const game::ItemInstance* i = m.fromStorage ? storage->At(m.from) : player.inventory.At(m.from)) crossing = *i;
+        }
         game::Storage::MoveResult r = storage->Move(*config.rules->items, player.inventory, m.fromStorage ? Side::Storage : Side::Inventory, m.from,
                                                     m.toStorage ? Side::Storage : Side::Inventory, m.to, m.quantity);
         // An item keeps its id on either side; the part a split takes is a new item: one of the reserved ids (none left: undone).
@@ -1048,6 +1058,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         }
         SendMessage(*peer.connection, answer);
+        if (crossing && m.guild == 0) {
+            const std::int32_t moved = m.quantity != 0 ? std::int32_t(std::min<std::uint32_t>(m.quantity, crossing->count)) : std::int32_t(crossing->count);
+            LogItem(player, m.toStorage ? logs::ItemOp::ToStorage : logs::ItemOp::FromStorage, crossing->refId, crossing->serial, moved, m.from, m.to,
+                    m.toStorage ? logs::Storage::Storage : logs::Storage::Inventory);
+        }
         // Both sides in one transaction (the original's _STRG_MOVE_ITEM), after everything submitted before it, with the bag's
         // own saves still waiting folded in (SaveSideOf): neither side's earlier saves can land after it; a fee's gold too.
         ExchangeSaveSide bag = SaveSideOf(player.selected, player.inventory, r.inventoryTouched);
@@ -1071,6 +1086,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (from < g.amount || to > UINT64_MAX - g.amount) return;
         from -= g.amount;
         to += g.amount;
+        if (g.guild == 0) LogGold(player, g.deposit ? logs::ItemOp::GoldToStorage : logs::ItemOp::GoldFromStorage, std::int64_t(g.amount));
         SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
         SendMessage(*peer.connection, proto::StorageGoldChanged{storage->gold, g.guild});
         ExchangeSaveSide bag;
@@ -1262,6 +1278,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         proto::ShopAnswer answer;
         answer.entity = buy.entity;
         FinishDeal(peer, player, answer, touched, {}, honor);
+        for (const std::uint8_t place : touched) {
+            if (const game::ItemInstance* got = player.inventory.At(place))
+                LogItem(player, logs::ItemOp::Buy, got->refId, got->serial, item.count, logs::kNoSlot, place, logs::Storage::Inventory, std::int64_t(price / touched.size()));
+        }
         if (!tokens.empty()) QuestTake(player.entity, tokens); // the tokens out of their stacks (counted above)
     }
 
@@ -1290,6 +1310,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const std::uint64_t price = std::uint64_t(std::max<std::int64_t>(0, std::int64_t(gross) - tax));
         game::ItemInstance sold = it->second;
         sold.count = std::uint16_t(count);
+        LogItem(player, logs::ItemOp::Sell, sold.refId, sold.serial, count, sell.place, logs::kNoSlot, logs::Storage::Inventory, std::int64_t(price));
         std::vector<std::int64_t> gone;
         if (count == it->second.count) {
             gone.push_back(it->second.serial);
@@ -1600,6 +1621,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             Broadcast(player.entity, proto::EntityLevelUp{player.entity, std::uint8_t(player.level)});
             if (quests) quests->LevelChanged(player.entity); // the quests it may take now
             core::LogInfo("{}: {} reaches level {}", config.name, player.name, player.level);
+            LogChar(player, logs::CharEvent::LevelChanged, startLevel, player.level);
             if (guilds) guilds->LevelChanged(player.selected, player.level);
             if (academies) academies->LevelChanged(player.selected, player.level, player.maxLevel);
             // Saved at once: a level is worth keeping.
@@ -3632,6 +3654,46 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto by = taxedBy.find(NpcRef(npc));
         if (by != taxedBy.end()) CollectTax(by->second, tax);
     }
+
+    // --- The game's logs (GameLog.h): queued here, written about once a second by a database job -----------------
+    std::unique_ptr<GameLog> gameLog;
+    Clock::time_point nextLog{};
+    int logRounds = 0;
+    void FlushLog(bool now = false) {
+        if (!gameLog) return;
+        if (!now && Clock::now() < nextLog) return;
+        nextLog = Clock::now() + std::chrono::seconds(1);
+        GameLog::Batch batch = gameLog->Take();
+        // A spill left from a refusal is tried every ten seconds even with nothing new.
+        if (batch.Empty() && (++logRounds % 10 != 0 || !gameLog->Spilled())) return;
+        database.Submit([log = gameLog.get(), batch = std::move(batch)](Database& db) { log->Write(db, batch); });
+    }
+    // Where a character stands, as the logs' EventPos (ours: region(x,y,z)).
+    std::string LogPos(const PlayerWorld& p) const {
+        const auto at = p.entity != 0 ? world->Where(p.entity) : std::nullopt;
+        return at ? std::format("{}({:.0f},{:.0f},{:.0f})", at->position.region, at->position.x, at->position.y, at->position.z) : std::string();
+    }
+    void LogChar(const PlayerWorld& p, logs::CharEvent event, std::int32_t data1 = 0, std::int32_t data2 = 0, std::string desc = {}) {
+        if (!gameLog || p.selected == 0) return;
+        gameLog->Char({p.selected, std::uint8_t(event), data1, data2, LogPos(p), std::move(desc)});
+    }
+    void LogItem(const PlayerWorld& p, logs::ItemOp op, std::uint32_t refId, std::int64_t serial, std::int32_t count, std::uint8_t from, std::uint8_t to,
+                 logs::Storage storage = logs::Storage::Inventory, std::int64_t gold = 0) {
+        if (!gameLog || p.selected == 0) return;
+        ItemLogRow r;
+        r.character = p.selected;
+        r.refId = refId;
+        r.data = count;
+        r.storage = std::uint8_t(storage);
+        r.operation = std::uint8_t(op);
+        r.from = from;
+        r.to = to;
+        r.pos = LogPos(p);
+        r.serial = serial;
+        r.gold = gold;
+        gameLog->Item(std::move(r));
+    }
+    void LogGold(const PlayerWorld& p, logs::ItemOp op, std::int64_t gold) { LogItem(p, op, 0, 0, 0, logs::kNoSlot, logs::kNoSlot, logs::Storage::Inventory, gold); }
 
     // The jobs' trade: the specialty NPCs' markets, buying into the transport, selling (Trades.h).
     std::unique_ptr<Trades> trades;
@@ -6087,6 +6149,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // none known). Its kill's relation (game::KillRelation) decides the penalty, the PK counts and the killer's reward.
     void Die(PlayerWorld& player, PlayerWorld* killer = nullptr, std::uint32_t monster = 0, int strikerLevel = 0) {
         if (killer == &player) killer = nullptr;
+        // Its log (the original's 20): by whom (ours: the killer's name, or the monster's codename).
+        {
+            std::string by;
+            if (killer != nullptr) {
+                by = std::format("by {} (PC)", killer->name);
+            } else if (const assets::ObjectRow* row = monster != 0 && config.characters ? config.characters->Find(monster) : nullptr) {
+                by = "by " + row->codename; // `monster` its refObjId
+            }
+            LogChar(player, logs::CharEvent::Died, 0, 0, std::move(by));
+        }
         const game::KillRelation relation = KillRelationOf(player, killer);
         const bool victimMurderer = player.pkPoints > 0;
         const bool murder = relation == game::KillRelation::Open && killer != nullptr && !killer->dead &&
@@ -11607,7 +11679,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             std::string error;
             const CreateCharacterResult result = CreateCharacter(db, account, config.id, n, config.maxCharacters, error);
             if (result == CreateCharacterResult::Failed) core::LogError("{}: creating {} failed: {}", config.name, n.name, error);
-            completions->Post([this, peerId, result] {
+            // Its log (the original's character creation, 1).
+            std::int64_t made = 0;
+            if (result == CreateCharacterResult::Created) {
+                const QueryResult id = db.Query("SELECT charid FROM _char WHERE lower(charname16) = lower($1) ORDER BY charid DESC LIMIT 1", {n.name});
+                if (id.Ok() && id.Rows() > 0) made = id.Int(0, 0);
+            }
+            completions->Post([this, peerId, result, made] {
+                if (made != 0 && gameLog) gameLog->Char({made, std::uint8_t(logs::CharEvent::Created), 0, 0, {}, {}});
                 proto::LobbyStatus status = proto::LobbyStatus::Failed;
                 if (result == CreateCharacterResult::Created) status = proto::LobbyStatus::Ok;
                 if (result == CreateCharacterResult::NameTaken) status = proto::LobbyStatus::NameTaken;
@@ -11893,6 +11972,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 if (guilds) guilds->Entered(GuildActorOf(peerId, player));
                 if (community) community->Entered(CommunityActorOf(peerId, player), player.arrived);
                 if (academies) academies->Entered(AcademyActorOf(peerId, player), player.arrived);
+                if (!player.arrived) LogChar(player, logs::CharEvent::Login); // (a move from another game server is none)
                 if (openMarket) openMarket->Entered(peerId);
                 player.deeds = row->deeds;
                 if (quests) {
@@ -11993,6 +12073,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // beside it at its next entry (Coses.h).
         if (coses) coses->DismissAll(player.entity, true);
         if (quests) quests->Leave(player.entity);
+        if (!moving) LogChar(player, logs::CharEvent::Logout);
         if (parties) {
             if (moving) parties->MovedAway(player.entity);
             else parties->LeaveWorld(player.entity); // out of its party while the members still know it
@@ -12383,6 +12464,11 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
         state->popDrawFixed = state->config.popDraw;
         state->trades = std::make_unique<Trades>(*state);
         state->alchemy = std::make_unique<Alchemy>(*state);
+        if (state->config.gameLog) {
+            const std::filesystem::path spill =
+                state->config.gameLogSpill.empty() ? std::filesystem::path(std::format("gamelog-{}.spill", state->config.id)) : state->config.gameLogSpill;
+            state->gameLog = std::make_unique<GameLog>(LogSchemaOf(state->config.shardSchema), spill);
+        }
         if (state->config.drops) {
             for (int degree = 1; degree <= 12; ++degree) {
                 game::alchemy::StoneBucket bucket{state->config.drops->Consumables("magicstone", degree - 1),
@@ -12827,6 +12913,7 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
         if (!s.saving && Clock::now() >= s.nextSave) s.SaveAll();
         if (s.config.statsInterval.count() > 0 && Clock::now() >= s.nextStats) s.LogStats();
         if (s.config.sampleInterval.count() > 0 && Clock::now() >= s.nextSample) s.SampleLoad();
+        s.FlushLog();
     }
 }
 
@@ -12840,6 +12927,7 @@ void GameServer::Stop() {
     if (s.world) s.SaveAll();  // every place, before the sessions go
     s.peers->CloseAll(); // queues each session's release (and each player's place)
     s.listener->Close();
+    s.FlushLog(true); // the logs queued so far
     // The other servers hear of it at once, not when its silence has gone on long enough.
     const std::string goodbye = s.parties ? s.parties->GoodbyeText() : std::string();
     const std::string communityGoodbye = s.community ? s.community->GoodbyeText() : std::string();

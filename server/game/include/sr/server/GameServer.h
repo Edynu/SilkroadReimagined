@@ -59,6 +59,10 @@ struct GameServerConfig {
     // This shard's schema: its characters, items, storage; the accounts are
     // sro_vt_account's. Another shard on the same database names its own (sro_vt_shard2, ...).
     std::string shardSchema = "sro_vt_shard";
+    // The game's logs (GameLog.h) in the shard's log schema: written (false: none), and the file their rows wait in while
+    // the database cannot take them (empty: gamelog-<id>.spill in the working folder).
+    bool gameLog = true;
+    std::filesystem::path gameLogSpill;
     // Which game server runs which part of the world (ShardLayout.h; none: this one runs it all).
     std::shared_ptr<const ShardLayout> layout;
     // How long a player gone to another game server may take to arrive, before it counts as logged out.
