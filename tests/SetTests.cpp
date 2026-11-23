@@ -481,10 +481,16 @@ struct SetServer {
         }
         return out;
     }
+    // The last move's bag place it landed on (a worn item taken off goes to the first free one).
+    std::uint8_t landed = 0;
     bool Move(Player& p, std::uint8_t from, std::uint8_t to) {
         p.client->Send(proto::ItemMove{from, to, 0});
         proto::ItemMoved moved;
-        return p.client->Expect(moved) && moved.status == proto::ItemStatus::Ok;
+        if (!p.client->Expect(moved) || moved.status != proto::ItemStatus::Ok) return false;
+        landed = 0;
+        for (const proto::ItemRecord& i : moved.changed)
+            if (i.slot >= game::slot::kWorn) landed = i.slot;
+        return true;
     }
     std::map<std::string, float> Sheet(Player& p) {
         p.client->Send(proto::DevSheet{});
@@ -573,7 +579,7 @@ TEST_CASE("Game server: a set's pieces worn raise their plus and its numbers") {
         // The helm off and on again: 3, then 4 pieces: the group changes twice, the resists back.
         REQUIRE(s.Move(p, game::slot::kHead, kFree + 1));
         CHECK(number(s.Sheet(p), "resistBurn") == 0);
-        REQUIRE(s.Move(p, kFree + 1, game::slot::kHead));
+        REQUIRE(s.Move(p, s.landed, game::slot::kHead)); // (taken off into the first free place)
         CHECK(number(s.Sheet(p), "resistBurn") == 10);
     }
 }

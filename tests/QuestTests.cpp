@@ -562,7 +562,7 @@ TEST_CASE("Quests: the premium's purification seeds: offered with the premium, d
     CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
 
     // Every monster drops a seed at 5 % (the made-up host knows no monster's level: the scale is 1).
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
     for (int k = 0; k < 4000; ++k) quests.Killed(9000, "MOB_ANYTHING", 0, me);
     const auto seeds = std::count(host.dropped.begin(), host.dropped.end(), std::string("ITEM_QSP_ALL_POTION_3_01"));
     CHECK(seeds > 120);
@@ -656,7 +656,7 @@ TEST_CASE("Quests: offered, counted, handed in and rewarded by their rules (a ma
     CHECK(quests.Record(1, 20001)->status == proto::QuestStatus::Achieving);
 
     // Kills: the class counts (a champion not), another's monster not.
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
     quests.Killed(9000, "MOB_WOLF", 1, me); // a champion: no kill counted, its fang dropped (a drop has no class)
     CHECK(quests.Record(1, 20001)->progress[0] == 0);
     CHECK(host.dropped.size() == 1);
@@ -1221,7 +1221,7 @@ TEST_CASE("Quests: a goal paid by the piece drops past its count and pays each p
     quests.Enter(1, {});
     Ask(quests, proto::QuestAccept{kPriest, 20130});
     REQUIRE(quests.Record(1, 20130) != nullptr);
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
     quests.Killed(9000, "MOB_STONE", 0, me);
     host.bag["ITEM_T_PIECE"] = 1;
     quests.BagChanged(1);
@@ -1542,4 +1542,215 @@ TEST_CASE("Game server: a quest's item used from the bag: taken by its quest's r
     CHECK(answer(kStray) == 2);
     proto::ItemMoved none;
     CHECK_FALSE(p.c->Expect(none, 200ms));
+}
+
+namespace {
+// RulesHost with what a quest says outside a talk (QuestSay) and the players of a party: their places, the party's id.
+struct PartyHost : RulesHost {
+    std::vector<std::string> said;
+    void QuestSay(std::uint32_t, const std::string& key) override { said.push_back(key); }
+    std::map<std::uint32_t, proto::WorldPosition> at; // the party's members here (1 among them)
+    std::uint32_t partyId = 0;                         // 0: no party sharing both
+    std::optional<Player> QuestPlayer(std::uint32_t entity) override {
+        if (entity != 1 && !at.contains(entity)) return std::nullopt;
+        Player p = who;
+        p.peer = entity;
+        p.character = 70 + entity;
+        return p;
+    }
+    KillParty QuestKillParty(std::uint32_t) override {
+        KillParty k;
+        k.id = partyId;
+        if (partyId != 0)
+            for (const auto& [entity, place] : at) k.members.push_back({entity, place});
+        return k;
+    }
+};
+server::QuestRecord UnderWayRecord(std::uint32_t quest) {
+    server::QuestRecord r;
+    r.quest = quest;
+    r.status = proto::QuestStatus::Achieving;
+    return r;
+}
+} // namespace
+
+TEST_CASE("Quests: a daily quest again on a new day; a limit's words; 33 at once; the pay and the give-up take every piece") {
+    PartyHost host;
+    host.npcs = {{kGiver, "NPC_GIVER"}, {kFinisher, "NPC_FINISHER"}};
+    host.near = {kGiver, kFinisher};
+    server::Quests quests(host, {});
+    std::vector<game::QuestDef> defs;
+    defs.push_back(Parse("quest QNO_T_DAILY\nid 20010\nstart real-clock\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 1 MOB_WOLF\n"));
+    defs.push_back(Parse("quest QNO_T_QUOTA\nid 20011\nstart quota 1\nrepeat 0\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 1 MOB_WOLF\n"));
+    defs.push_back(Parse("quest QNO_T_GATHER\nid 20012\nrepeat 0\ngiver NPC_GIVER\nfinish NPC_GIVER\nstart-item ITEM_T_LETTER 1\n"
+                         "goal drop 2 ITEM_T_FANG from MOB_WOLF 100%\ngoal drop 2 ITEM_T_CLAW from MOB_WOLF 100%\n"
+                         "goal deliver NPC_FINISHER ITEM_T_LETTER 1 get ITEM_T_REPLY 1\nreward item ITEM_T_POTION 1\n"));
+    defs.push_back(Parse("quest QNO_T_HWAN\nid 20014\nstart hwan 3\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 1 MOB_WOLF\n"));
+    for (int i = 1; i <= 34; ++i) defs.push_back(Parse(std::format("quest QNO_T_MANY_{}\nid {}\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 9 MOB_BAT\n", i, i)));
+    quests.Load(defs);
+    // Finished three days ago at its limit: its count back to 0, and offered (the original's reset by the calendar day).
+    server::QuestRecord daily;
+    daily.quest = 20010;
+    daily.status = proto::QuestStatus::Done;
+    daily.times = 1;
+    daily.ended = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() - 3 * 86400;
+    quests.Enter(1, {daily});
+    CHECK(quests.Record(1, 20010)->times == 0);
+    Ask(quests, proto::QuestTalk{kGiver, 20010});
+    CHECK(host.Last<proto::QuestSays>().moment == "offer");
+    Ask(quests, proto::QuestAccept{kGiver, 20010});
+    quests.Killed(9000, "MOB_WOLF", 0, 1u);
+    Ask(quests, proto::QuestHandIn{kGiver, 20010, {}});
+    CHECK(quests.Record(1, 20010)->times == 1);
+    // Done today: still listed at its giver, its talk the count-limit words; not taken.
+    quests.TellNpc(1, kGiver);
+    const auto rows = host.Last<proto::NpcQuests>().rows;
+    CHECK(std::any_of(rows.begin(), rows.end(), [](const proto::NpcQuests::Row& r) { return r.quest == 20010 && r.kind == proto::NpcQuestKind::Offer; }));
+    Ask(quests, proto::QuestTalk{kGiver, 20010});
+    CHECK(host.Last<proto::QuestSays>().moment == "count-limit");
+    Ask(quests, proto::QuestAccept{kGiver, 20010});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::NotOffered);
+
+    // The window's quota spent: count-limit; a give-up gives its start back.
+    Ask(quests, proto::QuestAccept{kGiver, 20011});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    quests.Killed(9001, "MOB_WOLF", 0, 1u);
+    Ask(quests, proto::QuestHandIn{kGiver, 20011, {}});
+    Ask(quests, proto::QuestTalk{kGiver, 20011});
+    CHECK(host.Last<proto::QuestSays>().moment == "count-limit");
+    host.hour = 22; // the night's window: a new quota
+    Ask(quests, proto::QuestAccept{kGiver, 20011});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    Ask(quests, proto::QuestAbandon{20011});
+    Ask(quests, proto::QuestAccept{kGiver, 20011});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok); // its start given back
+    Ask(quests, proto::QuestAbandon{20011});
+    host.hour = 12;
+
+    // No hwan level asked (the original's offer test reads none).
+    Ask(quests, proto::QuestAccept{kGiver, 20014});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    Ask(quests, proto::QuestAbandon{20014});
+
+    // One gathering goal a kill (the first the monster feeds); a quest item refused to the ground's pickup once every
+    // gathering goal for it holds its count.
+    Ask(quests, proto::QuestAccept{kGiver, 20012});
+    host.dropped.clear();
+    quests.Killed(9002, "MOB_WOLF", 0, 1u);
+    CHECK(host.dropped == std::vector<std::string>{"ITEM_T_FANG"});
+    host.bag["ITEM_T_FANG"] = 1;
+    CHECK_FALSE(quests.PickUpRefused(1, "ITEM_T_FANG"));
+    host.bag["ITEM_T_FANG"] = 5;
+    host.bag["ITEM_T_CLAW"] = 2;
+    quests.BagChanged(1);
+    CHECK(quests.PickUpRefused(1, "ITEM_T_FANG"));
+    CHECK_FALSE(quests.PickUpRefused(1, "ITEM_T_OTHER"));
+    // The delivery's handed-back item, then the reward's room asked at the finisher's talk: none, the bag-full words.
+    Ask(quests, proto::QuestHandIn{kFinisher, 20012, {}});
+    CHECK(host.bag["ITEM_T_REPLY"] == 1);
+    host.bag["ITEM_T_REPLY"] = 2;
+    host.noRoom = {"ITEM_T_POTION"};
+    Ask(quests, proto::QuestTalk{kGiver, 20012});
+    CHECK(host.Last<proto::QuestSays>().moment == "bag-full");
+    host.noRoom.clear();
+    Ask(quests, proto::QuestTalk{kGiver, 20012});
+    CHECK(host.Last<proto::QuestSays>().moment == "done");
+    // The pay takes every held piece of the gathered and handed-back items.
+    Ask(quests, proto::QuestHandIn{kGiver, 20012, {}});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    CHECK(host.bag["ITEM_T_FANG"] == 0);
+    CHECK(host.bag["ITEM_T_CLAW"] == 0);
+    CHECK(host.bag["ITEM_T_REPLY"] == 0);
+    CHECK(host.bag["ITEM_T_POTION"] == 1);
+    // Given up after the delivery: its handed-back item goes too.
+    Ask(quests, proto::QuestAccept{kGiver, 20012});
+    Ask(quests, proto::QuestHandIn{kFinisher, 20012, {}});
+    CHECK(host.bag["ITEM_T_REPLY"] == 1);
+    Ask(quests, proto::QuestAbandon{20012});
+    CHECK(host.bag["ITEM_T_REPLY"] == 0);
+
+    // 33 of the original's quests under way at once; ours (from 10001) do not count.
+    Ask(quests, proto::QuestAccept{kGiver, 20012});
+    for (std::uint32_t id = 1; id <= 33; ++id) {
+        Ask(quests, proto::QuestAccept{kGiver, id});
+        CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    }
+    Ask(quests, proto::QuestAccept{kGiver, 34});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::TooMany);
+}
+
+TEST_CASE("Quests: a time limit runs only while its holder is in the world; its words at the end") {
+    PartyHost host;
+    host.npcs = {{kGiver, "NPC_GIVER"}};
+    host.near = {kGiver};
+    server::Quests quests(host, {});
+    quests.Load({Parse("quest QNO_T_TIMER\nid 20013\ntimer 30\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 1 MOB_WOLF\n"
+                       "talk NPC_GIVER time-out @SN_T_TIMEOUT\n")});
+    quests.Enter(1, {});
+    Ask(quests, proto::QuestAccept{kGiver, 20013});
+    CHECK(host.Last<proto::QuestChanged>().state.secondsLeft == 30);
+    // Out of the world: its seconds left kept in the record; an hour offline does not count.
+    quests.Leave(1);
+    server::QuestRecord kept = host.saved.back();
+    CHECK(kept.progress[server::Quests::kTimerSlot] >= 29);
+    kept.started -= 3600;
+    quests.Enter(1, {kept});
+    const auto now = server::Quests::Clock::now();
+    quests.Tick(now + std::chrono::seconds(20));
+    REQUIRE(quests.Record(1, 20013));
+    CHECK(quests.Record(1, 20013)->status == proto::QuestStatus::Achieving);
+    CHECK(host.saved.back().progress[server::Quests::kTimerSlot] == 10); // kept as it runs
+    quests.Tick(now + std::chrono::seconds(31));
+    CHECK(quests.Record(1, 20013)->status == proto::QuestStatus::Abandoned);
+    CHECK(host.Last<proto::QuestGone>().why == proto::QuestEnd::TimeOut);
+    CHECK(host.said == std::vector<std::string>{"SN_T_TIMEOUT"});
+}
+
+TEST_CASE("Quests: a kill counts for its killer; in a party sharing both it is shared by each quest's DivideType") {
+    PartyHost host;
+    host.npcs = {{kGiver, "NPC_GIVER"}};
+    server::Quests quests(host, {});
+    quests.Load({Parse("quest QNO_P_TURN\nid 20020\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 9 MOB_WOLF\n"),
+                 Parse("quest QNO_P_ALL\nid 20021\ndivide 5\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 9 MOB_WOLF\n"),
+                 Parse("quest QNO_P_KILLER\nid 20022\ndivide 2\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 9 MOB_WOLF\n"),
+                 Parse("quest QNO_P_PARTY\nid 20023\ndivide 1\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 9 MOB_WOLF\n")});
+    // Members 1 and 2 side by side, 3 far above (1200 in 3D), 4 near but holding none.
+    host.at[1] = {25000, 100.0f, 0.0f, 100.0f, 0};
+    host.at[2] = {25000, 150.0f, 0.0f, 100.0f, 0};
+    host.at[3] = {25000, 100.0f, 1200.0f, 100.0f, 0};
+    host.at[4] = {25000, 120.0f, 0.0f, 100.0f, 0};
+    const std::vector<server::QuestRecord> all = {UnderWayRecord(20020), UnderWayRecord(20021), UnderWayRecord(20022), UnderWayRecord(20023)};
+    for (std::uint32_t e : {1u, 2u, 3u}) quests.Enter(e, all);
+    quests.Enter(4, {});
+    const auto count = [&](std::uint32_t e, std::uint32_t quest) { return quests.Record(e, quest)->progress[0]; };
+
+    // No party: the killer's own, and a party quest (DivideType 1) not at all.
+    quests.Killed(9000, "MOB_WOLF", 0, 2u);
+    CHECK(count(2, 20020) == 1);
+    CHECK(count(2, 20021) == 1);
+    CHECK(count(2, 20022) == 1);
+    CHECK(count(2, 20023) == 0);
+    CHECK(count(1, 20020) == 0);
+
+    // A party sharing both: DivideType 0 one holder near at a time in turn, 5 and 1 every holder near, 2 the killer.
+    host.partyId = 7;
+    for (int k = 0; k < 4; ++k) quests.Killed(9001 + k, "MOB_WOLF", 0, 1u);
+    CHECK(count(1, 20020) == 2);
+    CHECK(count(2, 20020) == 3); // 1 before, then 2 of the 4 by turn
+    CHECK(count(3, 20020) == 0); // too far
+    CHECK(count(1, 20021) == 4);
+    CHECK(count(2, 20021) == 5);
+    CHECK(count(3, 20021) == 0);
+    CHECK(count(1, 20022) == 4);
+    CHECK(count(2, 20022) == 1);
+    CHECK(count(1, 20023) == 4);
+    CHECK(count(2, 20023) == 4);
+    CHECK(count(3, 20023) == 0);
+
+    // A player's kill goes the same way (the original's event 0x35).
+    quests.Load({Parse("quest QNO_P_PK\nid 20030\ndivide 5\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill-player 5 level 1\n")});
+    for (std::uint32_t e : {1u, 2u}) quests.Enter(e, {UnderWayRecord(20030)});
+    quests.PlayerKilled(2, 50, 25000, "");
+    CHECK(count(1, 20030) == 1);
+    CHECK(count(2, 20030) == 1);
 }

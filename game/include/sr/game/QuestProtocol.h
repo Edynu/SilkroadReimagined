@@ -19,7 +19,10 @@ namespace sr::game::proto {
 inline bool IsQuestMessage(MessageId id) { return id >= 0x1260 && id < 0x1290; }
 
 constexpr std::size_t kQuestGoals = 8;        // ours: the goals a quest may have (the original's quests have up to 4)
-constexpr std::size_t kQuestsAtOnce = 20;     // ours: quests a character holds at once (the original's limit not traced)
+// Quests a character holds under way at once (the original's 33: its Accept row becomes SN_TALK_COMMON_MAXQUEST), counting
+// only the quests numbered below kCountedQuestIds (the original's; its events' and our own from 10001 do not count).
+constexpr std::size_t kQuestsAtOnce = 33;
+constexpr std::uint32_t kCountedQuestIds = 10001;
 constexpr float kQuestReach = 100.0f;         // ours: from how far an NPC is talked to (the gates' and shops' reach)
 constexpr std::uint32_t kOurQuestIds = 20000; // a server's own quests are numbered from here
 

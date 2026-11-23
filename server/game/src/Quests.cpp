@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 #include "sr/core/Log.h"
 #include "sr/game/QuestItems.h"
@@ -56,6 +57,35 @@ bool ClassFits(const QuestGoal& g, std::uint8_t rarity) {
 
 bool Night(int hour) { return hour < 4 || hour >= 20; }
 
+// The server's local calendar day of a Unix time (month and day: the original compares only those two).
+std::pair<int, int> LocalMonthDay(std::int64_t unix) {
+    const std::time_t t = std::time_t(unix);
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    return {local.tm_mon, local.tm_mday};
+}
+
+// A 3D distance within `range` in one world (the quest kill's share: 1000 from the killer, the original's).
+bool Near(const proto::WorldPosition& a, const proto::WorldPosition& b, double range) {
+    if (a.layer != b.layer) return false;
+    double dx = 0, dz = 0;
+    if ((a.region & 0x8000) != 0 || (b.region & 0x8000) != 0) {
+        if (a.region != b.region) return false;
+        dx = double(a.x) - double(b.x);
+        dz = double(a.z) - double(b.z);
+    } else {
+        const proto::FlatPosition fa = proto::ToFlat(a), fb = proto::ToFlat(b);
+        dx = fa.x - fb.x;
+        dz = fa.z - fb.z;
+    }
+    const double dy = double(a.y) - double(b.y);
+    return dx * dx + dy * dy + dz * dz <= range * range;
+}
+
 } // namespace
 
 std::pair<std::int64_t, std::int64_t> PackQuestProgress(const std::array<std::uint16_t, proto::kQuestGoals>& progress) {
@@ -94,9 +124,14 @@ Quests::Loaded Quests::Load(std::vector<QuestDef> quests) {
         game::AddOriginalUseRules(q);
         // The record's places of the original's bytes (a catch's words 2 and 5, the supply's day 6) above the goals' counts.
         const bool catches = std::any_of(q.onUse.begin(), q.onUse.end(), [](const QuestDef::UseRule& u) { return u.capture.has_value(); });
-        if ((catches && q.goals.size() > kCatchMinutesSlot) || (q.resupplyDaily && q.goals.size() > kSupplyDaySlot)) {
-            core::LogWarning("quests: {} has {} goals: its catch's or daily supply's record words overlap them", q.codename, q.goals.size());
+        if ((catches && q.goals.size() > kCatchMinutesSlot) || (q.resupplyDaily && q.goals.size() > kSupplyDaySlot) ||
+            (q.timerSeconds != 0 && q.goals.size() > kTimerSlot)) {
+            core::LogWarning("quests: {} has {} goals: its catch's, daily supply's or timer's record words overlap them", q.codename, q.goals.size());
         }
+        // DivideType 1 is a party quest (the original's test on the offer and on every kill: a party sharing experience and
+        // items); a party quest's kills go to every holder near (the coded party quests set DivideType 1).
+        if (q.divide == 1) q.party = true;
+        if (q.party && q.divide == 0) q.divide = 1;
         std::string why;
         const bool play = Playable(q, why);
         if (!play) ++loaded.waiting;
@@ -174,8 +209,12 @@ proto::QuestState Quests::StateOf(std::uint32_t entity, const QuestDef& q, const
     s.quest = q.id;
     s.status = r.status;
     s.progress.assign(r.progress.begin(), r.progress.begin() + std::ptrdiff_t(std::min(q.goals.size(), r.progress.size())));
-    if (q.timerSeconds != 0 && r.started != 0) {
-        const std::int64_t left = r.started + std::int64_t(q.timerSeconds) - UnixNow();
+    if (q.timerSeconds != 0 && UnderWay(r)) {
+        // The holder's clock: its end while in the world, else the seconds the record keeps.
+        std::int64_t left = r.progress[kTimerSlot];
+        if (const PlayerQuests* p = Of(entity); p != nullptr)
+            if (const auto d = p->deadlines.find(q.id); d != p->deadlines.end())
+                left = std::chrono::ceil<std::chrono::seconds>(d->second - Clock::now()).count();
         s.secondsLeft = std::uint32_t(std::max<std::int64_t>(1, left));
     }
     // A trial's or an instance's time on the client's gauge (the original's 0x30DA).
@@ -193,6 +232,7 @@ void Quests::Changed(std::uint32_t entity, PlayerQuests& p, const QuestDef& q, Q
 void Quests::TellMarks(std::uint32_t entity, PlayerQuests& p) {
     const auto who = host_.QuestPlayer(entity);
     if (!who) return;
+    ResetDaily(p);
     std::map<std::string, proto::QuestMark> marks;
     // A hand-in outranks an offer, an offer a quest under way (ours: the order of 1.188's NPC table is not read).
     const auto rank = [](proto::QuestMark m) { return m == proto::QuestMark::End ? 3 : m == proto::QuestMark::Start ? 2 : 1; };
@@ -309,11 +349,30 @@ bool Quests::Started(const QuestDef& q) const {
     return it->second.night != Night(host_.QuestHour()) || it->second.left > 0;
 }
 
-bool Quests::OfferedTo(const QuestHost::Player& who, const PlayerQuests& p, const QuestDef& q) const {
+void Quests::ResetDaily(PlayerQuests& p) {
+    const std::int64_t now = UnixNow();
+    std::optional<std::pair<int, int>> today;
+    for (auto& [id, r] : p.records) {
+        if (r.status != proto::QuestStatus::Done || r.ended == 0) continue;
+        const QuestDef* q = Find(id);
+        if (q == nullptr || !q->realClock || q->repeat == 0 || r.times < q->repeat) continue;
+        if (!today) today = LocalMonthDay(now);
+        if (LocalMonthDay(r.ended) == *today) continue;
+        r.times = 0;
+        host_.QuestSave(p.character, r);
+        core::LogInfo("quests: {} offered again (a new day)", q->codename);
+    }
+}
+
+bool Quests::Limited(const QuestHost::Player& who, const PlayerQuests& p, const QuestDef& q) const {
+    return !OfferedTo(who, p, q) && OfferedTo(who, p, q, false);
+}
+
+bool Quests::OfferedTo(const QuestHost::Player& who, const PlayerQuests& p, const QuestDef& q, bool limits) const {
     if (q.givers.empty() && !q.given) return false; // not playable (yet)
     if (who.level < q.minLevel || (q.maxLevel != 0 && who.level > q.maxLevel)) return false;
     if (!q.race.empty() && q.race != who.race) return false;
-    if (who.hwan < int(q.hwan)) return false;
+    // (A script's LuaSetHwanLevel is never read by the original's offer test: no hwan level is asked.)
     // The job state of the suit worn, one of these (the start's flag 0x1000: the state equal).
     if (!q.jobs.empty() && std::find(q.jobs.begin(), q.jobs.end(), who.job) == q.jobs.end()) return false;
     const auto finished = [&](const std::string& code) {
@@ -365,9 +424,10 @@ bool Quests::OfferedTo(const QuestHost::Player& who, const PlayerQuests& p, cons
         if (UnderWay(it->second)) return false;
         // Given up, a quest that locks is not offered again (refuses status 6).
         if (it->second.status == proto::QuestStatus::Abandoned && q.giveUpLocks) return false;
-        if (q.repeat != 0 && it->second.times >= q.repeat) return false;
+        // A daily quest's count is left to its talk (`limits` false); the others refuse at their limit.
+        if (q.repeat != 0 && it->second.times >= q.repeat && (limits || !q.realClock)) return false;
     }
-    return Started(q);
+    return !limits || Started(q);
 }
 
 bool Quests::Offered(std::uint32_t entity, const QuestDef& q) const {
@@ -424,11 +484,14 @@ void Quests::Enter(std::uint32_t entity, std::vector<QuestRecord> records) {
     p.level = who->level;
     for (QuestRecord& r : records) p.records[r.quest] = r;
     proto::QuestList list;
+    const Clock::time_point now = Clock::now();
     for (auto& [id, r] : p.records) {
         const QuestDef* q = Find(id);
         if (q == nullptr) continue;
         if (r.times > 0) list.finished.push_back({id, r.times});
         if (!UnderWay(r)) continue;
+        // A time limit goes on from the seconds the record kept (none kept: out of time at the first tick).
+        if (q->timerSeconds != 0) p.deadlines[id] = now + std::chrono::seconds(r.progress[kTimerSlot]);
         if (Evaluate(entity, *q, r)) host_.QuestSave(p.character, r);
         Define(entity, p, *q);
         list.active.push_back(StateOf(entity, *q, r));
@@ -441,8 +504,17 @@ void Quests::Enter(std::uint32_t entity, std::vector<QuestRecord> records) {
 void Quests::Leave(std::uint32_t entity) {
     // A caught COS goes with its owner; its record keeps its minutes, and the world entry on this or the other game server
     // brings it back (ResumeCatches).
-    if (const PlayerQuests* p = Of(entity)) {
+    if (PlayerQuests* p = Of(entity)) {
         for (const auto& [quest, c] : p->catches) host_.QuestCosRemove(c.cos);
+        // A time limit stops with its holder out of the world: its seconds left kept for the next entry.
+        const Clock::time_point now = Clock::now();
+        for (const auto& [quest, until] : p->deadlines) {
+            KeepTimer(entity, *p, quest, now, false);
+            if (const auto r = p->records.find(quest); r != p->records.end() && UnderWay(r->second)) {
+                r->second.progress[kTimerSlot] = std::max<std::uint16_t>(r->second.progress[kTimerSlot], 1);
+                host_.QuestSave(p->character, r->second);
+            }
+        }
     }
     players_.erase(entity);
 }
@@ -482,9 +554,11 @@ void Quests::TellNpc(std::uint32_t entity, std::uint32_t npc) {
     const auto who = host_.QuestPlayer(entity);
     const std::string code = host_.QuestNpcNear(entity, npc);
     if (p == nullptr || !who || code.empty()) return;
+    ResetDaily(*p);
     proto::NpcQuests rows;
     rows.npc = npc;
-    // A party quest is listed without the party too: its row says the `not-party` talk (Talk).
+    // A party quest is listed without the party too: its row says the `not-party` talk (Talk). A daily quest at its count
+    // and a quest whose quota is spent are listed: their talk says `count-limit`.
     QuestHost::Player inParty = *who;
     inParty.sharedParty = true;
     for (const QuestDef& q : quests_) {
@@ -493,7 +567,7 @@ void Quests::TellNpc(std::uint32_t entity, std::uint32_t npc) {
             Evaluate(entity, q, it->second);
             const bool handIn = (Finishes(q, code) && it->second.status == proto::QuestStatus::Achieved) || DueAt(entity, q, it->second, code);
             rows.rows.push_back({q.id, handIn ? proto::NpcQuestKind::HandIn : proto::NpcQuestKind::UnderWay});
-        } else if (Contains(q.givers, code) && OfferedTo(q.party ? inParty : *who, *p, q)) {
+        } else if (Contains(q.givers, code) && OfferedTo(q.party ? inParty : *who, *p, q, false)) {
             rows.rows.push_back({q.id, proto::NpcQuestKind::Offer});
         } else if (q.resupplyAfterFinish && Contains(q.givers, code) && it != p->records.end() && it->second.times > 0 && !UnderWay(it->second)) {
             rows.rows.push_back({q.id, proto::NpcQuestKind::UnderWay}); // its daily supply (QuestDef::resupplyAfterFinish)
@@ -519,6 +593,7 @@ void Quests::Talk(std::uint32_t entity, const proto::QuestTalk& t) {
     const std::string npc = host_.QuestNpcNear(entity, t.npc);
     if (npc.empty()) return Answer(entity, t.quest, proto::QuestCode::TooFar);
     if (q == nullptr) return Answer(entity, t.quest, proto::QuestCode::NotOffered);
+    ResetDaily(*p);
     const auto it = p->records.find(q->id);
     if (it != p->records.end() && Involves(*q, it->second, npc)) {
         QuestRecord& r = it->second;
@@ -532,6 +607,9 @@ void Quests::Talk(std::uint32_t entity, const proto::QuestTalk& t) {
         }
         if (Finishes(*q, npc) && r.status == proto::QuestStatus::Achieved) {
             if (!NeedsHeld(entity, *who, *q)) return Say(entity, t.npc, q->id, "missing", proto::QuestChoice::None);
+            // No room for the reward once the pay's items are taken: the bag-full words in place of `done` (the original's
+            // dry run of the pay at the talk).
+            if (!RewardFits(entity, *q)) return Say(entity, t.npc, q->id, "bag-full", proto::QuestChoice::None);
             return Say(entity, t.npc, q->id, "done", proto::QuestChoice::HandIn);
         }
         // Its tools given again at a giver when none is left (QuestDef::resupply).
@@ -578,10 +656,16 @@ void Quests::Talk(std::uint32_t entity, const proto::QuestTalk& t) {
     if (q->party && !who->sharedParty && Contains(q->givers, npc)) {
         QuestHost::Player inParty = *who;
         inParty.sharedParty = true;
-        if (OfferedTo(inParty, *p, *q)) {
+        if (OfferedTo(inParty, *p, *q, false)) {
             Define(entity, *p, *q);
             return Say(entity, t.npc, q->id, "not-party", proto::QuestChoice::None);
         }
+    }
+    // A daily quest at its count, or the window's quota spent: the count-limit words (the original's
+    // BASIC_MENUSTRING_COUNT_LIMIT).
+    if (Contains(q->givers, npc) && Limited(*who, *p, *q)) {
+        Define(entity, *p, *q);
+        return Say(entity, t.npc, q->id, "count-limit", proto::QuestChoice::None);
     }
     if (it != p->records.end() && q->repeat != 0 && it->second.times >= q->repeat) return Say(entity, t.npc, q->id, "count-limit", proto::QuestChoice::None);
     Answer(entity, t.quest, proto::QuestCode::NotOffered);
@@ -595,6 +679,11 @@ void Quests::Start(std::uint32_t entity, PlayerQuests& p, const QuestDef& q, con
     r.started = UnixNow();
     r.ended = 0;
     Evaluate(entity, q, r);
+    // A time limit: its seconds kept in the record, run on the holder's clock (Tick).
+    if (q.timerSeconds != 0) {
+        r.progress[kTimerSlot] = std::uint16_t(std::min<std::uint32_t>(q.timerSeconds, 0xFFFF));
+        p.deadlines[q.id] = Clock::now() + std::chrono::seconds(r.progress[kTimerSlot]);
+    }
     if (q.quota != 0) {
         Quota& quota = quotas_[q.id];
         const bool night = Night(host_.QuestHour());
@@ -614,8 +703,11 @@ void Quests::Accept(std::uint32_t entity, const proto::QuestAccept& a) {
     if (!who->free) return Answer(entity, a.quest, proto::QuestCode::Busy);
     const std::string npc = host_.QuestNpcNear(entity, a.npc);
     if (npc.empty()) return Answer(entity, a.quest, proto::QuestCode::TooFar);
+    ResetDaily(*p);
     if (q == nullptr || !Contains(q->givers, npc) || !OfferedTo(*who, *p, *q)) return Answer(entity, a.quest, proto::QuestCode::NotOffered);
-    const std::size_t underWay = std::count_if(p->records.begin(), p->records.end(), [](const auto& kv) { return UnderWay(kv.second); });
+    const std::size_t underWay = std::count_if(p->records.begin(), p->records.end(), [](const auto& kv) {
+        return kv.first < proto::kCountedQuestIds && UnderWay(kv.second);
+    });
     if (underWay >= proto::kQuestsAtOnce) return Answer(entity, a.quest, proto::QuestCode::TooMany);
     // A quest without goals is a story told at its giver (the original's QNO_WC_FERRY4_1 conversation): no room for
     // its reward refuses it at once; else it starts, its pages are told and it is paid in the same talk.
@@ -725,6 +817,37 @@ bool Quests::NeedsHeld(std::uint32_t entity, const QuestHost::Player& who, const
     return std::all_of(q.needItems.begin(), q.needItems.end(), [&](const QuestGoal::Items& i) { return host_.QuestItemCount(entity, i.item) >= i.count; });
 }
 
+std::vector<QuestGoal::Items> Quests::PayItems(std::uint32_t entity, const QuestDef& q) const {
+    std::vector<QuestGoal::Items> out;
+    // Every held piece of an item (at least `least`), once.
+    const auto all = [&](const std::string& item, std::uint32_t least) {
+        const std::uint32_t held = std::max(least, host_.QuestItemCount(entity, item));
+        const auto same = std::find_if(out.begin(), out.end(), [&](const QuestGoal::Items& i) { return i.item == item; });
+        if (same != out.end()) same->count = std::max(same->count, held);
+        else if (held > 0) out.push_back({item, held});
+    };
+    // A counting gathering's item, every piece held (the original's removal loop: counted, a stack removed, again while any
+    // is left); a helper's (hidden) only when it pays by the piece.
+    for (const QuestGoal& g : q.goals)
+        if (g.kind == QuestGoalKind::Drop && (!g.hidden || g.apiece)) all(g.item, g.count);
+    // What a delivery's NPC handed back (QuestGoal::received), every piece held.
+    for (const QuestGoal& g : q.goals)
+        if (g.kind == QuestGoalKind::Deliver)
+            for (const QuestGoal::Items& i : g.received) all(i.item, 0);
+    // Every one of its leftover tools (QuestDef::payTake; a capture's traps and caught item).
+    for (const std::string& item : q.payTake) all(item, 0);
+    // The items needed besides the goals, their counts.
+    out.insert(out.end(), q.needItems.begin(), q.needItems.end());
+    return out;
+}
+
+bool Quests::RewardFits(std::uint32_t entity, const QuestDef& q) const {
+    if (q.reward.choose != 0 || q.reward.items.empty()) return true; // a choice's room is asked at its pay
+    std::vector<QuestGoal::Items> given;
+    for (const auto& i : q.reward.items) given.push_back({i.item, i.count});
+    return host_.QuestRoomAfter(entity, given, PayItems(entity, q));
+}
+
 void Quests::Pay(std::uint32_t entity, PlayerQuests& p, const QuestDef& q, QuestRecord& r, std::uint32_t npc, std::span<const std::uint8_t> choices) {
     // The reward's items: all of them, or the ones chosen.
     std::vector<QuestGoal::Items> given;
@@ -743,31 +866,15 @@ void Quests::Pay(std::uint32_t entity, PlayerQuests& p, const QuestDef& q, Quest
     }
     // The gathered items (and the needed ones) go to the NPC, then the reward into the bag (the gathered ones back if it
     // has no room), then the gold needed.
-    std::vector<QuestGoal::Items> gathered;
+    const std::vector<QuestGoal::Items> gathered = PayItems(entity, q);
     // A goal paid by the piece gives up every piece held, each paid (QuestGoal::apiece).
     std::int64_t pieceGold = 0, pieceExp = 0, pieceSp = 0;
     for (const QuestGoal& g : q.goals) {
-        if (g.kind != QuestGoalKind::Drop || g.hidden) continue; // a helper goal's items stay
-        if (!g.apiece) {
-            gathered.push_back({g.item, g.count});
-            continue;
-        }
+        if (g.kind != QuestGoalKind::Drop || !g.apiece) continue;
         const std::uint32_t held = std::max(g.count, host_.QuestItemCount(entity, g.item));
-        gathered.push_back({g.item, held});
         pieceGold += std::min<std::int64_t>(g.apieceGold * held, 10'000'000); // the original's cap, before the rate
         pieceExp += g.apieceExp * held;
         pieceSp += g.apieceSp * held;
-    }
-    // What a delivery's NPC handed back goes too (QuestGoal::received).
-    for (const QuestGoal& g : q.goals)
-        if (g.kind == QuestGoalKind::Deliver) gathered.insert(gathered.end(), g.received.begin(), g.received.end());
-    gathered.insert(gathered.end(), q.needItems.begin(), q.needItems.end());
-    // Every one of its leftover tools (QuestDef::payTake; a capture's traps and caught item).
-    for (const std::string& item : q.payTake) {
-        const std::uint32_t held = host_.QuestItemCount(entity, item);
-        const auto same = std::find_if(gathered.begin(), gathered.end(), [&](const QuestGoal::Items& i) { return i.item == item; });
-        if (same != gathered.end()) same->count = std::max(same->count, held);
-        else if (held > 0) gathered.push_back({item, held});
     }
     if (!gathered.empty() && !host_.QuestTake(entity, gathered)) {
         Evaluate(entity, q, r);
@@ -819,6 +926,7 @@ void Quests::Finished(std::uint32_t entity, PlayerQuests& p, const QuestDef& q, 
     r.times = std::uint16_t(std::min(0xFFFF, int(r.times) + 1));
     r.progress = {};
     r.ended = UnixNow();
+    p.deadlines.erase(q.id);
     // A catch still held ends with it (the pay's state 4 clears the record's words: its minutes no longer run).
     if (const auto c = p.catches.find(q.id); c != p.catches.end()) {
         host_.QuestCosRemove(c->second.cos);
@@ -901,8 +1009,12 @@ void Quests::Abandon(std::uint32_t entity, std::uint32_t quest, proto::QuestEnd 
     };
     if (!q->giveUpKeepsItems) {
         for (const auto& i : q->startItems) add(i.item);
-        for (const QuestGoal& g : q->goals)
+        for (const QuestGoal& g : q->goals) {
             if (g.kind == QuestGoalKind::Drop) add(g.item);
+            // A delivery's handed-back items too (the original's abort takes every stack of them).
+            if (g.kind == QuestGoalKind::Deliver)
+                for (const QuestGoal::Items& i : g.received) add(i.item);
+        }
     }
     // A caught COS goes with it.
     if (p->catches.contains(quest)) DropCatch(entity, *p, quest, nullptr);
@@ -911,62 +1023,144 @@ void Quests::Abandon(std::uint32_t entity, std::uint32_t quest, proto::QuestEnd 
     r.status = proto::QuestStatus::Abandoned;
     r.progress = {};
     r.ended = UnixNow();
+    p->deadlines.erase(quest);
     host_.QuestSave(p->character, r);
+    // Its start given back to the window's quota (the original's give-up: one more, up to the quota), within the same window.
+    if (q->quota != 0) {
+        if (const auto quota = quotas_.find(q->id); quota != quotas_.end() && quota->second.night == Night(host_.QuestHour()) && quota->second.left < q->quota) {
+            ++quota->second.left;
+        }
+    }
+    // Out of time: the quest's own words for it (BASIC_MENUSTRING_TIME_LIMIT_AUTO_ABORT), where it has them.
+    if (why == proto::QuestEnd::TimeOut) {
+        const auto said = std::find_if(q->talks.begin(), q->talks.end(), [](const game::QuestTalk& t) { return t.moment == "time-out"; });
+        if (said != q->talks.end()) host_.QuestSay(entity, !said->text.key.empty() ? said->text.key : said->text.literal);
+    }
     TellMarks(entity, *p);
     Send(entity, proto::QuestGone{quest, why, r.times});
     if (why == proto::QuestEnd::Abandoned) Answer(entity, quest, proto::QuestCode::Ok);
 }
 
-void Quests::Killed(std::uint32_t monster, const std::string& codename, std::uint8_t rarity, std::span<const std::uint32_t> credited) {
-    std::vector<std::pair<std::uint32_t, const QuestDef::KillRule*>> killRules;
-    for (const std::uint32_t entity : credited) {
-        PlayerQuests* p = Of(entity);
-        if (p == nullptr) continue;
+void Quests::ShareKill(std::uint32_t killer, const Credit& credit) {
+    const QuestHost::KillParty party = host_.QuestKillParty(killer);
+    if (party.id == 0) {
+        // Alone, or in a party not sharing both experience and items: the killer's own quests; a party quest counts only in
+        // such a party (QuestDef::party, the original's DivideType 1 test on every kill).
+        PlayerQuests* p = Of(killer);
+        if (p == nullptr) return;
         for (auto& [id, r] : p->records) {
-            // Its goals met (8), only a goal paid by the piece goes on dropping (it skips the state 8 test).
-            const bool met = r.status == proto::QuestStatus::Achieved;
-            if (r.status != proto::QuestStatus::Achieving && !met) continue;
             const QuestDef* q = Find(id);
-            if (q == nullptr) continue;
-            if (met && std::none_of(q->goals.begin(), q->goals.end(), [](const QuestGoal& g) { return g.apiece; })) continue;
-            bool changed = false, named = false, counted = false;
-            for (std::size_t i = 0; i < q->goals.size() && i < r.progress.size(); ++i) {
-                const QuestGoal& g = q->goals[i];
-                if (met && !g.apiece) continue;
-                if (g.kind == QuestGoalKind::Kill && Contains(g.monsters, codename)) named = true;
-                // A berserk kill goal counts only for a holder in berserk (the hwan ghosts' kill handler body mode 1).
-                const auto inBerserk = [&] {
-                    const auto who = host_.QuestPlayer(entity);
-                    return who && who->berserk;
-                };
-                if (g.kind == QuestGoalKind::Kill && r.progress[i] < Need(g) && Contains(g.monsters, codename) && ClassFits(g, rarity) &&
-                    (!g.berserk || inBerserk())) {
-                    ++r.progress[i];
-                    changed = counted = true;
-                } else if (g.kind == QuestGoalKind::Drop && (r.progress[i] < Need(g) || g.apiece)) {
-                    // (a goal paid by the piece drops on past its count)
-                    for (const QuestGoal::Source& s : g.sources) {
-                        if (s.monster != codename && s.monster != "any") continue;
-                        double percent = s.percent;
-                        if (s.byLevel) {
-                            const auto who = host_.QuestPlayer(entity);
-                            const int level = host_.QuestMonsterLevel(codename);
-                            if (who && level > 0) percent *= game::QuestLevelScale(who->level, level);
-                        }
-                        if (std::uniform_real_distribution<double>(0.0, 100.0)(random_) < percent) host_.QuestDrop(entity, monster, g.item);
-                        break;
-                    }
-                }
+            if (q != nullptr && !q->party && UnderWay(r)) credit(killer, *p, *q, r);
+        }
+        return;
+    }
+    // The members near the killer: in its world, within 1000 of it (3D; the original's vt+0x51C).
+    std::optional<proto::WorldPosition> at;
+    for (const auto& [entity, place] : party.members)
+        if (entity == killer) at = place;
+    std::vector<bool> near(party.members.size(), false);
+    for (std::size_t i = 0; i < party.members.size(); ++i) {
+        const auto& [entity, place] = party.members[i];
+        near[i] = entity == killer || (at && place && Near(*place, *at, 1000.0));
+    }
+    // The record of a near member's quest under way (none: not near, not held).
+    const auto held = [&](std::size_t i, std::uint32_t quest) -> std::pair<PlayerQuests*, QuestRecord*> {
+        if (!near[i]) return {nullptr, nullptr};
+        PlayerQuests* p = Of(party.members[i].first);
+        if (p == nullptr) return {nullptr, nullptr};
+        const auto it = p->records.find(quest);
+        if (it == p->records.end() || !UnderWay(it->second)) return {nullptr, nullptr};
+        return {p, &it->second};
+    };
+    std::set<std::uint32_t> quests;
+    for (std::size_t i = 0; i < party.members.size(); ++i) {
+        if (!near[i]) continue;
+        if (const PlayerQuests* p = Of(party.members[i].first))
+            for (const auto& [id, r] : p->records)
+                if (UnderWay(r)) quests.insert(id);
+    }
+    if (turns_.size() > 65536) turns_.clear(); // (a turn begun again is harmless)
+    for (const std::uint32_t id : quests) {
+        const QuestDef* q = Find(id);
+        if (q == nullptr) continue;
+        if (q->divide == 2 || q->divide == 3) {
+            // The killer only.
+            for (std::size_t i = 0; i < party.members.size(); ++i) {
+                if (party.members[i].first != killer) continue;
+                if (auto [p, r] = held(i, id); r != nullptr) credit(killer, *p, *q, *r);
             }
-            if (met) continue; // (only its pieces dropped)
-            // Its kill handler's rules (QuestDef::onKill): for a kill its kill goal counted (none naming it: any), kept
-            // for after the records' walk (they change the bag).
-            for (const QuestDef::KillRule& k : q->onKill)
-                if (k.monster == codename && (counted || !named)) killRules.push_back({entity, &k});
-            changed |= Evaluate(entity, *q, r);
-            if (changed) Changed(entity, *p, *q, r);
+        } else if (q->divide == 1 || q->divide == 4 || q->divide == 5) {
+            // Every holder near.
+            for (std::size_t i = 0; i < party.members.size(); ++i)
+                if (auto [p, r] = held(i, id); r != nullptr) credit(party.members[i].first, *p, *q, *r);
+        } else {
+            // One holder at a time: the first from the party's turn whose quest takes the kill; the turn moves past it.
+            std::size_t& turn = turns_[{party.id, id}];
+            for (std::size_t k = 0; k < party.members.size(); ++k) {
+                const std::size_t i = (turn + k) % party.members.size();
+                auto [p, r] = held(i, id);
+                if (r == nullptr || !credit(party.members[i].first, *p, *q, *r)) continue;
+                turn = i + 1;
+                break;
+            }
         }
     }
+}
+
+void Quests::Killed(std::uint32_t monster, const std::string& codename, std::uint8_t rarity, std::uint32_t killer) {
+    std::vector<std::pair<std::uint32_t, const QuestDef::KillRule*>> killRules;
+    // A quest's take of the kill: its kill goals count, its first gathering goal fed by the monster rolls its drop (one a
+    // kill, the original's); whether anything took it.
+    const auto credit = [&](std::uint32_t entity, PlayerQuests& p, const QuestDef& q, QuestRecord& r) {
+        // Its goals met (8), only a goal paid by the piece goes on dropping (it skips the state 8 test).
+        const bool met = r.status == proto::QuestStatus::Achieved;
+        if (r.status != proto::QuestStatus::Achieving && !met) return false;
+        if (met && std::none_of(q.goals.begin(), q.goals.end(), [](const QuestGoal& g) { return g.apiece; })) return false;
+        bool changed = false, named = false, counted = false, gathered = false;
+        for (std::size_t i = 0; i < q.goals.size() && i < r.progress.size(); ++i) {
+            const QuestGoal& g = q.goals[i];
+            if (met && !g.apiece) continue;
+            if (g.kind == QuestGoalKind::Kill && Contains(g.monsters, codename)) named = true;
+            // A berserk kill goal counts only for a holder in berserk (the hwan ghosts' kill handler body mode 1).
+            const auto inBerserk = [&] {
+                const auto who = host_.QuestPlayer(entity);
+                return who && who->berserk;
+            };
+            if (g.kind == QuestGoalKind::Kill && r.progress[i] < Need(g) && Contains(g.monsters, codename) && ClassFits(g, rarity) &&
+                (!g.berserk || inBerserk())) {
+                ++r.progress[i];
+                changed = counted = true;
+            } else if (g.kind == QuestGoalKind::Drop && !gathered && (r.progress[i] < Need(g) || g.apiece)) {
+                // (a goal paid by the piece drops on past its count)
+                for (const QuestGoal::Source& s : g.sources) {
+                    if (s.monster != codename && s.monster != "any") continue;
+                    gathered = true;
+                    double percent = s.percent;
+                    if (s.byLevel) {
+                        const auto who = host_.QuestPlayer(entity);
+                        const int level = host_.QuestMonsterLevel(codename);
+                        if (who && level > 0) percent *= game::QuestLevelScale(who->level, level);
+                    }
+                    if (std::uniform_real_distribution<double>(0.0, 100.0)(random_) < percent) host_.QuestDrop(entity, monster, g.item);
+                    break;
+                }
+            }
+        }
+        if (met) return gathered; // (only its pieces dropped)
+        // Its kill handler's rules (QuestDef::onKill): for a kill its kill goal counted (none naming it: any), kept for after
+        // the share (they change the bag).
+        bool ruled = false;
+        for (const QuestDef::KillRule& k : q.onKill) {
+            if (k.monster == codename && (counted || !named)) {
+                killRules.push_back({entity, &k});
+                ruled = true;
+            }
+        }
+        changed |= Evaluate(entity, q, r);
+        if (changed) Changed(entity, p, q, r);
+        return counted || gathered || ruled;
+    };
+    ShareKill(killer, credit);
     std::vector<std::uint32_t> bags;
     for (const auto& [entity, k] : killRules) {
         const auto held = [&](const std::string& item) { return host_.QuestItemCount(entity, item); };
@@ -986,24 +1180,40 @@ void Quests::Killed(std::uint32_t monster, const std::string& codename, std::uin
 }
 
 void Quests::PlayerKilled(std::uint32_t killer, int level, std::uint16_t region, const std::string& job) {
-    PlayerQuests* p = Of(killer);
-    if (p == nullptr) return;
-    for (auto& [id, r] : p->records) {
-        if (r.status != proto::QuestStatus::Achieving) continue;
-        const QuestDef* q = Find(id);
-        if (q == nullptr) continue;
+    // Shared as a monster's kill (the original's event 0x35 takes the same way).
+    ShareKill(killer, [&](std::uint32_t entity, PlayerQuests& p, const QuestDef& q, QuestRecord& r) {
+        if (r.status != proto::QuestStatus::Achieving) return false;
         bool changed = false;
-        for (std::size_t i = 0; i < q->goals.size() && i < r.progress.size(); ++i) {
-            const QuestGoal& g = q->goals[i];
+        for (std::size_t i = 0; i < q.goals.size() && i < r.progress.size(); ++i) {
+            const QuestGoal& g = q.goals[i];
             if (g.kind != QuestGoalKind::KillPlayer || r.progress[i] >= Need(g)) continue;
             if (level < g.minLevel || (g.region != 0 && std::int16_t(region) != g.region)) continue;
             if (!g.jobs.empty() && !Contains(g.jobs, job)) continue;
             ++r.progress[i];
             changed = true;
         }
-        changed |= Evaluate(killer, *q, r);
-        if (changed) Changed(killer, *p, *q, r);
+        const bool took = changed;
+        changed |= Evaluate(entity, q, r);
+        if (changed) Changed(entity, p, q, r);
+        return took;
+    });
+}
+
+bool Quests::PickUpRefused(std::uint32_t entity, const std::string& item) const {
+    const PlayerQuests* p = Of(entity);
+    if (p == nullptr) return false;
+    bool any = false;
+    for (const auto& [id, r] : p->records) {
+        if (!UnderWay(r)) continue;
+        const QuestDef* q = Find(id);
+        if (q == nullptr) continue;
+        for (const QuestGoal& g : q->goals) {
+            if (g.kind != QuestGoalKind::Drop || g.item != item) continue;
+            if (g.apiece || host_.QuestItemCount(entity, item) < g.count) return false; // still wanted
+            any = true;
+        }
     }
+    return any;
 }
 
 void Quests::UniqueDied(const std::string& codename) {
@@ -1048,14 +1258,32 @@ void Quests::BagChanged(std::uint32_t entity) {
     }
 }
 
+void Quests::KeepTimer(std::uint32_t entity, PlayerQuests& p, std::uint32_t quest, Clock::time_point now, bool save) {
+    (void)entity;
+    const auto d = p.deadlines.find(quest);
+    const auto r = p.records.find(quest);
+    if (d == p.deadlines.end() || r == p.records.end() || !UnderWay(r->second)) return;
+    const auto left = std::chrono::ceil<std::chrono::seconds>(d->second - now).count();
+    const std::uint16_t word = std::uint16_t(std::clamp<std::int64_t>(left, 0, 0xFFFF));
+    if (word == r->second.progress[kTimerSlot]) return;
+    r->second.progress[kTimerSlot] = word;
+    if (save) host_.QuestSave(p.character, r->second);
+}
+
 void Quests::Tick(Clock::time_point steady) {
-    const std::int64_t now = UnixNow();
+    // The time limits run on their holders' clocks: out of time, the quest is lost; the seconds left kept in the record every
+    // 10 seconds (the original's each second; and at the world's leave).
     std::vector<std::pair<std::uint32_t, std::uint32_t>> late;
-    for (const auto& [entity, p] : players_)
-        for (const auto& [id, r] : p.records) {
-            const QuestDef* q = Find(id);
-            if (q != nullptr && q->timerSeconds != 0 && UnderWay(r) && r.started + std::int64_t(q->timerSeconds) <= now) late.emplace_back(entity, id);
+    for (auto& [entity, p] : players_) {
+        for (const auto& [id, until] : p.deadlines) {
+            if (until <= steady) {
+                late.emplace_back(entity, id);
+                continue;
+            }
+            const auto left = std::chrono::ceil<std::chrono::seconds>(until - steady).count();
+            KeepTimer(entity, p, id, steady, left % 10 == 0);
         }
+    }
     for (const auto& [entity, id] : late) Abandon(entity, id, proto::QuestEnd::TimeOut);
     // The item uses' waits run out (the original's countdown, its event 0x18 each second of the player's update).
     struct Due {

@@ -605,6 +605,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x1839}); // UIIT_MSG_STRGERR_CANNOT_BE_PICKED
             return refuse(proto::ItemStatus::Failed);
         }
+        // A quest's item while every gathering goal for it holds its count (the original's event 0x0F to the quests):
+        // 0x1874 UIIT_MSG_STRGERR_CANNOT_BE_PICKED_AT_QUEST_ACHIEVE_CONDITION.
+        if (const assets::ItemRow* row = g.item.refId != 0 && config.rules->items ? config.rules->items->Find(g.item.refId) : nullptr;
+            row != nullptr && quests && quests->PickUpRefused(player.entity, row->codename)) {
+            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x1874});
+            return refuse(proto::ItemStatus::Failed);
+        }
         // Specialty goods: a trader only those his alias bought (0x1863), a thief
         // only those he did not (0x186F), a hunter none (0x1863), no job none (0x1864); not after the thieves' town
         // scroll is read (0x186E); a transport out needed (0x1861); into it, as a new item with the old creator.
@@ -2042,7 +2049,6 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 DropLoot(where->position, killer->selected, std::move(loot));
             }
         }
-        std::vector<std::uint32_t> credited;
         for (const Parties::KillShare& share : kill.shares) {
             PlayerWorld* other = PlayerByEntity(share.entity);
             if (other == nullptr || other->dead) continue;
@@ -2051,10 +2057,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (kill.shares.size() > 1 && parties && (parties->SettingsOf(other->entity) & game::kPartyExpShare) != 0) {
                 other->combat.battleUntil = Clock::now() + std::chrono::seconds(20);
             }
-            credited.push_back(share.entity);
         }
-        // The quests' kills and drops count for the players the experience went to.
-        if (quests && !credited.empty()) quests->Killed(monster, row->codename, d.rarity, credited);
+        // The quests' kill and drops: the killing hit's attacker's (a pet's owner's), shared in its party by each quest's
+        // DivideType (Quests::Killed).
+        if (const std::uint32_t killer = d.killer != 0 ? d.killer : (d.damageBy.empty() ? 0u : d.damageBy.back().first);
+            quests && killer != 0 && PlayerByEntity(killer) != nullptr) {
+            quests->Killed(monster, row->codename, d.rarity, killer);
+        }
         // A unique's death for the quests that wait for it, whoever killed it (the original's UNIQUE_DEAD event).
         if (quests && ((row->rarity & 0x0F) == 3 || (d.rarity & 0x0F) == 3)) quests->UniqueDied(row->codename);
         // The triggers of its world (an instance's, or the shared world's pillars):
@@ -4526,6 +4535,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // A quest's instance (Quests::OpenWorld): the party's members here, its master, a transport out, the world's layer.
     std::vector<std::uint32_t> QuestPartyHere(std::uint32_t entity) override { return parties ? parties->MemberEntities(entity) : std::vector<std::uint32_t>{}; }
     bool QuestPartyMaster(std::uint32_t entity) override { return parties && parties->Leads(entity); }
+    QuestHost::KillParty QuestKillParty(std::uint32_t killer) override {
+        QuestHost::KillParty out;
+        constexpr std::uint8_t kBoth = game::kPartyExpShare | game::kPartyItemShare;
+        if (!parties || (parties->SettingsOf(killer) & kBoth) != kBoth) return out;
+        out.id = parties->PartyOf(killer);
+        if (out.id == 0) return out;
+        for (const std::uint32_t member : parties->MemberEntities(killer)) {
+            const auto at = world->Where(member);
+            out.members.push_back({member, at ? std::optional<proto::WorldPosition>(at->position) : std::nullopt});
+        }
+        return out;
+    }
     bool QuestTransportOut(std::uint32_t entity) override { return coses && coses->TransportOut(entity); }
     std::uint32_t QuestWorldOpen(std::uint32_t entity, const std::string& worldName) override {
         const PlayerWorld* p = PlayerByEntity(entity);
@@ -4642,6 +4663,37 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (p == nullptr) return false;
         const auto before = p->inventory.places;
         const auto ids = freeItemIds;
+        std::vector<std::uint8_t> touched;
+        const bool fits = PutAll(*p, items, touched);
+        p->inventory.places = before;
+        freeItemIds = ids;
+        return fits;
+    }
+    bool QuestRoomAfter(std::uint32_t entity, const std::vector<game::QuestGoal::Items>& items, const std::vector<game::QuestGoal::Items>& taken) override {
+        PlayerWorld* p = PlayerByEntity(entity);
+        if (p == nullptr || !config.rules->items) return false;
+        const auto before = p->inventory.places;
+        const auto ids = freeItemIds;
+        // The taken items out of the bag first (the pay's order), then the reward in; all put back as it was.
+        for (const game::QuestGoal::Items& want : taken) {
+            const assets::ItemRow* row = config.rules->items->Find(std::string_view(want.item));
+            if (row == nullptr) continue;
+            std::uint32_t left = want.count;
+            for (auto it = p->inventory.places.begin(); it != p->inventory.places.end() && left > 0;) {
+                if (it->first < game::slot::kWorn || it->second.refId != row->refObjId) {
+                    ++it;
+                    continue;
+                }
+                const std::uint32_t n = std::min<std::uint32_t>(left, it->second.count);
+                left -= n;
+                if (n == it->second.count) {
+                    it = p->inventory.places.erase(it);
+                } else {
+                    it->second.count = std::uint16_t(it->second.count - n);
+                    ++it;
+                }
+            }
+        }
         std::vector<std::uint8_t> touched;
         const bool fits = PutAll(*p, items, touched);
         p->inventory.places = before;

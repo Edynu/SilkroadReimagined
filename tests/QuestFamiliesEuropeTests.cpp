@@ -306,7 +306,7 @@ TEST_CASE("Quest families (Europe): the stable's purification taken, the holy wa
     // Uvetino's horns, then his holy water (the import's reward; here put in the bag by hand).
     CHECK(Offers(host, quests, kUvetino, horns));
     Ask(quests, proto::QuestAccept{kUvetino, horns});
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
     for (int i = 0; i < 20; ++i) quests.Killed(9000 + i, "MOB_EU_DOWB_CLON", 0, me); // 20 % each: the drops land in the bag
     host.bag["ITEM_QNO_EU_EASTEU_3_01"] = 20;
     quests.BagChanged(1);
@@ -406,7 +406,7 @@ TEST_CASE("Quest families (Europe): the hwan tests in turn; a test's end raises 
     CHECK(Offers(host, quests, kGeneralCh, id("QNO_CH_HWAN_1_1")));
     // The first test: its champion beaten (in its instance), finished at the general; the next offered.
     Ask(quests, proto::QuestAccept{kGeneralCh, id("QNO_CH_HWAN_1_1")});
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
     quests.Killed(9500, "MOB_QT_CH_SOLDIER_01_1", 0, me); // a normal one does not count
     CHECK(quests.Record(1, id("QNO_CH_HWAN_1_1"))->progress[0] == 0);
     quests.Killed(9501, "MOB_QT_CH_SOLDIER_01_1", 1, me);

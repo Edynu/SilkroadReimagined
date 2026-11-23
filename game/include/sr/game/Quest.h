@@ -161,10 +161,12 @@ struct QuestDef {
     bool party = false;
     std::string race;                    // china, europe (empty: any)
     std::vector<std::string> jobs;       // the job worn (empty: none needed)
-    std::uint32_t hwan = 0;              // the hwan level needed
+    std::uint32_t hwan = 0;              // LuaSetHwanLevel, kept as read (the original's offer test asks no hwan level)
     std::string time;                    // day, night (empty: any)
     std::uint32_t quota = 0;             // starts allowed per day or night window, for all players together
-    bool realClock = false;              // the quota's window by the wall clock (the original's LuaSetRealTime)
+    // A daily quest (the original's LuaSetRealTime): finished at its limit on an earlier local calendar day, its count goes
+    // back to 0 at the next offer; at its limit its giver says `count-limit`.
+    bool realClock = false;
     // Given by itself, without an NPC's offer, when the character reaches its start level (the original's
     // _RefCharDefault_Quest: the Beginner's Assistant). No finisher: it finishes at the NPC of its last goal.
     bool given = false;
@@ -459,7 +461,7 @@ struct QuestDef {
     std::optional<Trial> trial;
 
     // The original's settings not traced yet, kept as they are
-    std::uint32_t divide = 0;          // LuaSetDivideType
+    std::uint32_t divide = 0;          // LuaSetDivideType: a sharing party's kill share (0 in turn, 1 4 5 all near, 2 3 the killer); 1 a party quest
     std::uint32_t differentString = 0; // LuaSetDifferentString
     bool disabled = false;
     std::vector<std::string> special;  // handlers the original ran in its script (unique-dead, conversation, ...)

@@ -98,6 +98,11 @@ struct AsiaHost : server::QuestHost {
         who.race = "china";
     }
     std::optional<Player> QuestPlayer(std::uint32_t entity) override { return entity == 1 ? std::optional(who) : std::nullopt; }
+    // In a party sharing both (who.sharedParty): a kill's share among the killer alone here.
+    KillParty QuestKillParty(std::uint32_t killer) override {
+        if (!who.sharedParty) return {};
+        return {7, {{killer, who.position}}};
+    }
     void QuestSend(std::uint64_t, proto::MessageId id, const std::vector<std::byte>& payload) override { sent.emplace_back(id, payload); }
     std::string QuestNpcNear(std::uint32_t, std::uint32_t npc) override { return npcs.contains(npc) ? npcs[npc] : std::string(); }
     int QuestHour() override { return 12; }
@@ -311,7 +316,7 @@ TEST_CASE("Asian coded quests: a delivery given at the start, a helper that neve
         play.Enter();
         play.Accept("NPC_CA_WAREHOUSE", "QNO_CA_WAREHOUSE_1");
         // The archers drop earwigs (100 %, up to 5): the helper counts them.
-        for (int i = 0; i < 7; ++i) play.quests.Killed(9000, "MOB_QT_01_ARCHER_CLON", 0, std::vector<std::uint32_t>{1});
+        for (int i = 0; i < 7; ++i) play.quests.Killed(9000, "MOB_QT_01_ARCHER_CLON", 0, 1u);
         CHECK(play.host.bag["ITEM_QNO_CA_WAREHOUSE_1_02"] == 5);
         CHECK(play.Record("QNO_CA_WAREHOUSE_1")->status == proto::QuestStatus::Achieving);
         // Ten grass found and every earwig spent but two: met all the same; the hand-in takes the grass, the earwigs stay.
@@ -334,18 +339,18 @@ TEST_CASE("Asian coded quests: a delivery given at the start, a helper that neve
         CHECK(play.host.bag["ITEM_QNO_CA_GORIA_2_01"] == 70);
         // No bag place: the original's _08, nothing changed.
         play.host.freePlace = false;
-        play.quests.Killed(9000, "MOB_CA_GOLEM_CLON", 0, std::vector<std::uint32_t>{1});
+        play.quests.Killed(9000, "MOB_CA_GOLEM_CLON", 0, 1u);
         CHECK(play.host.said.back() == "SN_TALK_QNO_CA_GORIA_2_08");
         CHECK(play.host.bag["ITEM_QNO_CA_GORIA_2_02"] == 0);
         play.host.freePlace = true;
-        for (int i = 0; i < 69; ++i) play.quests.Killed(9000, "MOB_CA_GOLEM_CLON", 0, std::vector<std::uint32_t>{1});
+        for (int i = 0; i < 69; ++i) play.quests.Killed(9000, "MOB_CA_GOLEM_CLON", 0, 1u);
         CHECK(play.host.bag["ITEM_QNO_CA_GORIA_2_02"] == 69);
         CHECK(play.host.bag["ITEM_QNO_CA_GORIA_2_01"] == 1);
         CHECK(play.Record("QNO_CA_GORIA_2")->status == proto::QuestStatus::Achieving);
         // Another monster changes nothing.
-        play.quests.Killed(9000, "MOB_CA_ONG", 0, std::vector<std::uint32_t>{1});
+        play.quests.Killed(9000, "MOB_CA_ONG", 0, 1u);
         CHECK(play.host.bag["ITEM_QNO_CA_GORIA_2_01"] == 1);
-        play.quests.Killed(9000, "MOB_CA_GOLEM_CLON", 0, std::vector<std::uint32_t>{1});
+        play.quests.Killed(9000, "MOB_CA_GOLEM_CLON", 0, 1u);
         CHECK(play.host.bag["ITEM_QNO_CA_GORIA_2_02"] == 70);
         CHECK(play.Record("QNO_CA_GORIA_2")->status == proto::QuestStatus::Achieved);
         play.HandIn("NPC_CA_HUNTER", "QNO_CA_GORIA_2");
@@ -359,7 +364,7 @@ TEST_CASE("Asian coded quests: a delivery given at the start, a helper that neve
         Played play(defs);
         play.Enter();
         play.Accept("NPC_CA_SMITH", "QNO_CA_TREASURE_4");
-        play.quests.Killed(9000, "MOB_QT_01_ONG_CLON", 0, std::vector<std::uint32_t>{1});
+        play.quests.Killed(9000, "MOB_QT_01_ONG_CLON", 0, 1u);
         CHECK(play.host.bag["ITEM_QNO_CA_TREASURE_4_01"] == 1);
         play.host.bag["ITEM_QNO_CA_TREASURE_4_02"] = 1;
         play.quests.BagChanged(1);
@@ -401,7 +406,7 @@ TEST_CASE("Asian coded quests: the tools given again, taken again with its own w
         CHECK(play.host.LastSaid() == "resupply");
         CHECK(play.host.bag["ITEM_QNO_CA_TREASURE_5_01"] == 5);
         // The guardian's death drops the box (100 %): met, handed in.
-        play.quests.Killed(9000, "MOB_QT_01_ONG", 0, std::vector<std::uint32_t>{1});
+        play.quests.Killed(9000, "MOB_QT_01_ONG", 0, 1u);
         CHECK(play.Record("QNO_CA_TREASURE_5")->status == proto::QuestStatus::Achieved);
         play.HandIn("NPC_CA_SMITH", "QNO_CA_TREASURE_5");
         CHECK(play.Record("QNO_CA_TREASURE_5")->status == proto::QuestStatus::Done);
@@ -436,7 +441,7 @@ TEST_CASE("Asian coded quests: the tools given again, taken again with its own w
         CHECK(play.host.bag["ITEM_QNO_TQ_ORNAMENT_4_04"] == 1);
         CHECK(play.host.bag["ITEM_QNO_TQ_ORNAMENT_4_01"] == 1);
         play.host.bag["ITEM_QNO_TQ_ORNAMENT_4_04"] = 0; // the stone used to go in
-        play.quests.Killed(9000, "MOB_QT_TQ_SNAKEGENERAL4", 3, std::vector<std::uint32_t>{1});
+        play.quests.Killed(9000, "MOB_QT_TQ_SNAKEGENERAL4", 3, 1u);
         CHECK(play.host.bag["ITEM_QNO_TQ_ORNAMENT_4_01"] == 0);
         CHECK(play.host.bag["ITEM_QNO_TQ_ORNAMENT_4_02"] == 1);
         CHECK(play.Record("QNO_TQ_ORNAMENT_4")->status == proto::QuestStatus::Achieved);

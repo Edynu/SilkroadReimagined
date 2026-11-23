@@ -22,6 +22,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <random>
@@ -97,6 +98,11 @@ public:
     virtual bool QuestTakeGold(std::uint32_t player, std::uint64_t gold) = 0;
     // Whether the bag has room for these items (nothing changed).
     virtual bool QuestRoom(std::uint32_t player, const std::vector<game::QuestGoal::Items>& items) = 0;
+    // The same once `taken` are out of the bag (the pay's dry run at the finisher's talk; nothing changed).
+    virtual bool QuestRoomAfter(std::uint32_t player, const std::vector<game::QuestGoal::Items>& items, const std::vector<game::QuestGoal::Items>& taken) {
+        (void)taken;
+        return QuestRoom(player, items);
+    }
     // The reward's numbers, after the rates: experience and skill experience earned, gold, skill points, bag places,
     // the hwan level reached (0: unchanged). Saved by the host.
     struct Reward {
@@ -197,6 +203,17 @@ public:
         (void)player;
         return false;
     }
+    // The killer's party for a quest kill's share (Quests::Killed): its id (0: none, or one not sharing both experience and
+    // items automatically) and its members on this game server in the party's order (the killer among them), each with its
+    // place (none: not in the world).
+    struct KillParty {
+        std::uint32_t id = 0;
+        std::vector<std::pair<std::uint32_t, std::optional<game::proto::WorldPosition>>> members;
+    };
+    virtual KillParty QuestKillParty(std::uint32_t killer) {
+        (void)killer;
+        return {};
+    }
     virtual bool QuestTransportOut(std::uint32_t player) {
         (void)player;
         return false;
@@ -247,13 +264,20 @@ public:
     bool Handle(std::uint32_t entity, game::proto::MessageId id, std::span<const std::byte> payload);
     // The NPC's rows for the player (after its menu).
     void TellNpc(std::uint32_t entity, std::uint32_t npc);
-    // A monster killed: `credited` are the players its experience went to. Kills count, quest items drop.
-    void Killed(std::uint32_t monster, const std::string& codename, std::uint8_t rarity, std::span<const std::uint32_t> credited);
+    // A monster killed by `killer`, the attacker of the killing hit (a pet's owner). Its quests count the kill and roll their
+    // drops; in a party sharing experience and items automatically each quest held by the members near is shared by its
+    // DivideType (the original's quest event 4): 0 one holder at a time in turn, 1, 4, 5 every holder, 2, 3 the killer only.
+    // A party quest (QuestDef::party) counts only in such a party.
+    void Killed(std::uint32_t monster, const std::string& codename, std::uint8_t rarity, std::uint32_t killer);
     // A unique died (the original's UNIQUE_DEAD event, QuestDef::onUniqueDead): its watchers swap their items.
     void UniqueDied(const std::string& codename);
     // A player killed by another (the temple quests' kill-player goals, LuaSetKillPlayerMissionData's MKP_LEVEL, MKP_REGION
-    // and MKP_JOB): the killer's goals whose victims it fits counted. `job` the victim's: trader, hunter, thief (empty: none).
+    // and MKP_JOB): the goals whose victims it fits counted, shared as a monster's kill (the original's event 0x35). `job` the
+    // victim's: trader, hunter, thief (empty: none).
     void PlayerKilled(std::uint32_t killer, int level, std::uint16_t region, const std::string& job);
+    // A quest item on the ground refused to the player (0x1874): every gathering goal under way for it holds its count
+    // (none paid by the piece).
+    bool PickUpRefused(std::uint32_t entity, const std::string& item) const;
     // The player's bag changed (an item picked up, dropped, sold, moved out): the gathering goals recounted.
     void BagChanged(std::uint32_t entity);
     // Timers run out.
@@ -277,7 +301,8 @@ public:
     // Where a quest's record keeps the original's bytes of its coded handlers (the record's +0..+0xF are QuestData1 / QuestData2,
     // our eight 16-bit counts): a capture's minutes (byte +4: word 2), its mark (word +0xA: 10 caught, 5 lost), the day of the
     // last daily resupply (word +0xC). A quest using them keeps its goals below them (Load warns otherwise).
-    static constexpr std::size_t kCatchMinutesSlot = 2, kCatchMarkSlot = 5, kSupplyDaySlot = 6;
+    // A timed quest's seconds left (the original's byte +4: they run only while its holder is in the world) in word 4.
+    static constexpr std::size_t kCatchMinutesSlot = 2, kTimerSlot = 4, kCatchMarkSlot = 5, kSupplyDaySlot = 6;
     static constexpr std::uint16_t kCaught = 10, kLost = 5;
     // A capture held for that quest (tests): its COS (0: none) and its minutes left.
     std::pair<std::uint32_t, std::uint32_t> Caught(std::uint32_t entity, std::uint32_t quest) const;
@@ -331,6 +356,8 @@ private:
             std::vector<std::size_t> rows; // what each row sent stands for (a drink's index, or kAsk / kTrade / kRefuse)
         };
         std::map<std::uint32_t, TalkGame> games;
+        // A timed quest's end on the steady clock, by quest (its seconds left run only while its holder is in the world).
+        std::map<std::uint32_t, Clock::time_point> deadlines;
     };
     // The original's state of a quest record (1 under way, 7 a goal progressed, 8 goals met; 4 not under way).
     static std::uint8_t OriginalState(const QuestRecord& r, const game::QuestDef* q = nullptr);
@@ -407,8 +434,26 @@ private:
     void Changed(std::uint32_t entity, PlayerQuests& p, const game::QuestDef& q, QuestRecord& r);
     // The goals' state recomputed (the gathered items counted); true when it changed.
     bool Evaluate(std::uint32_t entity, const game::QuestDef& q, QuestRecord& r);
-    bool OfferedTo(const QuestHost::Player& who, const PlayerQuests& p, const game::QuestDef& q) const;
+    // The offer test. `limits` false: a daily quest's count (QuestDef::realClock) and the window's quota are not asked (the
+    // NPC lists the quest, its talk then says `count-limit`: the original's offer test leaves those to the talk).
+    bool OfferedTo(const QuestHost::Player& who, const PlayerQuests& p, const game::QuestDef& q, bool limits = true) const;
+    // Offered but for its count or its quota (the talk's `count-limit`).
+    bool Limited(const QuestHost::Player& who, const PlayerQuests& p, const game::QuestDef& q) const;
     bool Started(const game::QuestDef& q) const; // the quota allows a start now
+    // The daily quests (QuestDef::realClock, the original's LuaSetRealTime): finished on an earlier local calendar day at their
+    // limit, their count back to 0 (saved), so they are offered again (the original's offer test).
+    void ResetDaily(PlayerQuests& p);
+    // What the pay takes from the bag besides the reward (the gathered items, every held piece; a delivery's handed-back
+    // items; the needed ones; the leftover tools), and the room for the reward once they are taken.
+    std::vector<game::QuestGoal::Items> PayItems(std::uint32_t entity, const game::QuestDef& q) const;
+    bool RewardFits(std::uint32_t entity, const game::QuestDef& q) const;
+    // A kill's quests shared as Killed says: `credit` counts it for a holder's quest and says whether the quest took it.
+    using Credit = std::function<bool(std::uint32_t, PlayerQuests&, const game::QuestDef&, QuestRecord&)>;
+    void ShareKill(std::uint32_t killer, const Credit& credit);
+    // The turn of a party's quest kills (DivideType 0), by (party, quest): the member's index in the party's order.
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t> turns_;
+    // A timed quest's seconds left on its holder's clock, kept in the record (kTimerSlot) as they run.
+    void KeepTimer(std::uint32_t entity, PlayerQuests& p, std::uint32_t quest, Clock::time_point now, bool save);
     static bool UnderWay(const QuestRecord& r);
     // What is due at the NPC for the player's quest: a goal (its index) not done there, or none.
     std::optional<std::size_t> DueAt(std::uint32_t entity, const game::QuestDef& q, const QuestRecord& r, const std::string& npc);

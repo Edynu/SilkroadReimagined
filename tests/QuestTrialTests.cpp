@@ -121,6 +121,11 @@ struct TrialHost : server::QuestHost {
     int QuestSpawnStanding(std::size_t nest) override { return nest < raised.size() && !raised[nest].gone && raised[nest].standing ? 1 : 0; }
     std::vector<std::uint32_t> QuestPartyHere(std::uint32_t) override { return party; }
     bool QuestPartyMaster(std::uint32_t entity) override { return entity == 1 && master; }
+    // In a party sharing both (who.sharedParty): a kill's share among the killer alone here.
+    KillParty QuestKillParty(std::uint32_t killer) override {
+        if (!who.sharedParty) return {};
+        return {7, {{killer, who.position}}};
+    }
     bool QuestTransportOut(std::uint32_t entity) override { return entity == 1 && transport; }
     std::uint32_t QuestWorldOpen(std::uint32_t, const std::string&) override { return nextLayer++; }
     bool QuestWorldEnter(std::uint32_t entity, std::uint32_t layer) override {
@@ -378,7 +383,7 @@ TEST_CASE("Quest trial: the ritual's ghost counts only in berserk; in berserk th
     REQUIRE(host.Count("MOB_QT_CH_CHARGHOST_01") == 1);
     // At its place exactly (the spawn's radius 0).
     CHECK(Flat(host.raised[0].at, proto::WorldPosition{25253, 177.0f, 233.0f, 684.0f, 0}) < 0.01);
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
 
     SUBCASE("not in berserk: the kill not counted, the words, no piece, out 10 s later") {
         quests.Killed(9000, "MOB_QT_CH_CHARGHOST_01", 1, me);
@@ -451,7 +456,7 @@ TEST_CASE("Quest item use: IVY_3's trumpet raises the keeper of the first site w
     quests.Tick(start + 301s);
     CHECK(host.raised[0].gone);
     // Its kill drops its sign (the quest's hidden gathering at 100 %); with it held that site raises nothing more.
-    const std::uint32_t me[] = {1};
+    const std::uint32_t me = 1;
     quests.Killed(9100, "MOB_QT_03_PUNISHER_CLON", 0, me);
     CHECK(host.bag["ITEM_QNO_EU_IVY_3_03"] == 1);
     host.told.clear();

@@ -949,6 +949,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                       {0x18F2, "UIIT_MSG_FORT_ETC_ERROR_WRONGACTION_FORTWAR"},
                       {0x1838, "UIIT_MSG_STRGERR_CANNOT_BE_DROPPED"},
                       {0x1839, "UIIT_MSG_STRGERR_CANNOT_BE_PICKED"},
+                      {0x1874, "UIIT_MSG_STRGERR_CANNOT_BE_PICKED_AT_QUEST_ACHIEVE_CONDITION"},
                       {0x1843, "UIIT_MSG_STRGERR_INVALID_TARGET_STORAGE"},
                       {0x1834, "UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED"},
                       {0x1829, "UIIT_MSG_STRGERR_SPECIFY_POSITIVE_NUMBER_ONLY"},
