@@ -5134,6 +5134,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         who.inTown = place && place->position.layer == 0 && towns && towns->TownAt(place->position.region, place->position.x, place->position.z) >= 0;
         who.dead = p->dead;
         who.riding = p->riding;
+        who.inBattle = Clock::now() < p->combat.battleUntil;
+        if (const auto a = accountOf.find(who.peer); a != accountOf.end()) who.gm = a->second.gm;
+        who.transport = CarriesGoods(*p);
         who.jobSuit = ActivityOf(*p).jobSuit;
         who.dealing = (exchanges && exchanges->Busy(entity)) || (stalls && (stalls->Owner(entity) || stalls->Visiting(entity)));
         who.atWar = guilds && guilds->AtAnyWar(p->selected);
@@ -6347,8 +6350,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // Those who see it see it stand (its health back).
         Broadcast(player.entity, proto::EntityDamaged{player.entity, 0, 0, player.hp, 0});
         const auto start = instances ? instances->StartOf(player.entity) : std::nullopt;
+        const assets::TeleportPoint* town = ReturnArrival(player);
         if (kind == 2) {
             core::LogInfo("{}: {} rises where it fell", config.name, player.name);
+        } else if (start && town != nullptr && instances->InForgottenWorld(player.entity) && CanTravelTo(town->region)) {
+            // Dead in the Forgotten World, "return to town": out of the instance to its return point (the original's).
+            core::LogInfo("{}: {} rises at {}, out of its instance", config.name, player.name, town->codename);
+            DropHostility(player);
+            const proto::WorldPosition to{town->region, town->x, town->y, town->z};
+            instances->ExitSiege(player.entity, &to);
         } else if (start) {
             core::LogInfo("{}: {} rises at its instance's start", config.name, player.name);
             world->Teleport(player.entity, *start);
@@ -7780,12 +7790,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     std::uint32_t FortressDungeonOpen(const std::string& opener) override {
         return instances ? instances->OpenSiege(opener, std::uint32_t(std::max(0, config.fortress.dungeonSeconds))) : 0u;
     }
+    bool FortressDungeonFree(std::uint64_t peerId) override {
+        const auto it = players.find(peerId);
+        if (it == players.end() || it->second.entity == 0) return false;
+        const PlayerWorld& p = it->second;
+        if (ActivityOf(p).jobSuit || p.freePvp != 0 || p.riding || CarriesGoods(p)) return false;
+        return !(stalls && (stalls->Owner(p.entity) || stalls->Visiting(p.entity)));
+    }
     bool FortressDungeonAdmit(std::uint64_t peerId, std::uint32_t layer) override {
         const auto it = players.find(peerId);
         if (it == players.end() || it->second.entity == 0 || !instances) return false;
         if (exchanges) exchanges->End(it->second.entity);
-        if (stalls) stalls->Leave(it->second.entity);
-        if (coses) coses->DismissAll(it->second.entity, true);
+        if (coses) coses->DismissAll(it->second.entity, true); // its pets (a ride or transport was refused before)
         // Entering sets the recall point to where the player stands (only in a normal world): the Cave's leave sends
         // them back there.
         const auto spot = KeepableSpot(it->second);

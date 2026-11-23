@@ -250,8 +250,9 @@ bool LoadGameWorlds(Database& db, const assets::FileSystem& files, const assets:
     if (!g.Ok()) return fail(g);
     for (int i = 0; i < g.Rows(); ++i) {
         const std::string key = Trim(g.Text(i, 0)), value = Trim(g.Text(i, 1));
-        if (key == "ENTER_WORLD_GROUP_COOL_TIME") out.reentrySeconds = std::uint32_t(std::max(0, std::atoi(value.c_str())));
-        if (key == "TIMEDJOB_COOL_TIME_FORCLIENT") out.jobSeconds = std::uint32_t(std::max(0, std::atoi(value.c_str())));
+        // Minutes (the original multiplies by 60: 300 is five hours).
+        if (key == "ENTER_WORLD_GROUP_COOL_TIME") out.reentrySeconds = std::uint32_t(std::max(0, std::atoi(value.c_str()))) * 60;
+        if (key == "TIMEDJOB_COOL_TIME_FORCLIENT") out.jobSeconds = std::uint32_t(std::max(0, std::atoi(value.c_str()))) * 60;
         if (key == "TIMEDJOB_ICONURL_FORCLIENT") {
             out.jobIcon = value;
             for (std::size_t at = out.jobIcon.find("\\\\"); at != std::string::npos; at = out.jobIcon.find("\\\\")) out.jobIcon.erase(at, 1);

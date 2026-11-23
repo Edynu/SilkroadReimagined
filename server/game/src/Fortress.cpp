@@ -1909,6 +1909,8 @@ struct Fortresses::State {
         if (f->dungeonLayer == 0 || !host.FortressDungeonStands(f->dungeonLayer)) return refuse(FortressError::DungeonClosed);
         if (host.FortressDungeonInside(f->dungeonLayer) >= host.FortressDungeonMaxUsers()) return refuse(FortressError::DungeonFull);
         if (!dungeonAllowed) return refuse(FortressError::DungeonTime);
+        // The world's entry conditions (a job suit, the free-PvP cape, a ride or transport, a stall): refused before any price.
+        if (!host.FortressDungeonFree(a.peer)) return refuse(FortressError::DungeonPay);
         if (!host.FortressDungeonReadmits(a.peer, f->dungeonLayer)) {
             const std::uint64_t gold = row != nullptr ? row->gold : 0;
             const std::uint32_t points = row != nullptr ? row->guildPoints : 0;

@@ -159,6 +159,10 @@ struct Monsters::State {
     std::vector<MonsterNest> summons;   // raised by hits this update, added at the next
     std::unordered_map<std::uint16_t, std::vector<std::size_t>> byRegion; // the nests of each region
     std::unordered_map<std::uint32_t, Monster> monsters;
+    // How many monsters fight each player now (worked out each think): at most the world's squad take one
+    // (MAX_SQUAD_MEMBER_COUNT: 6 in the shared world, 30 in an instance's data-driven world; the original's AddMember).
+    std::unordered_map<std::uint32_t, int> chasers;
+    static int SquadLimit(const proto::WorldPosition& at) { return at.layer == 0 ? 6 : 30; }
     // The places about a target its attackers take, as the original's positioner keeps them: eight, one each 45 degrees
     // from 22, turning the other way round (clockwise as atan2 counts), each held by one monster; one comes to the place on
     // the side it comes from, else the nearest free one to either side; with all eight held it still goes for its own
@@ -693,6 +697,7 @@ struct Monsters::State {
                         const float d = Distance(p->position, place->position);
                         if (nest.spec.warGuild != 0 && !WarFoe(nest.spec, *p)) continue; // a guard: only the side's enemies in the war
                         if (nest.spec.warGuild == 0 && InTown(p->position)) continue; // town ground is safe (the user's report 2026-11-14)
+                        if (const auto c = chasers.find(p->entity); c != chasers.end() && c->second >= SquadLimit(p->position)) continue; // its squad full
                         if (p->alive && !p->hidden && !p->banditsOnly && d < bestDistance && !m.states.Idles(p->entity) && !Protected(m, *p)) {
                             best = p;
                             bestDistance = d;
@@ -700,7 +705,10 @@ struct Monsters::State {
                     }
                 }
             }
-            if (best != nullptr) Engage(m, best->entity, now);
+            if (best != nullptr) {
+                Engage(m, best->entity, now);
+                ++chasers[best->entity];
+            }
         }
     }
 
@@ -1282,6 +1290,10 @@ void Monsters::Update(Clock::time_point now, const std::vector<Player>& players,
     for (const Player& p : s.playerList) {
         s.players[p.entity] = &p;
         s.playersByRegion[p.position.region].push_back(&p);
+    }
+    s.chasers.clear();
+    for (const auto& [entity, m] : s.monsters) {
+        if (m.mode == State::Mode::Chase && m.target != 0) ++s.chasers[m.target];
     }
     std::vector<std::size_t> buried; // nests whose bodies went this update
     for (auto it = s.monsters.begin(); it != s.monsters.end();) {

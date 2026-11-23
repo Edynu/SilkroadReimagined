@@ -143,7 +143,7 @@ struct GameWorldCatalog {
     std::unordered_map<std::uint32_t, HoleSpec> holes;      // by item
     std::vector<CollectionTheme> themes;
     std::unordered_map<std::uint32_t, TalismanSpec> talismans; // by item
-    std::uint32_t reentrySeconds = 300;                     // ENTER_WORLD_GROUP_COOL_TIME
+    std::uint32_t reentrySeconds = 18'000;                  // ENTER_WORLD_GROUP_COOL_TIME (300 minutes)
     // The re-entry limit's timed job as the client shows it (TIMEDJOB_*_FORCLIENT).
     std::string jobIcon, jobSubject, jobText;
     std::uint32_t jobSeconds = 0;
@@ -169,6 +169,9 @@ public:
         bool partyMaster = false;
         bool inTown = false;
         bool dead = false, riding = false, jobSuit = false, dealing = false, atWar = false, freePvp = false;
+        bool inBattle = false; // struck or striking in the last 20 s (GOD_BATTLE_STATE)
+        bool gm = false;       // a game master: past an instance's cap
+        bool transport = false; // a trade transport out
     };
     // Its party's members, on every game server of the shard.
     struct Member {
@@ -233,6 +236,7 @@ public:
     std::optional<game::proto::WorldPosition> StartOf(std::uint32_t entity) const;
     bool ThemeComplete(std::uint32_t entity, std::string_view theme) const;
     std::uint32_t WorldOf(std::uint32_t entity) const; // 0: not in an instance
+    bool InForgottenWorld(std::uint32_t entity) const; // in one of the Forgotten World's instances (GROUP_INS_GOD)
 
     // Tests and tools.
     std::size_t Count() const;

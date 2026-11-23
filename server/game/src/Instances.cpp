@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <deque>
+#include <numbers>
 
 #include "sr/assets/GameData.h"
 #include "sr/core/Log.h"
@@ -272,6 +273,25 @@ struct Instances::State {
     }
 
     // Into the instance: its entry kept, taken to the start.
+    // The Forgotten World's re-entry limit (GROUP_INS_GOD): its worlds only (the catalog's `worlds`), begun by an entry when
+    // none runs and not renewed by another entry meanwhile; when it began (0: none).
+    bool IsGod(std::uint32_t world) const {
+        return std::any_of(catalog->worlds.begin(), catalog->worlds.end(), [&](const GameWorldSpec& w) { return w.id == world; });
+    }
+    std::int64_t LimitStart(const Player& p) const {
+        std::int64_t start = 0;
+        for (const InstanceEntry& e : p.entries)
+            if (IsGod(e.world)) start = std::max(start, e.last);
+        return start != 0 && UnixNow() - start < std::int64_t(catalog->reentrySeconds) ? start : 0;
+    }
+    // Another of the Forgotten World's instances entered while the limit runs (re-entering the same one is allowed).
+    bool Limited(const Player& p, std::uint32_t key) const {
+        const std::int64_t now = UnixNow();
+        for (const InstanceEntry& e : p.entries) {
+            if (IsGod(e.world) && e.key != key && now - e.last < std::int64_t(catalog->reentrySeconds)) return true;
+        }
+        return false;
+    }
     void Admit(std::uint32_t entity, Player& p, Instance& inst, const proto::WorldPosition& from, const proto::WorldPosition* to = nullptr,
                bool counted = true) {
         p.layer = inst.layer;
@@ -296,7 +316,8 @@ struct Instances::State {
             // The day's count (the tomb's): an entry of another day starts it again.
             if (inst.spec->entriesPerDay > 0 && !SameDay(e.last, UnixNow())) e.count = 0;
             e.count += 1;
-            e.last = UnixNow();
+            // The Forgotten World's limit begins only when none runs.
+            if (!IsGod(e.world) || LimitStart(p) == 0) e.last = UnixNow();
         }
         std::erase_if(p.entries, [&](const InstanceEntry& old) { return old.world == e.world; });
         p.entries.insert(p.entries.begin(), e);
@@ -396,7 +417,8 @@ struct Instances::State {
     proto::InstanceState StateFor(const Player& p, std::uint32_t world, std::uint32_t secondsLeft) const {
         proto::InstanceState s{world, secondsLeft};
         std::int64_t last = 0;
-        for (const InstanceEntry& e : p.entries) last = std::max(last, e.last);
+        for (const InstanceEntry& e : p.entries)
+            if (IsGod(e.world)) last = std::max(last, e.last); // the Forgotten World's limit only
         const std::int64_t left = last + std::int64_t(catalog->jobSeconds) - UnixNow();
         if (last != 0 && left > 0) {
             s.jobSeconds = std::uint32_t(left);
@@ -545,22 +567,28 @@ struct Instances::State {
             if (row == nullptr) return;
             const auto who = Targets(target, user, inst);
             if (who.empty()) return;
-            const auto place = world.Where(who.front());
-            if (!place) return;
-            MonsterNest nest;
-            nest.refObjId = row->refObjId;
-            nest.position = place->position; // its layer with it
-            nest.spawnRadius = 40.0f;
-            nest.radius = 400.0f;
-            nest.maxCount = std::max(1, Number(t.Param(a, "NUM_INPUT_2")));
-            nest.rarity = Number(t.Param(a, "NUM_INPUT_1"));
-            nest.aggressive = true;
-            nest.sight = 300.0f;
-            nest.respawn = false;
-            nest.temporary = true;
-            const std::size_t index = monsters.AddNest(nest);
-            if (index != SIZE_MAX && inst != nullptr) inst->extra.push_back(index);
-            core::LogInfo("instances: {} raises {} x{}", t.codename, row->codename, nest.maxCount);
+            // About 300 from each target player, at a random angle (the original's), its layer with it.
+            for (const std::uint32_t player : who) {
+                const auto place = world.Where(player);
+                if (!place) continue;
+                const float angle = std::uniform_real_distribution<float>(0.0f, 2.0f * std::numbers::pi_v<float>)(random);
+                const proto::FlatPosition here = proto::ToFlat(place->position);
+                MonsterNest nest;
+                nest.refObjId = row->refObjId;
+                nest.position = proto::FromFlat({here.x + 300.0f * std::sin(angle), here.z + 300.0f * std::cos(angle)}, place->position.y);
+                nest.position.layer = place->position.layer;
+                nest.spawnRadius = 10.0f;
+                nest.radius = 400.0f;
+                nest.maxCount = std::max(1, Number(t.Param(a, "NUM_INPUT_2")));
+                nest.rarity = Number(t.Param(a, "NUM_INPUT_1"));
+                nest.aggressive = true;
+                nest.sight = 300.0f;
+                nest.respawn = false;
+                nest.temporary = true;
+                const std::size_t index = monsters.AddNest(nest);
+                if (index != SIZE_MAX && inst != nullptr) inst->extra.push_back(index);
+            }
+            core::LogInfo("instances: {} raises {} x{} by {} player(s)", t.codename, row->codename, std::max(1, Number(t.Param(a, "NUM_INPUT_2"))), who.size());
         }
     }
     void RunDelayed(const std::vector<TriggerSpec>& triggers, std::vector<Delayed>& delayed, Instance* inst, Clock::time_point now) {
@@ -634,6 +662,7 @@ struct Instances::State {
                                     p && p->party != 0 && p->party == inst->party});
     }
 
+    static constexpr float kNpcReach = 300.0f; // an NPC's reach in the original's range check: the recall pillar, the exit
     void EnterGap(std::uint32_t entity, std::uint32_t gap) {
         Instance* inst = ByGap(gap);
         // A gap's model put in an instance as its exit (the Roc's INS_QUEST_TELEPORT): the way out.
@@ -651,22 +680,20 @@ struct Instances::State {
         if (Distance(place->position, there->position) > proto::kGapReach) return Refuse(entity, "UIIT_MGS_ERR_GOD_TELEPORT_HOLE_NOT_PARTY", "too far");
         if (p->party == 0 || p->party != inst->party) return Refuse(entity, "UIIT_MGS_ERR_GOD_TELEPORT_HOLE_NOT_PARTY", "not of the party");
         if (p->dead) return Refuse(entity, "UIIT_MGS_ERR_GOD_DEADSTATE", "dead");
+        if (p->inBattle) return Refuse(entity, "UIIT_MGS_ERR_GOD_BATTLE_STATE", "in battle");
         if (p->riding) return Refuse(entity, "UIIT_MGS_ERR_GOD_CART_STATE", "riding");
         if (p->jobSuit && inst->spec->noJobSuit) return Refuse(entity, "UIIT_MGS_ERR_GOD_JOB_STATE", "job clothes");
+        // The free-PvP cape, worn in the job suit's place (FRPVP_VOUCHER_TAKE_OFF).
+        if (p->freePvp) return Refuse(entity, "UIIT_MGS_ERR_GOD_JOB_STATE", "free PvP");
         if (p->dealing) return Refuse(entity, "UIIT_MGS_ERR_GOD_TRADE_STATE", "dealing");
         if (p->atWar) return Refuse(entity, "UIIT_MGS_ERR_GOD_GUILD", "at war");
         if (me->second.layer != 0) return Refuse(entity, "UIIT_MGS_ERR_GOD_INS_WORLD", "in an instance");
         if (p->level < inst->spec->minLevel || (inst->spec->maxLevel > 0 && p->level > inst->spec->maxLevel)) {
             return Refuse(entity, "UIIT_MGS_ERR_GOD_LEVEL", "level");
         }
-        if (inst->inside.size() >= inst->spec->maxUsers) return Refuse(entity, "UIIT_MGS_ERR_GOD_PERSONNEL_MAX_COUNT", "full");
-        // The re-entry limit: another instance entered too lately.
-        const std::int64_t now = UnixNow();
-        for (const InstanceEntry& e : me->second.entries) {
-            if (e.key != inst->key && now - e.last < std::int64_t(catalog->reentrySeconds)) {
-                return Refuse(entity, "UIIT_MGS_ERR_GOD_LIMIT_TIME", "the re-entry limit");
-            }
-        }
+        if (inst->inside.size() >= inst->spec->maxUsers && !p->gm) return Refuse(entity, "UIIT_MSG_INTERACTION_FAIL_OUT_OF_REQUIRED_NUMBER_FOR_TELEPORT", "full");
+        // The re-entry limit: another of the Forgotten World's instances entered too lately.
+        if (Limited(me->second, inst->key)) return Refuse(entity, "UIIT_MGS_ERR_GOD_LIMIT_TIME", "the re-entry limit");
         core::LogInfo("instances: {} enters {} (layer {})", p->name, inst->spec->codename, inst->layer);
         Admit(entity, me->second, *inst, place->position);
     }
@@ -682,7 +709,7 @@ struct Instances::State {
         Instance* inst = me != players.end() ? Of(me->second.layer) : nullptr;
         if (inst == nullptr || std::find(inst->pillars.begin(), inst->pillars.end(), pillar) == inst->pillars.end()) return nullptr;
         const auto place = world.Where(entity), there = world.Where(pillar);
-        if (!place || !there || Distance(place->position, there->position) > proto::kGapReach) return nullptr;
+        if (!place || !there || Distance(place->position, there->position) > kNpcReach) return nullptr;
         return inst;
     }
 
@@ -691,6 +718,7 @@ struct Instances::State {
         const auto p = host.InstancePlayer(entity);
         if (inst == nullptr || !p) return;
         if (!p->partyMaster) return TellMaster(entity, "UIIT_MGS_ERR_PARTY_SUMMON_NOT", "");
+        if (host.InstancePartyMembers(entity).size() < 2) return TellMaster(entity, "UIIT_MGS_ERR_PARTY_SUMMON_NOT", ""); // a party of one: 2
         Send(entity, ListFor(entity, *inst));
     }
 
@@ -778,7 +806,7 @@ struct Instances::State {
         const auto me = players.find(entity);
         const auto p = host.InstancePlayer(entity);
         if (Clock::now() > a.expires || me == players.end() || !p) return;
-        const bool ready = me->second.layer == 0 && Ineligible(*p, a.minLevel, a.maxLevel) == 0;
+        const bool ready = me->second.layer == 0 && Ineligible(*p, a.minLevel, a.maxLevel) == 0 && !p->inBattle && !Limited(me->second, a.key);
         if (!a.remote) {
             const auto s = summons.find(a.character);
             Instance* inst = Of(a.layer);
@@ -864,7 +892,9 @@ struct Instances::State {
         Instance* inst = Of(me->second.layer);
         const auto place = world.Where(entity), there = world.Where(exit);
         if (inst == nullptr || !place || !there || std::find(inst->exits.begin(), inst->exits.end(), exit) == inst->exits.end()) return;
-        if (Distance(place->position, there->position) > proto::kGapReach) return;
+        if (Distance(place->position, there->position) > kNpcReach) return;
+        // Dead, with a trade transport, or dealing: refused (the original's exit NPC).
+        if (const auto p = host.InstancePlayer(entity); !p || p->dead || p->transport || p->dealing) return;
         Exit(entity, false);
     }
 };
@@ -1209,6 +1239,11 @@ std::optional<proto::WorldPosition> Instances::ReturnPlace(std::uint32_t entity)
     const auto it = s_->players.find(entity);
     if (it == s_->players.end() || it->second.layer == 0) return std::nullopt;
     return it->second.back;
+}
+
+bool Instances::InForgottenWorld(std::uint32_t entity) const {
+    const std::uint32_t world = WorldOf(entity);
+    return world != 0 && s_->IsGod(world);
 }
 
 std::optional<proto::WorldPosition> Instances::StartOf(std::uint32_t entity) const {

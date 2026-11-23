@@ -2344,7 +2344,7 @@ TEST_CASE("Game server: the inventory on entering, items worn and taken off, see
     a->Send(proto::WorldEnter{});
     REQUIRE(a->Expect(inv));
     REQUIRE(inv.items.size() == 4);
-    CHECK(inv.items[3].slot == 20);
+    CHECK(inv.items[3].slot == 13); // taken off: the bag's first free place, whatever place was asked (the original's)
     CHECK(inv.items[3].item == 10);
     CHECK(inv.items[3].durability == 60);
     game.Stop();

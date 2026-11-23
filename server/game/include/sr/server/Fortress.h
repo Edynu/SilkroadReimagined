@@ -213,6 +213,11 @@ public:
         (void)peer;
         (void)amount;
     }
+    // The Cave of Discipline's entry conditions met (no job suit, no free-PvP cape, no ride or transport, no stall).
+    virtual bool FortressDungeonFree(std::uint64_t peer) {
+        (void)peer;
+        return true;
+    }
     // A fortress taken from `guild`: its members' fortress positions (but the Commander's) are gone (the database's reset).
     virtual void FortressLost(std::uint32_t guild) { (void)guild; }
     virtual void FortressTaxRateChanged(std::uint32_t fortress, std::uint32_t guild, int rate) {
