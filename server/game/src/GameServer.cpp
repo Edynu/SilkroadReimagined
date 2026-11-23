@@ -239,6 +239,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         bool dropped = false;
         // A dropped connection's session, held until the character has left and its saves have landed.
         std::int64_t heldAccount = 0, heldSession = 0;
+        // The storage keeper the account's storage was opened at: every move and gold move checks it is still near.
+        std::uint32_t storageKeeper = 0;
         // Its name in the world (whispers find it by it), and its chat: when its lines came, until
         // when it may not chat.
         std::string name;
@@ -514,6 +516,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             SendMessage(*peer.connection, answer);
             return;
         }
+        // Its CanDrop (a mall item, a quest item, a pet's scroll stay in the bag): 0x1838.
+        if (const assets::ItemRow* row = config.rules->items ? config.rules->items->Find(it->second.refId) : nullptr; row != nullptr && !game::CanDropByHand(*row)) {
+            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x1838}); // UIIT_MSG_STRGERR_CANNOT_BE_DROPPED
+            answer.status = proto::ItemStatus::Failed;
+            SendMessage(*peer.connection, answer);
+            return;
+        }
         game::ItemInstance item = std::move(it->second);
         const std::int64_t serial = item.serial;
         player.inventory.places.erase(it);
@@ -528,7 +537,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
 
     void DropGold(Peer& peer, PlayerWorld& player, const proto::DropGold& drop) {
-        if (drop.amount == 0 || drop.amount > player.inventory.gold || drop.amount > 0xFFFFFFFFu) return;
+        // None: 0x1829; more than 100,000,000 at once: refused (the original's 2); more than it holds: 0x180F.
+        if (drop.amount == 0) return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1829});
+        if (drop.amount > 100'000'000u) return SendMessage(*peer.connection, proto::ItemMoved{proto::ItemStatus::Failed});
+        if (drop.amount > player.inventory.gold) return SendMessage(*peer.connection, proto::ItemRefused{0, 0x180F});
         const std::uint32_t model = GoldModel(drop.amount);
         if (model == 0) return;
         player.inventory.gold -= drop.amount;
@@ -587,6 +599,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (std::hypot(a.x - b.x, a.z - b.z) > kPickUpReach) return refuse(proto::ItemStatus::TooFar);
         GroundItem& g = it->second;
         if (g.ownerOnly && g.owner != player.selected) return refuse(proto::ItemStatus::NotYours);
+        // Its CanPick (fireworks, a campfire, a quest's weapon stay where they are): 0x1839.
+        if (const assets::ItemRow* row = g.item.refId != 0 && config.rules->items ? config.rules->items->Find(g.item.refId) : nullptr; row != nullptr && row->canPick == 0) {
+            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x1839}); // UIIT_MSG_STRGERR_CANNOT_BE_PICKED
+            return refuse(proto::ItemStatus::Failed);
+        }
         // Specialty goods: a trader only those his alias bought (0x1863), a thief
         // only those he did not (0x186F), a hunter none (0x1863), no job none (0x1864); not after the thieves' town
         // scroll is read (0x186E); a transport out needed (0x1861); into it, as a new item with the old creator.
@@ -869,6 +886,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void OpenStorage(Peer& peer, PlayerWorld& player, const proto::StorageOpen& open) {
         if (open.guild != 0) return OpenGuildStorage(peer, player, open.entity);
         if (const auto status = AtStorageKeeper(player, open.entity); status != proto::GateStatus::Ok) return RefuseGate(peer, open.entity, "storage", status);
+        player.storageKeeper = open.entity;
         if (player.storage) return SendStorage(peer, *player.storage);
         if (player.storageLoading || peer.account == 0) return;
         player.storageLoading = true;
@@ -898,10 +916,29 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             return;
         }
         using Side = game::Storage::Side;
+        // The account's storage keeper still near (the original checks the NPC on every move: 3).
+        if (m.guild == 0 && (player.storageKeeper == 0 || AtStorageKeeper(player, player.storageKeeper) != proto::GateStatus::Ok)) {
+            answer.status = proto::ItemStatus::TooFar;
+            SendMessage(*peer.connection, answer);
+            return;
+        }
         // A bound item (the beta quests' weapons) stays out of a guild's storage; its own storage takes it.
         if (m.guild != 0 && !m.fromStorage && m.toStorage) {
             if (const auto it = player.inventory.places.find(m.from); it != player.inventory.places.end() && it->second.bound) {
                 answer.status = proto::ItemStatus::Bound;
+                SendMessage(*peer.connection, answer);
+                return;
+            }
+        }
+        // Which storage takes it (its CanBorrow: 0x80 the account's, 0x40 a guild's; a guild's takes no quest item and
+        // nothing that cannot be traded): else 0x1843.
+        if (!m.fromStorage && m.toStorage) {
+            const game::ItemInstance* item = player.inventory.At(m.from);
+            const assets::ItemRow* row = item != nullptr ? config.rules->items->Find(item->refId) : nullptr;
+            const bool quest = row != nullptr && row->typeId[0] == 3 && row->typeId[1] == 3 && row->typeId[2] == 9;
+            if (row != nullptr && (m.guild == 0 ? (row->canBorrow & 0x80) == 0 : ((row->canBorrow & 0x40) == 0 || quest || !row->canTrade))) {
+                SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x1843});
+                answer.status = proto::ItemStatus::Failed;
                 SendMessage(*peer.connection, answer);
                 return;
             }
@@ -973,6 +1010,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void MoveStorageGold(Peer& peer, PlayerWorld& player, const proto::StorageGold& g) {
         game::Storage* storage = StorageFor(peer, player, g.guild != 0);
         if (storage == nullptr || g.amount == 0) return;
+        if (g.guild == 0 && (player.storageKeeper == 0 || AtStorageKeeper(player, player.storageKeeper) != proto::GateStatus::Ok)) {
+            return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1834}); // UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED
+        }
         std::uint64_t& from = g.deposit ? player.inventory.gold : storage->gold;
         std::uint64_t& to = g.deposit ? storage->gold : player.inventory.gold;
         if (from < g.amount || to > UINT64_MAX - g.amount) return;
@@ -1183,7 +1223,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 return RefuseDeal(peer, player, sell.entity, proto::ItemStatus::NotForSale);
             }
         }
-        const int count = sell.count == 0 ? it->second.count : std::clamp(int(sell.count), 1, int(it->second.count));
+        // A grab pet's watch goes whole whatever the count asked (the original's sale forces it).
+        const int count = sell.count == 0 || game::IsWholeItem(*row) ? it->second.count : std::clamp(int(sell.count), 1, int(it->second.count));
         // The fortress's tax comes off the sale's whole: a positive rate pays the seller less, a negative one more; none
         // for the holder's guild and union.
         std::uint32_t taxFortress = 0;
@@ -5984,7 +6025,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const assets::ItemRow* row = config.rules->items ? config.rules->items->Find(item.refId) : nullptr;
         if (row == nullptr || item.serial == 0) return false;
         if (row->typeId[0] == 3 && row->typeId[1] == 3 && row->typeId[2] == 9) return false;
-        if (row->cashItem || !row->canDrop || game::IsCosSummoner(*row)) return false;
+        if (row->cashItem || !game::CanDropAtDeath(*row) || game::IsCosSummoner(*row)) return false;
         const game::ItemKind kind = game::KindOf(*row);
         const bool equipment = kind == game::ItemKind::Weapon || kind == game::ItemKind::Shield || kind == game::ItemKind::Armour ||
                                kind == game::ItemKind::Accessory || kind == game::ItemKind::JobSuit;
@@ -6823,12 +6864,23 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (item.durability >= most) continue;
             statsChanged = statsChanged || (item.durability == 0 && place < game::slot::kWorn);
             item.durability = most;
+            bool charged = false;
             for (game::ItemInstance::Option& o : item.options) {
                 const assets::MagicOptionRow* m = options != nullptr ? game::FindOption(*options, o.id) : nullptr;
-                if (m != nullptr && m->optionName == "MATTR_REPAIR" && o.value > 1) --o.value;
+                if (m != nullptr && m->optionName == "MATTR_REPAIR" && o.value > 1) {
+                    --o.value;
+                    charged = true;
+                }
             }
             any = true;
             SendMessage(*peer.connection, proto::DurabilityChanged{place, item.durability});
+            // A Repair charge spent: the item's options told again (the original's 0x3040 with mask 0x20).
+            if (charged) {
+                proto::ItemMoved told;
+                told.from = told.to = place;
+                told.changed.push_back(player.inventory.Record(place));
+                SendMessage(*peer.connection, told);
+            }
             QueueItemSave(player.selected, player.inventory, {place}, {});
         }
         if (!any) {
@@ -9408,6 +9460,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             SendMessage(*peer.connection, answer);
             return;
         }
+        // A weapon, or a shield, put in hand while a cast holds the hands: 0x1834 (the original's motion lock).
+        if (const Clock::time_point now = Clock::now(); now < player.combat.castUntil || now < player.combat.chainUntil) {
+            const game::ItemInstance* moving = player.inventory.At(m.from);
+            const assets::ItemRow* row = moving != nullptr ? config.rules->items->Find(moving->refId) : nullptr;
+            const bool shield = row != nullptr && row->typeId[0] == 3 && row->typeId[1] == 1 && row->typeId[2] == 4 && (row->typeId[3] == 1 || row->typeId[3] == 2);
+            if (m.to == game::slot::kWeapon || (m.to == game::slot::kShield && shield)) {
+                SendMessage(*peer.connection, proto::ItemRefused{row != nullptr ? row->refObjId : 0u, 0x1834});
+                answer.status = proto::ItemStatus::Failed;
+                SendMessage(*peer.connection, answer);
+                return;
+            }
+        }
         // The job suit's place: its rules, then a 10 s change (the move made by TickSuitChanges). Only a league's own suit
         // has them: the event suit, the PvP cape and the whole-body suits move as any equipment, unless a league's suit
         // is the one worn there.
@@ -10703,6 +10767,30 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 case proto::AvatarMove::kId: {
                     proto::AvatarMoved answer;
                     answer.status = proto::ItemStatus::Exchanging;
+                    SendMessage(*peer.connection, answer);
+                    return;
+                }
+                default: break;
+                }
+            }
+            // The dead move no item and no gold (the original refuses every kind but the death's own drop and a mall
+            // package: 2).
+            if (player.entity != 0 && player.dead) {
+                switch (m.id) {
+                case proto::ItemMove::kId:
+                case proto::DropItem::kId:
+                case proto::DropGold::kId:
+                case proto::StorageMove::kId:
+                case proto::StorageGold::kId:
+                case proto::CubeMove::kId: {
+                    proto::ItemMoved answer;
+                    answer.status = proto::ItemStatus::Failed;
+                    SendMessage(*peer.connection, answer);
+                    return;
+                }
+                case proto::AvatarMove::kId: {
+                    proto::AvatarMoved answer;
+                    answer.status = proto::ItemStatus::Failed;
                     SendMessage(*peer.connection, answer);
                     return;
                 }

@@ -31,9 +31,10 @@ struct Storage {
         std::vector<std::uint8_t> storageTouched, inventoryTouched;
         std::vector<std::int64_t> gone; // serials of items merged away into another stack (either side): their rows go
     };
-    // Moves `quantity` (0: all) of what is at `from` on one side to `to` on the other (or the same)
-    // side; nothing changes unless Ok. An item keeps its serial whichever side it goes to (the original moves the
-    // same item id); the part a split takes is a new item with serial 0 (the server gives it one).
+    // Moves what is at `from` on one side to `to` on the other (or the same) side; nothing changes unless Ok. Between the
+    // sides the whole item (`quantity` not read), to `to` or that side's first free place; inside the storage a merge
+    // (the whole stack as far as it fits) or a swap, never a split (`quantity` must be the whole). An item keeps its serial
+    // whichever side it goes to (the original moves the same item id).
     MoveResult Move(const assets::ItemTable& items, Inventory& inventory, Side fromSide, std::uint8_t from, Side toSide, std::uint8_t to,
                     std::uint16_t quantity);
 };

@@ -162,7 +162,7 @@ bool DecodeItemRows(std::string_view text, std::vector<ItemRow>& out, std::strin
         row.cashItem = Int(c[7]) != 0;
         if (c.size() > 16) row.canTrade = Int(c[16]) != 0;
         if (c.size() > 17) row.canSell = Int(c[17]) != 0;
-        if (c.size() > 20) row.canDrop = Int(c[20]) != 0;
+        if (c.size() > 20) row.canDrop = Int(c[20]);
         row.decayMs = Int(c[13]);
         row.canBuy = Int(c[18]);
         row.canBorrow = Int(c[19]);

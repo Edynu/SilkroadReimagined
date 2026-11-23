@@ -106,11 +106,14 @@ struct ItemRow {
     bool cashItem = false;       // col 7: a mall item (never destroyed by a failed reinforcement)
     bool canSell = true;         // col 17: 0 the shops refuse it
     bool canTrade = true;        // col 16 (_RefObjCommon.CanTrade): 0 it cannot be offered in an exchange (0x183A)
-    bool canDrop = true;         // col 20 (_RefObjCommon.CanDrop): 0 a death never drops it
+    // col 20 (_RefObjCommon.CanDrop), the original's two bits: 1 it may be dropped by hand (not when it cannot be traded and
+    // CanDrop is 1), 2 a death may drop it. 3 for a row made without the column.
+    int canDrop = 3;
     // The rest of _RefObjCommon's flags, as written (the item catalogue shows them): col 18 CanBuy, 19 CanBorrow (a bit
     // mask: 255 in most rows), 21 CanPick, 24 CanUse (0 not, 1 used from the bag, 129 the mall's services), 25 CanThrow;
     // col 13 DecayTime (ms on the ground), 29 CostBorrow, 30 KeepingFee (the storage's).
-    int canBuy = 1, canBorrow = 0, canPick = 1, canUse = 0, canThrow = 0;
+    // canBorrow (col 19): 0x80 the account's storage takes it, 0x40 a guild's (255 for a row made without the column).
+    int canBuy = 1, canBorrow = 0xFF, canPick = 1, canUse = 0, canThrow = 0;
     int decayMs = 0;
     std::uint64_t costBorrow = 0, keepingFee = 0;
     int setId = 0; // col 62 (_RefObjItem.SetID): the set an item belongs to (0 none)

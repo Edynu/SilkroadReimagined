@@ -35,7 +35,7 @@ namespace {
 
 constexpr std::uint32_t kGold1D = 920001, kSkillGold4W = 920002, kPremium = 920003, kPremiumTicket = 920004, kReturnHigh = 920005,
                         kReverse = 920006, kResurrect100 = 920007, kBooth = 920008, kBagPlus = 920009, kStoragePlus = 920010, kSpirit = 920011,
-                        kExtension = 920012, kMarket = 920013, kResurrect60 = 920014;
+                        kExtension = 920012, kMarket = 920013, kResurrect60 = 920014, kNoStorage = 920015, kNoDrop = 920016;
 constexpr std::uint32_t kKeeper = 920100; // a storage keeper (NPC_CH_WAREHOUSE_M)
 
 assets::ItemRow Row(std::uint32_t id, const char* codename, std::array<int, 4> tid) {
@@ -100,6 +100,13 @@ std::shared_ptr<assets::ItemTable> Items() {
     extension.params[0] = 2419200;
     items->Add(extension);
     items->Add(Row(kMarket, "ITEM_MALL_OPEN_MARKET_TICKET", {3, 3, 13, 19}));
+    // A quest item no storage takes (CanBorrow 0), and one never dropped by hand (CanDrop 0).
+    assets::ItemRow unstored = Row(kNoStorage, "ITEM_QNO_TEST_LETTER", {3, 3, 9, 1});
+    unstored.canBorrow = 0;
+    items->Add(unstored);
+    assets::ItemRow undroppable = Row(kNoDrop, "ITEM_MALL_TEST_KEEPSAKE", {3, 3, 13, 19});
+    undroppable.canDrop = 0;
+    items->Add(undroppable);
     return items;
 }
 
@@ -693,7 +700,7 @@ TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is 
     SKIP_WITHOUT_DATABASE(t);
     ItemServer s(t);
     REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
-    auto p = s.Make("Vaulter", {Stored(kReturnHigh, 10), Stored(kBooth, 1)});
+    auto p = s.Make("Vaulter", {Stored(kReturnHigh, 10), Stored(kBooth, 1), Stored(kNoStorage, 1), Stored(kNoDrop, 1)});
     const auto settle = [&](const std::function<bool()>& done) {
         for (int i = 0; i < 500 && !done(); ++i) s.game.Poll(2ms);
         return done();
@@ -748,21 +755,40 @@ TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is 
     CHECK(chestId(0) == 0);
     CHECK(item(boothId).first == kBooth);
 
-    // The scrolls in whole, then 4 of them out: the 4 a new item, the 6 still the same one.
-    CHECK(move(false, scrolls, true, 1) == proto::ItemStatus::Ok);
+    // Between the bag and the storage the whole item moves (the original's): onto a taken place it goes to the storage's
+    // first free place instead; asked for 4, all 10 come out, the same item.
+    CHECK(move(false, booth, true, 0) == proto::ItemStatus::Ok);
+    CHECK(move(false, scrolls, true, 0) == proto::ItemStatus::Ok);
     CHECK(settle([&] { return chestId(1) == scrollId; }));
     CHECK(move(true, 1, false, scrolls, 4) == proto::ItemStatus::Ok);
-    CHECK(settle([&] { return bagId(scrolls) != 0; }));
-    const std::int64_t split = bagId(scrolls);
-    CHECK(split != scrollId);
-    CHECK(item(split) == std::pair<std::int64_t, std::int64_t>{kReturnHigh, 4});
-    CHECK(chestId(1) == scrollId);
-    CHECK(item(scrollId) == std::pair<std::int64_t, std::int64_t>{kReturnHigh, 6});
-    // The 6 onto the 4: the bag's item holds 10, the one merged away is freed.
-    CHECK(move(true, 1, false, scrolls) == proto::ItemStatus::Ok);
-    CHECK(settle([&] { return chestId(1) == 0 && item(split).second == 10; }));
-    CHECK(bagId(scrolls) == split);
-    CHECK(item(scrollId).first == 0);
+    CHECK(settle([&] { return bagId(scrolls) == scrollId && chestId(1) == 0; }));
+    CHECK(item(scrollId) == std::pair<std::int64_t, std::int64_t>{kReturnHigh, 10});
+    // Two stacks of them in the storage (split in the bag: the 4 a new item), merged there: the one merged away freed.
+    const std::uint8_t spare = 30;
+    proto::ItemMove split;
+    split.from = scrolls;
+    split.to = spare;
+    split.quantity = 4;
+    p.client->Send(split);
+    (void)Next<proto::ItemMoved>(p);
+    CHECK(settle([&] { return bagId(spare) != 0; }));
+    const std::int64_t part = bagId(spare);
+    CHECK(part != scrollId);
+    CHECK(move(false, scrolls, true, 2) == proto::ItemStatus::Ok);
+    CHECK(move(false, spare, true, 3) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return chestId(2) == scrollId && chestId(3) == part; }));
+    // Inside the storage nothing splits (only the inventory does); the 4 onto the 6 merge.
+    CHECK(move(true, 2, true, 4, 3) == proto::ItemStatus::BadSlot);
+    CHECK(move(true, 3, true, 2) == proto::ItemStatus::Ok);
+    CHECK(settle([&] { return chestId(3) == 0 && item(scrollId).second == 10; }));
+    CHECK(item(part).first == 0);
+    // A quest item no storage takes: 0x1843; an item whose CanDrop has no bit 1 stays in the bag: 0x1838.
+    const std::uint8_t letter = s.PlaceOf(p, kNoStorage), keepsake = s.PlaceOf(p, kNoDrop);
+    CHECK(move(false, letter, true, 5) == proto::ItemStatus::Failed);
+    CHECK(Next<proto::ItemRefused>(p).code == 0x1843);
+    p.client->Send(proto::DropItem{keepsake});
+    CHECK(Next<proto::ItemRefused>(p).code == 0x1838);
+    CHECK(Next<proto::ItemMoved>(p).status == proto::ItemStatus::Failed);
 
     // The gold: the character's and the storage's written together.
     p = s.Relog(p, [&] { REQUIRE(t.Db().Query("UPDATE _char SET remaingold = 10000 WHERE charid = $1", {p.character}).Ok()); });

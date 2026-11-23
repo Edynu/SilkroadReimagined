@@ -46,6 +46,7 @@ std::vector<StatChange> BlueChanges(std::uint32_t code, std::uint32_t value, flo
     case 0x7374726A:              // strj
     case 0x73747276: return one(stat::kStr, 0); // strv
     case 0x696E74:                               // int
+    case 0x696E746A:                             // intj (MATTR_INT_3JOB: the job suits', as strj)
     case 0x696E7476: return one(stat::kInt, 0);  // intv (MATTR_INT_AVATAR)
     case 0x73747261: return one(stat::kStr, 0);  // stra (MATTR_AVATAR_STR*: summed, BlueSums)
     case 0x696E7461: return one(stat::kInt, 0);  // inta (MATTR_AVATAR_INT*: summed)

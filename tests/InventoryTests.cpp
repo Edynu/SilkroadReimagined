@@ -156,29 +156,38 @@ TEST_CASE("the inventory: wearing, taking off, the shield and the two-handed wea
     }
     REQUIRE(inv.At(13) != nullptr);
     CHECK(inv.At(13)->refId == 11);
-    // Off the body into the bag; a swap back only with what is worn there.
+    // Off the body: into the bag's first free place whatever place was asked, never a swap (the original's detach; a swap
+    // is the other way, a bag item put on).
+    const int chestTo = inv.FreeBagPlace();
+    REQUIRE(chestTo >= place::kWorn);
     CHECK(inv.Move(items, chinese, place::kChest, 20, 0).status == ItemStatus::Ok);
-    CHECK(inv.At(20)->refId == 1);
-    CHECK(inv.Move(items, chinese, place::kWeapon, 13, 0).status == ItemStatus::WrongSlot); // the shield is not a weapon
-    // Bow and sword swap: the arrows go to the bag with the bow (the sword shoots none).
-    const auto sword = inv.Move(items, chinese, place::kWeapon, 15, 0);
-    CHECK(sword.status == ItemStatus::Ok);
-    CHECK(inv.At(place::kWeapon)->refId == 10);
-    CHECK(inv.At(place::kShield) == nullptr);
-    REQUIRE(inv.At(14) != nullptr); // the first free place of the bag
-    CHECK(inv.At(14)->refId == 13);
-    // The bow on again: the arrows back beside it; off into the bag: the arrows too.
-    CHECK(inv.Move(items, chinese, 15, place::kWeapon, 0).status == ItemStatus::Ok);
-    CHECK(inv.At(place::kShield) != nullptr);
-    CHECK(inv.Move(items, chinese, place::kWeapon, 15, 0).status == ItemStatus::Ok); // bow and sword swap again
-    CHECK(inv.Move(items, chinese, place::kWeapon, 22, 0).status == ItemStatus::Ok); // the sword off
-    CHECK(inv.Move(items, chinese, 15, place::kWeapon, 0).status == ItemStatus::Ok); // the bow on: arrows along
-    REQUIRE(inv.At(place::kShield) != nullptr);
-    const auto off = inv.Move(items, chinese, place::kWeapon, 23, 0);                 // the bow off: arrows to the bag
+    REQUIRE(inv.At(std::uint8_t(chestTo)) != nullptr);
+    CHECK(inv.At(std::uint8_t(chestTo))->refId == 1);
+    // The bow off, asked onto the shield in 13: to the first free place, its arrows to the next; the shield stays.
+    const int bowTo = inv.FreeBagPlace();
+    const int arrowsTo = inv.FreeBagPlace(bowTo);
+    const auto off = inv.Move(items, chinese, place::kWeapon, 13, 0);
     CHECK(off.status == ItemStatus::Ok);
-    CHECK(inv.At(place::kShield) == nullptr);
     CHECK(off.touched.size() == 4);
-    CHECK(inv.Move(items, chinese, 22, place::kWeapon, 0).status == ItemStatus::Ok); // the sword back for what follows
+    CHECK(inv.At(place::kWeapon) == nullptr);
+    CHECK(inv.At(place::kShield) == nullptr);
+    REQUIRE(inv.At(13) != nullptr);
+    CHECK(inv.At(13)->refId == 11);
+    REQUIRE(inv.At(std::uint8_t(bowTo)) != nullptr);
+    CHECK(inv.At(std::uint8_t(bowTo))->refId == 12);
+    REQUIRE(inv.At(std::uint8_t(arrowsTo)) != nullptr);
+    CHECK(inv.At(std::uint8_t(arrowsTo))->refId == 13);
+    // The bow on again: its arrows from the bag beside it. The sword put on in its stead (a bag item onto the worn place:
+    // this way the two swap): the bow to the sword's place, its arrows to the bag (the sword shoots none).
+    CHECK(inv.Move(items, chinese, std::uint8_t(bowTo), place::kWeapon, 0).status == ItemStatus::Ok);
+    REQUIRE(inv.At(place::kShield) != nullptr);
+    CHECK(inv.At(place::kShield)->refId == 13);
+    CHECK(inv.Move(items, chinese, 15, place::kWeapon, 0).status == ItemStatus::Ok);
+    REQUIRE(inv.At(place::kWeapon) != nullptr);
+    CHECK(inv.At(place::kWeapon)->refId == 10);
+    REQUIRE(inv.At(15) != nullptr);
+    CHECK(inv.At(15)->refId == 12);
+    CHECK(inv.At(place::kShield) == nullptr);
 
     // Requirements: the country, the sex, the level, not broken.
     inv.places[21] = Item(20);

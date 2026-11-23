@@ -169,6 +169,13 @@ std::uint32_t NewDurability(const assets::ItemRow& row);
 // The most of one stack (col 57); ours larger for elixirs (100) and arrows and bolts (1,000), the server's and the
 // client's alike.
 int MaxStack(const assets::ItemRow& row);
+// A grab pet's watch (3/3/13/15 with Param6's bit 2; its count is its minutes): a whole item, never split nor merged, sold
+// whole (the original's).
+bool IsWholeItem(const assets::ItemRow& row);
+// May it be dropped by hand (CanDrop's bit 1, not when it cannot be traded and CanDrop is 1; never a pet's or a ride's
+// scroll nor a magic cube: TID2 2 but 3/2/2), and does a death drop it (bit 2)?
+bool CanDropByHand(const assets::ItemRow& row);
+bool CanDropAtDeath(const assets::ItemRow& row);
 
 // --- Repairing at an NPC ----------------------------------------
 

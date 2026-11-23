@@ -338,25 +338,24 @@ Inventory::MoveResult Inventory::Move(const assets::ItemTable& items, const Wear
         return result;
     }
     if (from < slot::kWorn) {
-        // Off the body into the bag: what is there must be worn in its place, or the place free.
+        // Off the body: into the bag's first free place whatever place was asked, never a swap (the original's detach;
+        // a swap is the other way, a bag item put on); the arrows (bolts) beside a weapon go with it, to the next.
         if (count != src->second.count) return refuse(ItemStatus::BadSlot);
-        if (dst != places.end()) {
-            if (const ItemStatus s = FromCheck(CanEquip(*dstRow, from, who, dst->second)); s != ItemStatus::Ok) return refuse(s);
-        }
-        // The weapon off: the arrows (bolts) beside it go to the bag with it, unless what takes its place
-        // shoots them.
+        const int first = FreeBagPlace();
+        if (first < 0) return refuse(ItemStatus::BagFull);
         int ammoTo = -1;
         if (from == slot::kWeapon) {
             if (const ItemInstance* side = At(slot::kShield)) {
                 const assets::ItemRow* sideRow = items.Find(side->refId);
-                const assets::ItemRow* next = dst != places.end() ? dstRow : nullptr;
-                if (sideRow != nullptr && IsAmmunition(*sideRow) && !FitsBeside(next, *sideRow)) {
-                    ammoTo = FreeBagPlace(to);
+                if (sideRow != nullptr && IsAmmunition(*sideRow)) {
+                    ammoTo = FreeBagPlace(first);
                     if (ammoTo < 0) return refuse(ItemStatus::BagFull);
                 }
             }
         }
-        swap();
+        places[std::uint8_t(first)] = std::move(src->second);
+        places.erase(src);
+        result.touched = {from, std::uint8_t(first)};
         if (ammoTo >= 0) {
             places[std::uint8_t(ammoTo)] = std::move(places[slot::kShield]);
             places.erase(slot::kShield);
@@ -365,18 +364,15 @@ Inventory::MoveResult Inventory::Move(const assets::ItemTable& items, const Wear
         }
         return result;
     }
-    // Bag to bag: the same stackable merges, tops up or swaps when full; part of a
-    // stack onto an empty place splits; anything else swaps.
+    // Bag to bag (the original's MoveOrMergeStack): onto the same stackable with room, as much of the whole source stack
+    // as fits (the asked count is not read); onto another item or a full stack, the two swap whatever the count; part of
+    // a stack onto an empty place splits. A grab pet's watch neither merges nor splits.
     const int most = MaxStack(*row);
-    if (dst != places.end() && dst->second.refId == src->second.refId && most > 1) {
+    const bool whole = IsWholeItem(*row);
+    if (dst != places.end() && dst->second.refId == src->second.refId && most > 1 && !whole && dst->second.count < most) {
         ItemInstance& a = src->second;
         ItemInstance& b = dst->second;
-        if (b.count >= most) {
-            if (count != a.count) return refuse(ItemStatus::BadSlot);
-            swap();
-            return result;
-        }
-        const std::uint16_t moved = std::uint16_t(std::min<int>(count, most - b.count));
+        const std::uint16_t moved = std::uint16_t(std::min<int>(a.count, most - b.count));
         b.count = std::uint16_t(b.count + moved);
         a.count = std::uint16_t(a.count - moved);
         if (a.count == 0) {
@@ -386,8 +382,12 @@ Inventory::MoveResult Inventory::Move(const assets::ItemTable& items, const Wear
         result.touched = {from, to};
         return result;
     }
+    if (dst != places.end()) {
+        swap();
+        return result;
+    }
     if (count < src->second.count) {
-        if (dst != places.end()) return refuse(ItemStatus::BadSlot); // a split goes to an empty place
+        if (whole) return refuse(ItemStatus::BadSlot);
         ItemInstance part = src->second;
         part.serial = 0;
         part.count = count;

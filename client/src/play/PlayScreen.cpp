@@ -946,7 +946,13 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                       {0x1886, "UIIT_MSG_STRGERR_CANT_FIND_LAST_DIEDPOS"},
                       {0x18FD, "UIIT_MSG_INTERACTION_FAIL_OUT_OF_REQUIRED_LEVEL_FOR_TELEPORT"},
                       {0x18E9, "UIIT_MSG_FORT_PORTALSTONE_FAIL_02"},
-                      {0x18F2, "UIIT_MSG_FORT_ETC_ERROR_WRONGACTION_FORTWAR"}};
+                      {0x18F2, "UIIT_MSG_FORT_ETC_ERROR_WRONGACTION_FORTWAR"},
+                      {0x1838, "UIIT_MSG_STRGERR_CANNOT_BE_DROPPED"},
+                      {0x1839, "UIIT_MSG_STRGERR_CANNOT_BE_PICKED"},
+                      {0x1843, "UIIT_MSG_STRGERR_INVALID_TARGET_STORAGE"},
+                      {0x1834, "UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED"},
+                      {0x1829, "UIIT_MSG_STRGERR_SPECIFY_POSITIVE_NUMBER_ONLY"},
+                      {0x180F, "UIIT_MSG_STRGERR_NOT_ENOUGH_GOLD"}};
         const char* key = "UIIT_MSG_COSPETERR_CANT_USEITEM";
         for (const auto& t : kTexts) {
             if (t.code == refused->code) key = t.key;

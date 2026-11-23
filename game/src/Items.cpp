@@ -96,6 +96,17 @@ int AmmunitionFor(const assets::ItemRow& weapon) {
     return weapon.typeId[3] == 6 ? 1 : weapon.typeId[3] == 12 ? 2 : 0;
 }
 
+bool IsWholeItem(const assets::ItemRow& row) {
+    return row.typeId[0] == 3 && row.typeId[1] == 3 && row.typeId[2] == 13 && row.typeId[3] == 15 && (row.params[5] & 2) != 0;
+}
+
+bool CanDropByHand(const assets::ItemRow& row) {
+    if ((row.canDrop & 1) == 0 || (!row.canTrade && row.canDrop == 1)) return false;
+    return !(row.typeId[0] == 3 && row.typeId[1] == 2 && row.typeId[2] != 2);
+}
+
+bool CanDropAtDeath(const assets::ItemRow& row) { return (row.canDrop & 2) != 0; }
+
 int MaxStack(const assets::ItemRow& row) {
     // Ours (the user's call, 2026-11-12): elixirs stack to 100 (the original's 1), arrows and bolts to 1,000, or their
     // row's own when it is more (the mall's quivers of 10,000).
