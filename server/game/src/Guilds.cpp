@@ -610,6 +610,7 @@ struct Guilds::State {
         if (me == nullptr || !May(*me, game::kGuildPermInvite)) return refuse(GuildError::Denied);
         if (r.target == a.entity) return;
         if (int(g->members.size()) >= game::GuildMemberCap(g->level)) return refuse(GuildError::Full);
+        if (host.GuildInFortressWar(g->id)) return refuse(GuildError::WarNoInvite);
         const std::optional<GuildActor> t = host.GuildPlayerAt(r.target);
         const double reach = host.GuildDistance(a.entity, r.target);
         if (!t || reach < 0 || reach > game::kGuildInviteReach) return refuse(GuildError::Failed);
@@ -707,6 +708,8 @@ struct Guilds::State {
         if (!host.IsNpc(r.npc) || reach < 0 || reach > game::kGuildNpcReach) return Answer(a.peer, proto::GuildAction::Leave, GuildError::Failed);
         const Member* me = g->Find(a.character);
         if (me == nullptr || me->memberClass == game::kGuildMaster) return;
+        if (host.GuildInFortressWar(g->id)) return Answer(a.peer, proto::GuildAction::Leave, GuildError::WarNoLeave);
+        if (host.GuildStorageHolder(g->id) == a.character) return Answer(a.peer, proto::GuildAction::Leave, GuildError::StorageInUse);
         if (InElection(*g, a.character)) return Answer(a.peer, proto::GuildAction::Leave, GuildError::ElectionNoLeave);
         Remove(*g, a.character, 1);
         Answer(a.peer, proto::GuildAction::Leave, GuildError::Ok);
@@ -718,12 +721,14 @@ struct Guilds::State {
         if (g == nullptr) return;
         const Member* me = g->Find(a.character);
         if (me == nullptr || !May(*me, game::kGuildPermKick)) return refuse(GuildError::Denied);
+        if (host.GuildInFortressWar(g->id)) return refuse(GuildError::WarNoKick);
         if (r.name.size() < 2) return;
         const std::string key = Lower(r.name);
         const auto target = std::find_if(g->members.begin(), g->members.end(), [&](const Member& m) { return Lower(m.name) == key; });
         if (target == g->members.end()) return; // not found: no answer
         if (target->character == a.character) return refuse(GuildError::KickSelf);
         if (target->memberClass == game::kGuildMaster) return refuse(GuildError::MasterNotExpellable);
+        if (host.GuildStorageHolder(g->id) == target->character) return refuse(GuildError::StorageInUse);
         if (InElection(*g, target->character)) return refuse(GuildError::ElectionNoKick);
         Remove(*g, target->character, 2);
         Answer(a.peer, proto::GuildAction::Kick, GuildError::Ok);
@@ -740,6 +745,7 @@ struct Guilds::State {
         if (Hostiles(g->id) > 0) return Answer(a.peer, proto::GuildAction::Disband, GuildError::DisbandWar);
         if (host.GuildHoldsFortress(g->id)) return Answer(a.peer, proto::GuildAction::Disband, GuildError::DisbandFortress);
         if (host.GuildInFortressWar(g->id)) return Answer(a.peer, proto::GuildAction::Disband, GuildError::DisbandSiege);
+        if (host.GuildStorageHolder(g->id) != 0) return Answer(a.peer, proto::GuildAction::Disband, GuildError::StorageInUse);
         // Ours: a guild in a union leaves it first (the original's shard manager's way is not known).
         if (g->alliance != 0) LeaveUnion(*g, 2);
         const std::uint32_t id = g->id;
@@ -796,6 +802,10 @@ struct Guilds::State {
             after[m->character] = p.permission;
             changes.emplace_back(m->character, p.permission);
         }
+        if (const std::int64_t holder = host.GuildStorageHolder(g->id); holder != 0) {
+            const Member* m = g->Find(holder);
+            if (m != nullptr && m->memberClass != game::kGuildMaster && (after[holder] & game::kGuildPermStorage) == 0) return refuse(GuildError::StorageRightInUse);
+        }
         int holders = 0;
         for (const Member& m : g->members) {
             if (m.memberClass == game::kGuildMaster || (after[m.character] & game::kGuildPermUnionChat) != 0) ++holders;
@@ -814,9 +824,12 @@ struct Guilds::State {
         const auto refuse = [&](GuildError e) { Answer(a.peer, proto::GuildAction::MasterTransfer, e); };
         if (std::int64_t(r.character) == a.character) return refuse(GuildError::Failed);
         Guild* g = GuildOfCharacter(a.character);
-        if (g == nullptr) return;
+        if (g == nullptr) return refuse(GuildError::NoGuild);
+        // A vote open in the guild (its end decides), then the master's own right, then the fortress war (0x4C5D).
+        if (elections.contains(g->id) || remoteElections.contains(g->id)) return refuse(GuildError::Denied);
         Member* me = g->Find(a.character);
         if (me == nullptr || me->memberClass != game::kGuildMaster) return refuse(GuildError::Denied);
+        if (host.GuildInFortressWar(g->id)) return refuse(GuildError::PositionInWar);
         const double reach = host.GuildDistance(a.entity, r.npc);
         if (!host.IsGuildNpc(r.npc) || reach < 0 || reach > game::kGuildNpcReach) return refuse(GuildError::Failed);
         Member* next = g->Find(r.character);
@@ -978,6 +991,7 @@ struct Guilds::State {
         const auto alliance = alliances.find(g->alliance);
         const bool leads = g->alliance == 0 || (alliance != alliances.end() && alliance->second.guilds[0] == g->id);
         if (me == nullptr || me->memberClass != game::kGuildMaster || !leads) return refuse(GuildError::Denied);
+        if (host.GuildInFortressWar(g->id)) return refuse(GuildError::WarNoUnionInvite);
         if (g->level < game::kUnionMinLevel) return refuse(GuildError::UnionLevel);
         Guild* other = GuildOfCharacter(t->character);
         if (other == nullptr) return refuse(GuildError::NoTargetGuild);
@@ -986,6 +1000,7 @@ struct Guilds::State {
         if (other->alliance != 0) return refuse(GuildError::TargetHasUnion);
         const Member* theirs = other->Find(t->character);
         if (theirs == nullptr || theirs->memberClass != game::kGuildMaster) return refuse(GuildError::TargetDenied);
+        if (WarBetween(g->id, other->id) != nullptr) return refuse(GuildError::UnionAtWar);
         // Ours here: the eight places (the original's shard manager refuses a ninth, 0x4C29).
         if (alliance != alliances.end() && std::count(alliance->second.guilds.begin(), alliance->second.guilds.end(), 0u) == 0) {
             return refuse(GuildError::UnionFull);
@@ -1334,6 +1349,8 @@ struct Guilds::State {
         if (Hostiles(them->second.id) >= game::kGuildWarMaxHostile) return refuse(GuildError::TargetHostileFull);
         if (WarBetween(g->id, them->second.id) != nullptr) return refuse(GuildError::AlreadyEnemies);
         if (g->alliance != 0 && g->alliance == them->second.alliance) return refuse(GuildError::AllyWar);
+        if (host.GuildInEventWorld(a.entity) && host.GuildInEventWorld(there->second.entity)) return refuse(GuildError::WarInEvent);
+        if (host.GuildInArena(a.entity) || host.GuildInArena(there->second.entity)) return refuse(GuildError::WarInArena);
         if (proposals.contains(theirMaster->character)) return refuse(GuildError::TargetBusy);
         Proposal p;
         p.kind = proto::kProposalWar;
@@ -1770,7 +1787,9 @@ struct Guilds::State {
     void UnionLeaveRequest(const GuildActor& a) {
         const auto refuse = [&](GuildError e) { Answer(a.peer, proto::GuildAction::UnionLeave, e); };
         Guild* g = GuildOfCharacter(a.character);
-        const Member* me = g != nullptr ? g->Find(a.character) : nullptr;
+        if (g != nullptr && host.GuildInFortressWar(g->id)) return refuse(GuildError::WarNoUnionLeave);
+        if (g == nullptr) return refuse(GuildError::NoGuild);
+        const Member* me = g->Find(a.character);
         if (me == nullptr || me->memberClass != game::kGuildMaster) return refuse(GuildError::Denied);
         if (g->alliance == 0) return refuse(GuildError::NotInUnion);
         LeaveUnion(*g, 2);
@@ -1780,11 +1799,13 @@ struct Guilds::State {
     void UnionKickRequest(const GuildActor& a, const proto::UnionKick& r) {
         const auto refuse = [&](GuildError e) { Answer(a.peer, proto::GuildAction::UnionKick, e); };
         Guild* g = GuildOfCharacter(a.character);
-        const Member* me = g != nullptr ? g->Find(a.character) : nullptr;
-        const auto alliance = g != nullptr ? alliances.find(g->alliance) : alliances.end();
-        if (me == nullptr || me->memberClass != game::kGuildMaster || alliance == alliances.end() || alliance->second.guilds[0] != g->id) {
-            return refuse(GuildError::Denied);
-        }
+        if (g != nullptr && host.GuildInFortressWar(g->id)) return refuse(GuildError::WarNoUnionKick);
+        if (g == nullptr) return refuse(GuildError::NoGuild);
+        const Member* me = g->Find(a.character);
+        if (me == nullptr || me->memberClass != game::kGuildMaster) return refuse(GuildError::Denied);
+        const auto alliance = alliances.find(g->alliance);
+        if (g->alliance == 0 || alliance == alliances.end()) return refuse(GuildError::NotInUnion);
+        if (alliance->second.guilds[0] != g->id) return refuse(GuildError::Denied);
         const auto& slots = alliance->second.guilds;
         const auto target = guilds.find(r.guild);
         if (r.guild == g->id || target == guilds.end() || std::find(slots.begin(), slots.end(), r.guild) == slots.end()) {
@@ -1838,6 +1859,24 @@ void Guilds::MovedAway(std::int64_t character) {
     s.online.erase(character);
     s.recallAsks.erase(character);
     s.remoteOnline.insert(character);
+}
+
+void Guilds::FortressPositionsReset(std::uint32_t guild) {
+    State& s = *s_;
+    const auto g = s.guilds.find(guild);
+    if (g == s.guilds.end()) return;
+    bool any = false;
+    for (auto& m : g->second.members) {
+        // Positions 4 and up (war, production, training, the engineers), as the database's reset; the Commander keeps his.
+        if (m.position < 4) continue;
+        m.position = game::kPositionNone;
+        any = true;
+        s.Write([guild, character = m.character](Database& db) { SaveGuildPosition(db, guild, character, game::kPositionNone); });
+        s.ToGuild(g->second, proto::GuildMemberChanged{s.Record(m)});
+    }
+    if (!any) return;
+    s.Touch(guild);
+    s.PublishTouched();
 }
 
 void Guilds::RowsChanged(std::uint32_t guild) {

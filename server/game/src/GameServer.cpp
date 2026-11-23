@@ -241,6 +241,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::int64_t heldAccount = 0, heldSession = 0;
         // The storage keeper the account's storage was opened at: every move and gold move checks it is still near.
         std::uint32_t storageKeeper = 0;
+        std::uint32_t guildChestNpc = 0; // the NPC the guild's storage was opened at
         // Its name in the world (whispers find it by it), and its chat: when its lines came, until
         // when it may not chat.
         std::string name;
@@ -832,6 +833,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         chest.user = peer.id;
         chest.userName = player.name;
         player.guildChest = access.guild;
+        player.guildChestNpc = npc;
         const std::uint8_t size = std::uint8_t(game::GuildStorageSize(access.level));
         if (chest.storage) {
             chest.storage->size = size;
@@ -874,6 +876,21 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             ChestTask(player.guildChest, [guild = player.guildChest, server = config.id](Database& db) { ReleaseGuildStorageLock(db, guild, server); });
         }
         player.guildChest = 0;
+    }
+    // The guild's storage a player holds: still its member with the right (Guilds::StorageAccessOf) and the NPC it was
+    // opened at still in reach. Not: put away (its lock given back).
+    bool GuildChestStillHeld(Peer& peer, PlayerWorld& player) {
+        if (player.guildChest == 0 || !guilds) return false;
+        const Guilds::StorageAccess access = guilds->StorageAccessOf(player.selected);
+        const auto me = world->Where(player.entity), there = world->Where(player.guildChestNpc);
+        bool near = false;
+        if (me && there) {
+            const proto::FlatPosition a = proto::ToFlat(me->position), b = proto::ToFlat(there->position);
+            near = std::hypot(a.x - b.x, a.z - b.z) <= config.gateReach;
+        }
+        if (access.refusal == 0 && access.guild == player.guildChest && near) return true;
+        CloseGuildStorage(peer.id, player);
+        return false;
     }
     // The storage a move or gold goes to: the account's, or the guild's the player holds.
     game::Storage* StorageFor(const Peer& peer, PlayerWorld& player, bool guild) {
@@ -922,6 +939,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             SendMessage(*peer.connection, answer);
             return;
         }
+        // The guild's: still a member with the storage's right, and the NPC it was opened at still near; else put away.
+        if (m.guild != 0 && !GuildChestStillHeld(peer, player)) {
+            answer.status = proto::ItemStatus::TooFar;
+            SendMessage(*peer.connection, answer);
+            return;
+        }
         // A bound item (the beta quests' weapons) stays out of a guild's storage; its own storage takes it.
         if (m.guild != 0 && !m.fromStorage && m.toStorage) {
             if (const auto it = player.inventory.places.find(m.from); it != player.inventory.places.end() && it->second.bound) {
@@ -941,6 +964,23 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 answer.status = proto::ItemStatus::Failed;
                 SendMessage(*peer.connection, answer);
                 return;
+            }
+        }
+        // Into a storage from the bag: its keeping fee, the item's KeepingFee x its pieces (half for a guild's), at least 1,
+        // at most 10,000,000; too little gold: 0x180F.
+        std::uint64_t fee = 0;
+        if (!m.fromStorage && m.toStorage) {
+            const game::ItemInstance* item = player.inventory.At(m.from);
+            const assets::ItemRow* row = item != nullptr ? config.rules->items->Find(item->refId) : nullptr;
+            if (row != nullptr) {
+                const double whole = double(row->keepingFee) * double(item->count) * (m.guild != 0 ? 0.5 : 1.0);
+                fee = std::clamp<std::uint64_t>(std::uint64_t(whole), 1, 10'000'000);
+                if (player.inventory.gold < fee) {
+                    SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x180F});
+                    answer.status = proto::ItemStatus::NotEnoughGold;
+                    SendMessage(*peer.connection, answer);
+                    return;
+                }
             }
         }
         const auto inventoryBefore = player.inventory.places;
@@ -995,13 +1035,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 answer.inventoryEmptied.push_back(place);
             }
         }
+        // The fee taken with the move (written with it, below).
+        if (fee != 0) {
+            player.inventory.gold -= fee;
+            SendMessage(*peer.connection, proto::GoldChanged{player.inventory.gold});
+        }
         SendMessage(*peer.connection, answer);
         // Both sides in one transaction (the original's _STRG_MOVE_ITEM), after everything submitted before it, with the bag's
-        // own saves still waiting folded in (SaveSideOf): neither side's earlier saves can land after it.
+        // own saves still waiting folded in (SaveSideOf): neither side's earlier saves can land after it; a fee's gold too.
         ExchangeSaveSide bag = SaveSideOf(player.selected, player.inventory, r.inventoryTouched);
         bag.gone.insert(bag.gone.end(), r.gone.begin(), r.gone.end());
-        database.SubmitBarrier([this, bag = std::move(bag), side = std::move(side)](Database& db) {
-            if (!SaveStorageMove(db, bag, side, false)) completions->Post([this, character = bag.character] { SaveFailed(character, "a storage move"); });
+        database.SubmitBarrier([this, bag = std::move(bag), side = std::move(side), withGold = fee != 0](Database& db) {
+            if (!SaveStorageMove(db, bag, side, withGold)) completions->Post([this, character = bag.character] { SaveFailed(character, "a storage move"); });
         });
     }
 
@@ -1013,6 +1058,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (g.guild == 0 && (player.storageKeeper == 0 || AtStorageKeeper(player, player.storageKeeper) != proto::GateStatus::Ok)) {
             return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1834}); // UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED
         }
+        if (g.guild != 0 && !GuildChestStillHeld(peer, player)) return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1834});
         std::uint64_t& from = g.deposit ? player.inventory.gold : storage->gold;
         std::uint64_t& to = g.deposit ? storage->gold : player.inventory.gold;
         if (from < g.amount || to > UINT64_MAX - g.amount) return;
@@ -2450,8 +2496,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
         if (PlayerWorld* victim = PlayerByEntity(monster)) {
             // A player killed by a player (or his COS): its death (a player killer's penalty) and the war's count.
-            PlayerWorld* killer = d.damageBy.empty() ? nullptr : PlayerByEntity(AsOwner(d.killer != 0 ? d.killer : d.damageBy.back().first));
-            if (!victim->dead) Die(*victim, killer);
+            const std::uint32_t striker = d.killer != 0 ? d.killer : (d.damageBy.empty() ? 0u : d.damageBy.back().first);
+            PlayerWorld* killer = d.damageBy.empty() ? nullptr : PlayerByEntity(AsOwner(striker));
+            // A pet's kill is its owner's, scored in a guild war by the pet's own level (the original's).
+            if (!victim->dead) Die(*victim, killer, 0, coses ? coses->LevelOf(striker) : 0);
             return;
         }
         core::LogInfo("{}: monster {} ({}) killed", config.name, monster, d.refObjId);
@@ -5829,7 +5877,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
 
     // A player's death: `killer` the player who killed it (a COS's owner), `monster` the killing monster's reference (0:
     // none known). Its kill's relation (game::KillRelation) decides the penalty, the PK counts and the killer's reward.
-    void Die(PlayerWorld& player, PlayerWorld* killer = nullptr, std::uint32_t monster = 0) {
+    void Die(PlayerWorld& player, PlayerWorld* killer = nullptr, std::uint32_t monster = 0, int strikerLevel = 0) {
         if (killer == &player) killer = nullptr;
         const game::KillRelation relation = KillRelationOf(player, killer);
         const bool victimMurderer = player.pkPoints > 0;
@@ -5964,7 +6012,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (flagWorlds) flagWorlds->Died(player.entity, killer != nullptr ? killer->entity : 0u);
         if (arenas) arenas->Died(player.entity, killer != nullptr ? killer->entity : 0u); // the gate's revival in 10 s, the points
         core::LogInfo("{}: {} dies ({} experience lost){}", config.name, player.name, player.deathLoss, killer != nullptr ? ", killed by " + killer->name : "");
-        if (killer != nullptr && guilds) guilds->PlayerKilled(killer->selected, player.selected, killer->level, player.level);
+        if (killer != nullptr && guilds) guilds->PlayerKilled(killer->selected, player.selected, strikerLevel > 0 ? strikerLevel : killer->level, player.level);
         if (killer != nullptr && fortresses) fortresses->PlayerKilled(killer->selected, player.selected);
         // The temple quests' kill-player goals: the victim's level, region and job.
         if (killer != nullptr && quests) {
@@ -7858,6 +7906,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     bool GuildNameAllowed(std::string_view name) const override {
         const game::NameCheck check = config.rules->names.Check(name);
         return check == game::NameCheck::Ok || check == game::NameCheck::BadLength;
+    }
+    std::int64_t GuildStorageHolder(std::uint32_t guild) const override {
+        const auto c = guildChests.find(guild);
+        if (c == guildChests.end() || c->second.user == 0) return 0;
+        const auto p = players.find(c->second.user);
+        return p != players.end() ? p->second.selected : 0;
+    }
+    bool GuildInEventWorld(std::uint32_t entity) const override { return flagWorlds && flagWorlds->InMatch(entity); }
+    bool GuildInArena(std::uint32_t entity) const override { return arenas && arenas->InMatch(entity); }
+    void FortressLost(std::uint32_t guild) override {
+        if (guilds) guilds->FortressPositionsReset(guild);
     }
     void GuildPay(std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) override {
         Payment(character, fee, std::move(work), std::move(done));

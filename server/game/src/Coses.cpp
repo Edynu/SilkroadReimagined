@@ -1347,6 +1347,11 @@ bool Coses::Leashed(std::uint32_t owner, const proto::WorldPosition& target) {
     return false;
 }
 
+int Coses::LevelOf(std::uint32_t entity) const {
+    const auto it = coses_.find(entity);
+    return it != coses_.end() ? std::max(1, it->second.row.level) : 0;
+}
+
 std::uint32_t Coses::OwnerOf(std::uint32_t entity) const {
     const auto it = coses_.find(entity);
     return it != coses_.end() ? it->second.owner : 0;

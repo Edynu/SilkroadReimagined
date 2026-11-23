@@ -670,6 +670,7 @@ struct Academies::State {
             });
     }
 
+    static constexpr double kInviteReach = 600.0; // the original's reach of a player (CGObjChar_CheckHitRange)
     void Invite(const AcademyActor& a, std::uint32_t entity, Clock::time_point now) {
         Online* o = Find(a.character);
         if (o == nullptr) return;
@@ -680,6 +681,18 @@ struct Academies::State {
         const std::optional<AcademyActor> t = host.AcademyPlayerAt(entity);
         Online* to = t ? Find(t->character) : nullptr;
         if (!t || to == nullptr || !to->loaded) return Refuse(a.peer, req, code::kInvalidTarget);
+        // Within the original's reach of a player (600, the same layer).
+        const auto here = host.AcademyPositionOf(a.entity), there = host.AcademyPositionOf(entity);
+        if (!here || !there || here->layer != there->layer) return Refuse(a.peer, req, code::kInvalidTarget);
+        const proto::FlatPosition pa = proto::ToFlat(*here), pb = proto::ToFlat(*there);
+        if (std::hypot(pa.x - pb.x, pa.z - pb.z) > kInviteReach) return Refuse(a.peer, req, code::kInvalidTarget);
+        // The places by its level now (below 40 an apprentice's, 40..59 an assistant's, 60 and up none); the database
+        // stores the class by its highest level (_TrainingCamp_FnAddMember).
+        const AcademyRow& row = academies.at(o->academy);
+        const academy::Class byLevel = academy::ClassOfLevel(t->level);
+        if (byLevel == academy::Class::Guardian) return Refuse(a.peer, req, code::kInvalidTarget);
+        if (byLevel == academy::Class::Assistant && Count(row, byLevel) >= academy::kMostAssistants) return Refuse(a.peer, req, code::kAssistantsFull);
+        if (byLevel == academy::Class::Apprentice && Count(row, byLevel) >= academy::kMostApprentices) return Refuse(a.peer, req, code::kApprenticesFull);
         // The one invited: not dealing, alive, no rejoining wait, in no academy.
         if (t->busy) return Refuse(a.peer, req, code::kBusy);
         if (t->dead) return Refuse(a.peer, req, code::kInvalidTarget);
@@ -687,12 +700,8 @@ struct Academies::State {
         if (to->academy == o->academy) return Refuse(a.peer, req, code::kAlreadyMember);
         if (to->academy != 0) return Refuse(a.peer, req, code::kOtherAcademy);
         if (t->jobChange) return Refuse(a.peer, req, code::kJobChange);
-        // Its class by the highest level it reached, and its class's places (_TrainingCamp_FnAddMember).
-        const AcademyRow& row = academies.at(o->academy);
         const academy::Class cls = academy::ClassOfLevel(t->maxLevel);
         if (cls == academy::Class::Guardian) return Refuse(a.peer, req, code::kFailed);
-        if (cls == academy::Class::Assistant && Count(row, cls) >= academy::kMostAssistants) return Refuse(a.peer, req, code::kAssistantsFull);
-        if (cls == academy::Class::Apprentice && Count(row, cls) >= academy::kMostApprentices) return Refuse(a.peer, req, code::kApprenticesFull);
         if (invites.contains(t->character)) return Refuse(a.peer, req, code::kFailed);
         invites[t->character] = {o->academy, a.character, a.peer, a.name, t->name, t->peer, now + std::chrono::seconds(academy::kInviteSeconds)};
         Send(t->peer, proto::AcademyAsk{a.name});
@@ -744,23 +753,26 @@ struct Academies::State {
         Online* o = Find(a.character);
         if (o == nullptr) return;
         const proto::MessageId req = ban ? proto::AcademyBan::kId : proto::AcademyLeave::kId;
-        if (a.dead) return Refuse(a.peer, req, code::kDead);
-        if (o->academy == 0 || !academies.contains(o->academy)) return Refuse(a.peer, req, ban ? code::kInvalidTarget : code::kNotPosition);
+        // No life asked (the original's); outside an academy 0x680B.
+        if (o->academy == 0 || !academies.contains(o->academy)) return Refuse(a.peer, req, code::kNoAcademy);
         const AcademyRow& row = academies.at(o->academy);
+        const AcademyMemberRow* me = Member(row, a.character);
+        const bool isGuardian = me != nullptr && me->memberClass == std::uint8_t(academy::Class::Guardian);
         const AcademyMemberRow* target = nullptr;
         if (ban) {
-            if (const std::uint16_t c = GuardianCheck(a, *o)) return Refuse(a.peer, req, c);
+            if (!isGuardian) return Refuse(a.peer, req, code::kNotGuardian);
             for (const AcademyMemberRow& m : row.members)
                 if (Lower(m.name) == Lower(name)) target = &m;
             if (target == nullptr) return Refuse(a.peer, req, code::kNotMember);
+            if (target->character == a.character) return Refuse(a.peer, req, code::kNotGuardian);
             // "To ban an apprentice, delete the registration on the matching list first" (0x6829).
             if (row.matchEntry != 0) return Refuse(a.peer, req, code::kBanWhileListed);
         } else {
-            target = Member(row, a.character);
+            // The guardian does not leave (he disbands): 0x6816.
+            if (isGuardian) return Refuse(a.peer, req, code::kNotGuardian);
+            target = me;
         }
-        if (target == nullptr) return Refuse(a.peer, req, code::kNotPosition);
-        // The guardian neither leaves nor is put out (_TRAINING_CAMP_DELMEMBER -2001): he disbands.
-        if (target->memberClass == std::uint8_t(academy::Class::Guardian)) return Refuse(a.peer, req, code::kFailed);
+        if (target == nullptr) return Refuse(a.peer, req, code::kNotMember);
         // 24 hours after joining, neither (0x6820, 0x6821).
         if (const std::int64_t left = target->joined + academy::kDay - Now(); left > 0) return Refuse(a.peer, req, ban ? code::kBanWait : code::kLeaveWait, left);
         const std::uint32_t id = o->academy;
@@ -820,7 +832,7 @@ struct Academies::State {
             if (me->memberClass == std::uint8_t(academy::Class::Guardian)) return Refuse(a.peer, req, code::kWrongTarget);
             target = me;
             const bool apprentice = me->memberClass == std::uint8_t(academy::Class::Apprentice);
-            if (a.level < (apprentice ? academy::kApprenticeGraduates : academy::kAssistantGraduates)) return Refuse(a.peer, req, code::kGraduateLevel);
+            if (a.maxLevel < (apprentice ? academy::kApprenticeGraduates : academy::kAssistantGraduates)) return Refuse(a.peer, req, code::kGraduateLevel);
             if (apprentice) {
                 if (rating >= std::size(academy::kRatingPoints)) return Refuse(a.peer, req, code::kWrongTarget);
                 evaluation = academy::kRatingPoints[rating];
@@ -927,7 +939,14 @@ struct Academies::State {
         Online* o = Find(a.character);
         if (o == nullptr) return;
         const proto::MessageId req = modify ? proto::AcademyMatchModify::kId : proto::AcademyMatchRegister::kId;
+        if (a.dead) return Refuse(a.peer, req, code::kDead);
+        if (!modify && a.jobChange) return Refuse(a.peer, req, code::kJobChange);
+        if (o->academy == 0 || !academies.contains(o->academy)) return Refuse(a.peer, req, code::kNotPosition);
         if (const std::uint16_t c = GuardianCheck(a, *o)) return Refuse(a.peer, req, c);
+        // The recruiting ban (a banned apprentice's 24 hours) keeps it off the list too: no join by matching meanwhile.
+        if (!modify) {
+            if (const std::int64_t left = WaitLeft(*o, academy::kWaitRecruit)) return Refuse(a.peer, req, code::kRecruitWait, left);
+        }
         if (title.empty() || title.size() > academy::kMatchTitleMax || !host.AcademyTextAllowed(title)) return Refuse(a.peer, req, code::kFailed);
         const AcademyRow& row = academies.at(o->academy);
         // The class it takes must have a place (the client's own checks).

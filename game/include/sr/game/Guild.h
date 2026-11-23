@@ -166,6 +166,18 @@ enum class GuildError : std::uint16_t {
     PositionNoFortress = 0x4C5B, // the administrators need a fortress
     PositionNone = 0x4C5C,       // none to take away
     PositionInWar = 0x4C5D,      // the guild is in the fortress war now
+    // The fortress war's locks on the guild's and the union's members (UIIT_MSG_FORT_STRUCTURE_ACTION_ERROR_06 in the client).
+    WarNoInvite = 0x4C71,
+    WarNoLeave = 0x4C72,
+    WarNoKick = 0x4C73,
+    WarNoUnionInvite = 0x4C75,
+    WarNoUnionLeave = 0x4C76,
+    WarNoUnionKick = 0x4C77,
+    StorageInUse = 0x4C48,      // a member uses the guild storage: no disband, no kick or leave of him (WAREHOUSE_INTERRUPT)
+    StorageRightInUse = 0x4C4C, // his storage right is not taken while he uses it (WAREHOUSE_USE_ING)
+    UnionAtWar = 0x4C42,        // a union invitation to a guild at war with one's own (RESPECT_ALLY_NOTALLY)
+    WarInEvent = 0x4C79,        // both masters in a timed world event's world
+    WarInArena = 0x4C7A,        // either master in a Battle Arena world
 };
 
 // Why the guild's points were spent (_GPHistory.Reason).

@@ -283,6 +283,8 @@ public:
     bool Leashed(std::uint32_t owner, const game::proto::WorldPosition& target);
     // A COS's owner (0: `entity` is no COS).
     std::uint32_t OwnerOf(std::uint32_t entity) const;
+    // A COS's level (0: not a COS).
+    int LevelOf(std::uint32_t entity) const;
     // A COS's numbers and health as a target (null / 0: no COS, or one with none: a ride); whether its owner rides it.
     const game::CombatStats* StatsOf(std::uint32_t entity) const;
     std::uint32_t HpOf(std::uint32_t entity) const;

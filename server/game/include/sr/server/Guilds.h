@@ -81,6 +81,20 @@ public:
         (void)guild;
         return false;
     }
+    // The member holding the guild's storage open (0: nobody).
+    virtual std::int64_t GuildStorageHolder(std::uint32_t guild) const {
+        (void)guild;
+        return 0;
+    }
+    // A player standing in a timed world event's world (a Capture the Flag match), or in a Battle Arena map.
+    virtual bool GuildInEventWorld(std::uint32_t entity) const {
+        (void)entity;
+        return false;
+    }
+    virtual bool GuildInArena(std::uint32_t entity) const {
+        (void)entity;
+        return false;
+    }
     // One of the item in an inventory place used up, when it is that item (itemdata codename).
     virtual bool TakeGuildItem(std::uint64_t peer, std::uint8_t slot, std::string_view codename) = 0;
     // To those who see the entity, itself too.
@@ -121,6 +135,9 @@ public:
     // A guild's rows changed in the database under it (a member deleted for good): loaded again here, the shard's other
     // servers told to.
     void RowsChanged(std::uint32_t guild);
+    // A fortress taken from the guild: its members' fortress positions but the Commander's back to none (as the database's
+    // reset of SiegeAuthority 4 and up), the members told, the shard's other servers too.
+    void FortressPositionsReset(std::uint32_t guild);
     // Gone to another game server of the shard: still online, nobody is told (Left if it never arrives).
     void MovedAway(std::int64_t character);
     void LevelChanged(std::int64_t character, int level);

@@ -670,6 +670,21 @@ TEST_CASE("Guilds: the guild's storage: level 2 and authority asked, one member 
     const auto seen = Next<proto::StorageList>(helper);
     CHECK(seen.guild == 1);
     CHECK(seen.gold == 1000);
+    // While the helper uses it: his storage right is not taken (0x4C4C), he is not put out and the guild is not disbanded
+    // (0x4C48), as the original keeps its storage's user.
+    const auto refusal = [&](GuildAction action) {
+        for (int i = 0; i < 20; ++i) {
+            const auto answer = Next<proto::GuildAnswer>(master);
+            if (answer.action == action && GuildError(answer.error) != GuildError::Ok) return GuildError(answer.error);
+        }
+        return GuildError::Ok;
+    };
+    master.c->Send(proto::GuildPermissions{{{std::uint32_t(helper.character), 0}}});
+    CHECK(refusal(GuildAction::Permissions) == GuildError::StorageRightInUse);
+    master.c->Send(proto::GuildKick{"Helper"});
+    CHECK(refusal(GuildAction::Kick) == GuildError::StorageInUse);
+    master.c->Send(proto::GuildDisband{master.keeper});
+    CHECK(refusal(GuildAction::Disband) == GuildError::StorageInUse);
     // Kept in the guild's row.
     for (int i = 0; i < 50 && t.Db().Query("SELECT gold FROM _guild WHERE name = 'Vault'").Int(0, 0) != 1000; ++i) rig.pump();
     CHECK(t.Db().Query("SELECT gold FROM _guild WHERE name = 'Vault'").Int(0, 0) == 1000);

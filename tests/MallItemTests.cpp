@@ -742,6 +742,8 @@ TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is 
     const std::int64_t scrollId = bagId(scrolls), boothId = bagId(booth);
     REQUIRE(scrollId != 0);
     REQUIRE(boothId != 0);
+    // A deposit costs its keeping fee (at least 1 gold): some gold first.
+    p = s.Relog(p, [&] { REQUIRE(t.Db().Query("UPDATE _char SET remaingold = 1000 WHERE charid = $1", {p.character}).Ok()); });
     open();
 
     // In: the same item in the storage's place, gone from the bag (the original's _STRG_MOVE_ITEM moves one item id).

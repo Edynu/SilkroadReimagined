@@ -213,6 +213,8 @@ public:
         (void)peer;
         (void)amount;
     }
+    // A fortress taken from `guild`: its members' fortress positions (but the Commander's) are gone (the database's reset).
+    virtual void FortressLost(std::uint32_t guild) { (void)guild; }
     virtual void FortressTaxRateChanged(std::uint32_t fortress, std::uint32_t guild, int rate) {
         (void)fortress;
         (void)guild;

@@ -740,6 +740,7 @@ struct Fortresses::State {
         // A new owner's structures at their first level and full health (`_SiegeFortressResetStructUpgradeLevel_NoTx`);
         // a fortress kept keeps its damage and its fallen structures, for the battle aide's repairs.
         if (taken) Rebuild(fi, f.row.guild, false);
+        if (taken && owner != 0) host.FortressLost(owner);
         Reward(f);
         Evacuate(f, true);
         PublishRow(f);
