@@ -144,6 +144,8 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
     if ((place->position.region & 0x8000) != 0) return refuse("UIIT_MSG_COS_CREATE_DUNGEON");
     if (o->fought) return refuse("UIIT_MSG_COS_CAN_NOT_CREATE_BATTLE");
     if (PlaceTaken(owner, kind)) return refuse("UIIT_MSG_COS_CANT_SUMMON_DUPLICATE_PETTYPE");
+    // Its kept transport still coming (read at its entry, made once it stands): that one is its.
+    if (kind == game::CosKind::Transport && (cartLoading_.contains(owner) || carts_.contains(owner))) return refuse("UIIT_MSG_COS_CANT_SUMMON_DUPLICATE_PETTYPE");
     const std::uint32_t entity = Place(owner, *row);
     if (entity == 0) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM");
     Cos& c = coses_[entity];
@@ -160,6 +162,23 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
         // Its numbers as a monster's (its row's): the bandits' hits are rolled against them.
         c.stats = game::MonsterCombatStats(*row, 0);
         c.stats.maxHp = std::max<std::uint32_t>(1, row->maxHp);
+        // Its row (the original's _AddNewCOS), in its owner's order of saves: its bag's saves wait for it.
+        c.character = o->character;
+        CosRow made;
+        made.owner = o->character;
+        made.refId = row->refObjId;
+        made.hp = c.hp;
+        made.state = std::uint8_t(game::CosState::Active);
+        made.level = std::max(1, row->level);
+        host_.CosCartCreate(o->character, made, TransportModels(), [this, entity, owner, character = o->character](std::int64_t id) {
+            if (id == 0) return;
+            const auto it = coses_.find(entity);
+            if (it == coses_.end() || it->second.owner != owner || it->second.kind != game::CosKind::Transport) {
+                host_.CosCartDelete(character, id); // gone before its row was made
+                return;
+            }
+            it->second.cart = id;
+        });
     }
     owned_[owner].push_back(entity);
     Send(owner, proto::CosSummoned{entity, c.model, std::uint8_t(kind), c.hp, c.maxHp, c.item});
@@ -1153,6 +1172,7 @@ void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool termin
     const auto it = coses_.find(entity);
     if (it == coses_.end()) return;
     const std::uint32_t owner = it->second.owner;
+    const bool wasRidden = it->second.ridden;
     if (it->second.ridden) Ride(owner, entity, false, Clock::now());
     // A pet back into its item: its row saved as it is now (Summoned when it comes out again where its owner arrives).
     if (Cos& c = it->second; c.row.id != 0) {
@@ -1163,10 +1183,16 @@ void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool termin
         if (!comesBack || dead) SendPetItem(owner, c.row);
     }
     // A transport killed or terminated: every slot drops whole where it stands (as the original's: its death and its
-    // owner's terminate, nothing else; a logout and a dropped owner's wait run out are terminations of ours, upstream's
-    // review 2026-11-22). Any other end (a return, a travel without it, its rider's death) takes the goods along.
+    // owner's terminate, nothing else). Any other end (its owner's leaving, a travel without it, its rider's death) keeps
+    // the goods in its row.
     if (Cos& c = it->second; c.kind == game::CosKind::Transport && !c.bag.empty() && (dead || terminate)) {
         if (const auto at = host_.CosWorld().Where(entity)) host_.CosCargoDropped(owner, at->position, std::exchange(c.bag, {}));
+    }
+    // A transport's row: gone with it when it is killed or sent away (the original's _DeleteCharCOS), else kept with its
+    // goods for its owner's next entry (the original's departure despawns it with no database job).
+    if (const Cos& c = it->second; c.kind == game::CosKind::Transport && c.cart != 0) {
+        if (dead || terminate) host_.CosCartDelete(c.character, c.cart);
+        else host_.CosCartRelease(c.character, c.cart, c.hp, wasRidden, c.bag);
     }
     host_.CosWorld().Leave(entity);
     Send(owner, proto::CosDismissed{entity});
@@ -1181,7 +1207,7 @@ void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool termin
 
 std::optional<Coses::Cart> Coses::TransportCart(std::uint32_t owner) {
     for (auto& [entity, c] : coses_) {
-        if (c.owner == owner && c.kind == game::CosKind::Transport) return Cart{entity, c.model, &c.bag, c.bagSize};
+        if (c.owner == owner && c.kind == game::CosKind::Transport) return Cart{entity, c.model, &c.bag, c.bagSize, c.cart};
     }
     return std::nullopt;
 }
@@ -1194,10 +1220,64 @@ bool Coses::CarriesGoods(std::uint32_t owner) const {
 }
 
 void Coses::CartChanged(std::uint32_t entity) {
-    if (const auto it = coses_.find(entity); it != coses_.end()) SendBag(it->second);
+    const auto it = coses_.find(entity);
+    if (it == coses_.end()) return;
+    SendBag(it->second);
+    // Written in its owner's order of saves, with his gold (a purchase's price, a sale's payout).
+    if (it->second.kind == game::CosKind::Transport) host_.CosCartSave(it->second.character);
 }
 
-void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport, bool terminate) {
+const std::vector<std::uint32_t>& Coses::TransportModels() {
+    if (!transportModelsRead_) {
+        transportModelsRead_ = true;
+        if (const assets::CharacterTable* characters = host_.CosCharacters()) {
+            for (const auto& [codename, row] : characters->rows())
+                if (game::CosKindOf(row) == game::CosKind::Transport) transportModels_.push_back(row.refObjId);
+            std::sort(transportModels_.begin(), transportModels_.end());
+        }
+    }
+    return transportModels_;
+}
+
+void Coses::RestoreCart(std::uint32_t owner, const CosRow& row, Clock::time_point now) {
+    const auto o = host_.CosOwner(owner);
+    const assets::CharacterTable* characters = host_.CosCharacters();
+    const assets::ObjectRow* shape = characters != nullptr ? characters->Find(row.refId) : nullptr;
+    if (!o || shape == nullptr || game::CosKindOf(*shape) != game::CosKind::Transport) return;
+    if (PlaceTaken(owner, game::CosKind::Transport)) {
+        core::LogInfo("cos: {}'s kept transport {} stays kept (one out already)", o->name, row.id);
+        return;
+    }
+    const std::uint32_t entity = Place(owner, *shape);
+    if (entity == 0) return;
+    Cos& c = coses_[entity];
+    c.entity = entity;
+    c.owner = owner;
+    c.model = shape->refObjId;
+    c.kind = game::CosKind::Transport;
+    c.maxHp = shape->maxHp;
+    c.hp = row.hp != 0 ? std::min(row.hp, shape->maxHp) : shape->maxHp;
+    c.walkSpeed = shape->walkSpeed;
+    c.runSpeed = shape->runSpeed;
+    c.bagSize = std::clamp(host_.CosTransportBagSize(shape->refObjId), 0, 255);
+    c.stats = game::MonsterCombatStats(*shape, 0);
+    c.stats.maxHp = std::max<std::uint32_t>(1, shape->maxHp);
+    c.character = o->character;
+    c.cart = row.id;
+    for (const StoredItem& s : row.bag) {
+        game::ItemInstance item = host_.CosItemOf(s);
+        item.creator = s.creator;
+        c.bag[s.slot] = std::move(item);
+    }
+    owned_[owner].push_back(entity);
+    Send(owner, proto::CosSummoned{entity, c.model, std::uint8_t(c.kind), c.hp, c.maxHp, c.item});
+    if (c.bagSize > 0) SendBag(c);
+    core::LogInfo("cos: {}'s transport {} back with {} stacks of goods (row {})", o->name, entity, c.bag.size(), row.id);
+    if (row.state == std::uint8_t(game::CosState::Active)) Ride(owner, entity, true, now);
+    host_.CosTransportBack(owner); // its goods count again: their stars, the bandits' caravan
+}
+
+void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport) {
     // Pets still waiting to come back, their owner leaving for good: inactive.
     if (!comesBack) {
         if (const auto r = returning_.find(owner); r != returning_.end()) {
@@ -1220,7 +1300,7 @@ void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport, 
             travelling_[owner].list.push_back({entity, c->second.ridden}); // a rider stays on it through the travel
             continue;
         }
-        Dismiss(entity, comesBack, false, terminate);
+        Dismiss(entity, comesBack);
     }
 }
 
@@ -1232,28 +1312,11 @@ void Coses::OwnerDied(std::uint32_t owner) {
         const auto c = coses_.find(entity);
         if (c == coses_.end() || !c->second.ridden) continue;
         // The COS ridden goes, a transport too, its goods with it, none dropped (as the original's: the death releases
-        // the ride slot, saved and despawned). One walked beside is not touched (the loop's test). Rare: a rider is never
-        // a monster's target (its mount is).
+        // the ride slot with its database job 1, _DeleteCharCOS: a transport's row and goods deleted). One walked beside is
+        // not touched (the loop's test). Rare: a rider is never a monster's target (its mount is).
+        if (Cos& ridden = c->second; ridden.kind == game::CosKind::Transport && ridden.cart != 0) host_.CosCartDelete(ridden.character, std::exchange(ridden.cart, 0));
         Dismiss(entity, false);
     }
-}
-
-void Coses::OwnerDropped(std::uint32_t owner, std::int64_t character, Clock::time_point now) {
-    const auto it = owned_.find(owner);
-    if (it == owned_.end() || character == 0) return;
-    for (const std::uint32_t entity : std::vector<std::uint32_t>(it->second)) {
-        Cos& c = coses_.at(entity);
-        if (c.kind != game::CosKind::Transport) continue;
-        if (c.ridden) Ride(owner, entity, false, now);
-        std::erase(it->second, entity);
-        c.owner = 0;
-        c.target = 0;
-        // One waiting per character (a second drop while one waits: the newer).
-        if (const auto old = waiting_.find(character); old != waiting_.end() && old->second.entity != entity) Dismiss(old->second.entity, false, false, true);
-        waiting_[character] = {entity, now + kTransportWait};
-        core::LogInfo("cos: transport {} waits {} min for its owner's character {}", entity, kTransportWait.count(), character);
-    }
-    if (const auto again = owned_.find(owner); again != owned_.end() && again->second.empty()) owned_.erase(again);
 }
 
 void Coses::BringTransport(std::uint32_t owner, const proto::WorldPosition& at) {
@@ -1286,17 +1349,15 @@ bool Coses::KeptOutOfTown(std::uint32_t owner, const proto::WorldPosition& targe
 
 void Coses::Entered(std::uint32_t owner, std::vector<PetLink> pets) {
     const auto o = host_.CosOwner(owner);
-    // Its transport waiting since its connection dropped (OwnerDropped): its again, told once it stands (Arrived).
-    if (const auto w = o ? waiting_.find(o->character) : waiting_.end(); w != waiting_.end()) {
-        const std::uint32_t entity = w->second.entity;
-        waiting_.erase(w);
-        if (const auto c = coses_.find(entity); c != coses_.end() && c->second.owner == 0) {
-            c->second.owner = owner;
-            owned_[owner].push_back(entity);
-            travelling_[owner].list.push_back({entity, false});
-            host_.CosTransportBack(owner);
-            core::LogInfo("cos: {} takes its waiting transport {} back", o->name, entity);
-        }
+    // Its transport kept (its row): read now, made beside it once it stands (Tick).
+    if (o) {
+        cartLoading_.insert(owner);
+        host_.CosCartLoad(o->character, TransportModels(), [this, owner, character = o->character](std::vector<CosRow> rows) {
+            cartLoading_.erase(owner);
+            const auto now = host_.CosOwner(owner);
+            if (!now || now->character != character || rows.empty()) return;
+            carts_[owner] = std::move(rows);
+        });
     }
     std::erase_if(pets, [](const PetLink& p) { return p.id == 0; });
     if (pets.empty()) return;
@@ -1507,7 +1568,7 @@ void Coses::Tick(Clock::time_point now) {
             unsummoned.push_back(entity);
             continue;
         }
-        if (c.ridden || c.owner == 0) continue; // a transport waiting for its owner (OwnerDropped) stands
+        if (c.ridden) continue;
         if (!world.Where(c.owner)) {
             lost.push_back(entity); // its owner left the world without a word
             continue;
@@ -1523,21 +1584,27 @@ void Coses::Tick(Clock::time_point now) {
     }
     for (std::uint32_t entity : unsummoned) Dismiss(entity);
     for (std::uint32_t entity : lost) Dismiss(entity);
-    // Transports whose owner did not come back in time: terminated, their goods on the ground (Dismiss).
-    for (auto it = waiting_.begin(); it != waiting_.end();) {
-        const auto c = coses_.find(it->second.entity);
-        if (c == coses_.end() || c->second.owner != 0) {
-            it = waiting_.erase(it);
+    // Kept transports read at their owners' entry: made once the owner stands where the ground is in; the newest row,
+    // the older ones (kept and never brought back) gone with their goods.
+    for (auto it = carts_.begin(); it != carts_.end();) {
+        const std::uint32_t owner = it->first;
+        const auto o = host_.CosOwner(owner);
+        if (!o) {
+            it = carts_.erase(it); // not a player here any more: the rows stay
             continue;
         }
-        if (now < it->second.until) {
+        const auto place = world.Where(owner);
+        if (!place || (world.HasNavigation() && !world.NavigationLoaded(place->position.region))) {
             ++it;
             continue;
         }
-        const std::uint32_t entity = it->second.entity;
-        it = waiting_.erase(it);
-        core::LogInfo("cos: transport {}'s owner did not come back: terminated", entity);
-        Dismiss(entity, false, false, true);
+        const std::vector<CosRow> rows = std::move(it->second);
+        it = carts_.erase(it);
+        for (std::size_t k = 1; k < rows.size(); ++k) {
+            core::LogWarning("cos: {}'s older kept transport {} ({} stacks of goods) deleted", o->name, rows[k].id, rows[k].bag.size());
+            host_.CosCartDelete(o->character, rows[k].id);
+        }
+        RestoreCart(owner, rows.front(), now);
     }
 }
 

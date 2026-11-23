@@ -1208,7 +1208,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const std::uint64_t price = tax >= 0 ? untaxed + std::uint64_t(tax) : untaxed - std::min<std::uint64_t>(untaxed, std::uint64_t(-tax));
         // A specialty good goes into the trader's transport, never the bag (Trades.h).
         if (game::IsSpecialtyGood(*row)) {
-            if (trades) trades->Buy(player.entity, buy.entity, *row, count, price, Clock::now(), tax);
+            if (trades) {
+                HoldGold(player.selected);
+                trades->Buy(player.entity, buy.entity, *row, count, price, Clock::now(), tax);
+                ReleaseGold(player.selected);
+            }
             return;
         }
         if (player.inventory.gold < price) return RefuseDeal(peer, player, buy.entity, proto::ItemStatus::NotEnoughGold);
@@ -3635,6 +3639,110 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     int CosTransportBagSize(std::uint32_t model) const override {
         const auto it = transportBags.find(model);
         return it != transportBags.end() ? it->second : 0;
+    }
+    // A transport's row and bag (_CharCOS, _InvCOS), in its owner's character's order of saves (Coses.h).
+    void CosCartCreate(std::int64_t character, const CosRow& row, std::vector<std::uint32_t> older, std::function<void(std::int64_t)> done) override {
+        auto id = std::make_shared<std::int64_t>(0);
+        CharacterWrite(
+            character,
+            [this, character, row, older = std::move(older), id](Database& db) {
+                // Its older transports (kept, never brought back) go first with their goods: one transport a character.
+                for (const CosRow& old : LoadCosOf(db, character, older)) {
+                    core::LogWarning("{}: character {}'s older transport {} ({} stacks of goods) gives way to a new one", config.name, character, old.id,
+                                     old.bag.size());
+                    DeleteCos(db, old.id);
+                }
+                std::string error;
+                *id = AddCos(db, row, 0, error);
+                if (*id == 0) core::LogWarning("{}: character {}'s transport has no row: {}", config.name, character, error);
+            },
+            [id, done = std::move(done)] { done(*id); });
+    }
+    void CosCartSave(std::int64_t character) override {
+        CharacterWrites& w = characterWrites[character];
+        w.goldPending = false; // this save writes the gold as it is at its turn
+        if (w.cartQueued) return;
+        w.cartQueued = true;
+        CharacterTask(character, [this, character]() -> std::function<void(Database&)> {
+            CharacterWrites& w = characterWrites[character];
+            w.cartQueued = false;
+            std::uint64_t gold = w.gold;
+            std::int64_t row = 0;
+            std::vector<StoredItem> present;
+            bool short_ = false;
+            if (PlayerWorld* p = PlayerOfCharacter(character)) {
+                gold = p->inventory.gold;
+                GoldNow(character, gold);
+                if (const auto cart = coses ? coses->TransportCart(p->entity) : std::nullopt; cart && cart->bag != nullptr && cart->row != 0) {
+                    row = cart->row;
+                    for (auto& [place, item] : *cart->bag) {
+                        // A new good: one of the reserved ids (none left now: written by the next save).
+                        if (item.serial == 0 && !freeItemIds.empty()) {
+                            item.serial = freeItemIds.back();
+                            freeItemIds.pop_back();
+                        }
+                        if (item.serial == 0) {
+                            short_ = true;
+                            continue;
+                        }
+                        StoredItem s = StoredOf(place, item);
+                        s.creator = item.creator;
+                        present.push_back(std::move(s));
+                    }
+                    TopUpItemIds();
+                }
+            }
+            if (short_) CosCartSave(character); // again after this one, the ids reserved meanwhile
+            return [this, character, gold, row, present = std::move(present)](Database& db) {
+                std::string error;
+                const bool ok = db.Transaction(
+                    [&](Database& tx) {
+                        if (row != 0 && !SaveCart(tx, row, present, error)) return false;
+                        return tx.Query("UPDATE _char SET remaingold = $2 WHERE charid = $1", {character, std::int64_t(gold)}).Ok();
+                    },
+                    error);
+                if (!ok) completions->Post([this, character] { SaveFailed(character, "the transport's goods"); });
+            };
+        });
+    }
+    void CosCartRelease(std::int64_t character, std::int64_t row, std::uint32_t hp, bool ridden, const std::map<std::uint8_t, game::ItemInstance>& bag) override {
+        const auto state = std::int64_t(ridden ? game::CosState::Active : game::CosState::Summoned);
+        std::vector<StoredItem> present;
+        for (const auto& [place, item] : bag) {
+            StoredItem s = StoredOf(place, item);
+            s.creator = item.creator;
+            present.push_back(std::move(s));
+        }
+        CharacterWrite(character, [this, character, row, hp, state, present = std::move(present)](Database& db) mutable {
+            // Its new goods not written yet: ids of their own now.
+            int missing = 0;
+            for (const StoredItem& s : present) missing += s.id == 0 ? 1 : 0;
+            if (missing > 0) {
+                std::vector<std::int64_t> ids = ReserveItemIds(db, missing);
+                for (StoredItem& s : present) {
+                    if (s.id != 0 || ids.empty()) continue;
+                    s.id = ids.back();
+                    ids.pop_back();
+                }
+            }
+            std::string error;
+            const bool ok = db.Transaction(
+                [&](Database& tx) {
+                    return SaveCart(tx, row, present, error) &&
+                           tx.Query("UPDATE _charcos SET hp = $2, state = $3 WHERE id = $1", {row, std::int64_t(hp), state}).Ok();
+                },
+                error);
+            if (!ok) core::LogWarning("{}: character {}'s transport {} not kept: {}", config.name, character, row, error);
+        });
+    }
+    void CosCartDelete(std::int64_t character, std::int64_t row) override {
+        CharacterWrite(character, [row](Database& db) { DeleteCos(db, row); });
+    }
+    void CosCartLoad(std::int64_t character, std::vector<std::uint32_t> models, std::function<void(std::vector<CosRow>)> done) override {
+        auto rows = std::make_shared<std::vector<CosRow>>();
+        CharacterWrite(
+            character, [character, models = std::move(models), rows](Database& db) { *rows = LoadCosOf(db, character, models); },
+            [rows, done = std::move(done)] { done(std::move(*rows)); });
     }
     void CosTransportGone(std::uint32_t owner) override {
         if (trades) trades->CargoChanged(owner); // its goods went with it: no stars
@@ -7332,6 +7440,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::deque<Task> tasks;
         bool busy = false;
         bool goldQueued = false, progressQueued = false;
+        // A trade under way (HoldGold): its gold written with the transport's goods by the transport's save (cartQueued),
+        // not alone before it; a gold change meanwhile pending until then.
+        bool goldHeld = false, goldPending = false, cartQueued = false;
         std::uint64_t gold = 0;      // the newest the game holds
         CharacterProgress progress;  // the same
         std::vector<std::function<void()>> drained; // once nothing is waiting or in flight
@@ -7381,6 +7492,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void QueueGoldSave(std::int64_t character, std::uint64_t gold) {
         CharacterWrites& w = characterWrites[character];
         w.gold = gold;
+        if (w.goldHeld) {
+            w.goldPending = true;
+            return;
+        }
         if (w.goldQueued) return;
         w.goldQueued = true;
         CharacterTask(character, [this, character]() -> std::function<void(Database&)> {
@@ -7390,6 +7505,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 if (!SaveGold(db, character, gold)) completions->Post([this, character] { SaveFailed(character, "the gold"); });
             };
         });
+    }
+    // A trade with the transport (a purchase, a sale): its gold changes are not written alone while it runs; the
+    // transport's save it asks for writes them with the goods, in one transaction (the original's _STRG_ADD_SPECIALTY and
+    // _STRG_DEL_ITEM with RemainGold). Released after it: a change no transport's save took is queued then.
+    void HoldGold(std::int64_t character) { characterWrites[character].goldHeld = true; }
+    void ReleaseGold(std::int64_t character) {
+        const auto it = characterWrites.find(character);
+        if (it == characterWrites.end()) return;
+        it->second.goldHeld = false;
+        if (std::exchange(it->second.goldPending, false)) return QueueGoldSave(character, it->second.gold);
+        if (!it->second.busy && it->second.tasks.empty()) NextCharacterWrite(character); // nothing asked: the writer let go
     }
     // A barrier save wrote the gold as the game holds it now: a gold save still waiting writes nothing older.
     void GoldNow(std::int64_t character, std::uint64_t gold) {
@@ -10858,7 +10984,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
             // The jobs' trade (Trades.h): the same.
             if (Trades::IsRequest(m.id)) {
-                if (player.entity != 0 && trades && !trades->Handle(player.entity, m.id, m.payload)) peer.connection->Close();
+                if (player.entity != 0 && trades) {
+                    HoldGold(player.selected); // a sale's payout written with the goods gone (the transport's save)
+                    const bool ok = trades->Handle(player.entity, m.id, m.payload);
+                    ReleaseGold(player.selected);
+                    if (!ok) peer.connection->Close();
+                }
                 return;
             }
             // The item mall and silk (Mall.h): the same.
@@ -11857,11 +11988,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (alchemy) alchemy->End(player.entity);
         if (stalls) stalls->Leave(player.entity); // its stall closes (its visitors hear 0x3C15)
         // Its pets stay Summoned in their rows: they come out again where it next enters, on the next server or after a
-        // logout (the user's report 2026-11-14: summoned pets come back on the next login); its scroll COS go. A dropped
-        // connection's (no reply asked, not a move) transport waits for it instead (Coses::OwnerDropped); a logout
-        // terminates it, its goods on the ground.
-        if (coses && !reply && !moving) coses->OwnerDropped(player.entity, player.selected, Clock::now());
-        if (coses) coses->DismissAll(player.entity, true, false, reply && !moving);
+        // logout (the user's report 2026-11-14: summoned pets come back on the next login); its ride goes. Its transport's
+        // row stays with its goods (a logout, a dropped connection, a move alike: the original's departure), made again
+        // beside it at its next entry (Coses.h).
+        if (coses) coses->DismissAll(player.entity, true);
         if (quests) quests->Leave(player.entity);
         if (parties) {
             if (moving) parties->MovedAway(player.entity);

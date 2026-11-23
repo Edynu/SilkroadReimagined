@@ -251,6 +251,9 @@ struct StoredItem {
     // Its sockets (`_BindingOptionWithItem` bOptType 1, a row per made socket by nSlot: nOptID the skill, nOptLvl its
     // level, nParam1 the stone; an empty one all 0), read with the items and written by WriteItem.
     game::ItemSockets sockets{};
+    // Who made it (_Items.CreaterName): a specialty good's buyer's alias. Read and written only with a transport's bag
+    // (LoadCos, SaveCart).
+    std::string creator;
 };
 
 // A trader's safe trade (`_CharTrijobSafeTrade`): the count of the day, active, and the day
@@ -595,6 +598,15 @@ bool SaveCosItems(Database& db, const ExchangeSaveSide& inventory, std::int64_t 
 // The new row's id (0: failed); `item` the summoning item's _Items.ID64 (0: none to link).
 std::int64_t AddCos(Database& db, const CosRow& row, std::int64_t item, std::string& error);
 bool SaveCos(Database& db, const CosRow& row);
+// A character's COS rows of these characterdata models (its transports, kept through a logout as the original keeps
+// them), each with its bag (as LoadCos reads it), the newest first.
+std::vector<CosRow> LoadCosOf(Database& db, std::int64_t owner, const std::vector<std::uint32_t>& models);
+// A transport's bag as the game holds it, in the caller's transaction (a trade's gold with it): `present` its items by
+// place (written, their buyers' aliases too), every other place of it empty, the items no place holds any more freed.
+bool SaveCart(Database& tx, std::int64_t cos, const std::vector<StoredItem>& present, std::string& error);
+// A COS row gone with its bag (the original's _DeleteCharCOS: a transport killed or sent away): the row, its places,
+// their items freed; in one transaction.
+bool DeleteCos(Database& db, std::int64_t cos);
 // A pet named, once (the original's _COS_Naming: a name no other pet has, case aside): Named, Taken (another pet's),
 // HasOne (it is named already), Failed (the database).
 enum class CosNaming : std::uint8_t { Named, Taken, HasOne, Failed };

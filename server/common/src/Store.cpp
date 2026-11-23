@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <format>
+#include <set>
 #include <unordered_set>
 
 #include "sr/core/Log.h"
@@ -2279,6 +2280,91 @@ bool SaveCos(Database& db, const CosRow& row) {
                     {row.id, row.owner, std::int64_t(row.refId), std::int64_t(row.hp), std::int64_t(row.state), row.name, std::int64_t(row.level),
                      row.experience, std::int64_t(row.hgp), row.rentUntil, std::int64_t(row.option)})
         .Ok();
+}
+
+std::vector<CosRow> LoadCosOf(Database& db, std::int64_t owner, const std::vector<std::uint32_t>& models) {
+    std::vector<CosRow> out;
+    if (models.empty()) return out;
+    std::string list;
+    for (const std::uint32_t m : models) list += (list.empty() ? "" : ",") + std::to_string(m);
+    QueryResult ids = db.Query(std::format("SELECT id FROM _charcos WHERE ownercharid = $1 AND refcharid IN ({}) ORDER BY id DESC", list), {owner});
+    for (int k = 0; ids.Ok() && k < ids.Rows(); ++k) {
+        std::optional<CosRow> row = LoadCos(db, ids.Int(k, 0));
+        if (!row) continue;
+        // The goods' buyers (who may sell them where).
+        QueryResult made = db.Query("SELECT b.slot, coalesce(it.creatername, '') FROM _invcos b JOIN _items it ON it.id64 = b.itemid "
+                                    "WHERE b.cosid = $1 AND b.itemid IS NOT NULL AND b.itemid <> 0",
+                                    {row->id});
+        for (int m = 0; made.Ok() && m < made.Rows(); ++m) {
+            for (StoredItem& i : row->bag)
+                if (i.slot == std::uint8_t(made.Int(m, 0))) i.creator = made.Text(m, 1);
+        }
+        out.push_back(std::move(*row));
+    }
+    return out;
+}
+
+bool SaveCart(Database& tx, std::int64_t cos, const std::vector<StoredItem>& present, std::string& error) {
+    QueryResult was = tx.Query("SELECT slot, coalesce(itemid, 0) FROM _invcos WHERE cosid = $1 FOR UPDATE", {cos});
+    if (!was.Ok()) {
+        error = was.Error();
+        return false;
+    }
+    std::set<int> places;
+    std::unordered_set<std::int64_t> kept;
+    for (const StoredItem& i : present) {
+        places.insert(i.slot);
+        kept.insert(i.id);
+    }
+    for (const StoredItem& i : present) {
+        if (i.id == 0) continue;
+        if (!WriteItem(tx, i.id, i, error)) return false;
+        if (!tx.Query("UPDATE _items SET creatername = NULLIF($2, '') WHERE id64 = $1", {i.id, i.creator}).Ok() ||
+            !tx.Query("INSERT INTO _invcos (cosid, slot, itemid) VALUES ($1, $2, $3) ON CONFLICT (cosid, slot) DO UPDATE SET itemid = EXCLUDED.itemid",
+                      {cos, int(i.slot), i.id})
+                 .Ok()) {
+            error = "a transport's place";
+            return false;
+        }
+    }
+    for (int k = 0; k < was.Rows(); ++k) {
+        const int slot = int(was.Int(k, 0));
+        const std::int64_t id = was.Int(k, 1);
+        if (!places.contains(slot) && !tx.Query("UPDATE _invcos SET itemid = 0 WHERE cosid = $1 AND slot = $2", {cos, slot}).Ok()) {
+            error = "a transport's place";
+            return false;
+        }
+        // A good no place holds any more (sold, dropped): freed, unless it is somewhere else now.
+        if (id == 0 || kept.contains(id)) continue;
+        QueryResult elsewhere = tx.Query("SELECT 1 FROM _inventory WHERE itemid = $1 UNION ALL SELECT 1 FROM _chest WHERE itemid = $1 "
+                                         "UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 AND cosid <> $2",
+                                         {id, cos});
+        if (!elsewhere.Ok() || (elsewhere.Rows() == 0 && !FreeItem(tx, id))) {
+            error = "a transport's good";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool DeleteCos(Database& db, std::int64_t cos) {
+    std::string error;
+    const bool ok = db.Transaction(
+        [&](Database& tx) {
+            QueryResult goods = tx.Query("SELECT coalesce(itemid, 0) FROM _invcos WHERE cosid = $1", {cos});
+            if (!goods.Ok()) return false;
+            for (int k = 0; k < goods.Rows(); ++k) {
+                const std::int64_t id = goods.Int(k, 0);
+                if (id == 0) continue;
+                QueryResult elsewhere = tx.Query("SELECT 1 FROM _inventory WHERE itemid = $1 UNION ALL SELECT 1 FROM _invcos WHERE itemid = $1 AND cosid <> $2",
+                                                 {id, cos});
+                if (!elsewhere.Ok() || (elsewhere.Rows() == 0 && !FreeItem(tx, id))) return false;
+            }
+            return tx.Query("DELETE FROM _invcos WHERE cosid = $1", {cos}).Ok() && tx.Query("DELETE FROM _charcos WHERE id = $1", {cos}).Ok();
+        },
+        error);
+    if (!ok) core::LogWarning("a COS row ({}) not deleted: {}", cos, error);
+    return ok;
 }
 
 bool SaveCharQuest(Database& db, std::int64_t character, const CharacterRow::Quest& q) {

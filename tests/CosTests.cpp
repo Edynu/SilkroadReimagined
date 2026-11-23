@@ -708,11 +708,16 @@ TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and
     s.game.Stop();
 }
 
-TEST_CASE("Game server: a transport waits for its owner through a dropped connection, taken back at the next entry; a logout ends it (upstream's review 2026-11-22)") {
+TEST_CASE("Game server: a transport's row: kept with its goods through its owner's leaving, made again beside him at his next entry, ridden; sent away, gone") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
     CosServer s(t);
     s.config.logoutCountdown = 1s;
+    // The cart's trade bag (_RefObjChar.InventorySize).
+    REQUIRE(t.Db().Query("CREATE TABLE _refobjcommon (id integer PRIMARY KEY, codename128 varchar(129), link integer)").Ok());
+    REQUIRE(t.Db().Query("CREATE TABLE _refobjchar (id integer PRIMARY KEY, inventorysize integer)").Ok());
+    REQUIRE(t.Db().Query("INSERT INTO _refobjcommon VALUES ($1, 'COS_T_TEST_CART', 1)", {std::int64_t(kCart)}).Ok());
+    REQUIRE(t.Db().Query("INSERT INTO _refobjchar VALUES (1, 40)").Ok());
     REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
     const auto wearing = [&](std::uint32_t suit) {
         return [&t, suit](std::int64_t character) {
@@ -725,22 +730,40 @@ TEST_CASE("Game server: a transport waits for its owner through a dropped connec
                         .Ok());
         };
     };
+    const auto eventually = [&](const std::function<bool()>& holds) {
+        for (int i = 0; i < 500 && !holds(); ++i) s.game.Poll(10ms);
+        return holds();
+    };
     auto a = s.Make("Carter", 1000, {Stored(kCartScroll, 1), Stored(kTraderSuit, 1)}, 1, 0, 0, 1000, wearing(kTraderSuit));
     auto watcher = s.Make("Watch", 1050, {});
     a.client->Send(proto::UseItem{PlaceOf(a.bag, kCartScroll)});
     const auto cart = Next<proto::CosSummoned>(a);
-    REQUIRE(Next<proto::CosRiding>(a).riding); // ridden when the connection drops: it is left standing
-    // The connection drops: its owner goes after the logout's second, the transport stays.
+    REQUIRE(Next<proto::CosRiding>(a).riding);
+    // Its row (the original's _AddNewCOS) from the summon.
+    const auto rowOf = [&] { return t.Db().Query("SELECT id, state FROM _charcos WHERE ownercharid = $1 AND refcharid = $2", {a.character, std::int64_t(kCart)}); };
+    REQUIRE(eventually([&] { return rowOf().Rows() == 1; }));
+    const std::int64_t row = rowOf().Int(0, 0);
+
+    // The connection drops: its owner goes after the logout's second, the transport with him; its row stays, ridden.
     a.client->Connection().Close();
     std::set<std::uint32_t> gone;
     const auto dropped = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - dropped < 3s) {
+    while (std::chrono::steady_clock::now() - dropped < 3s && !(gone.contains(a.entity) && gone.contains(cart.entity))) {
         proto::EntityGone g;
         if (watcher.client->Expect(g, 50ms)) gone.insert(g.entity);
     }
     CHECK(gone.contains(a.entity));
-    CHECK_FALSE(gone.contains(cart.entity));
-    // Its character enters again: the transport is its again (told to it, the same entity).
+    CHECK(gone.contains(cart.entity));
+    REQUIRE(eventually([&] { return rowOf().Rows() == 1 && rowOf().Int(0, 1) == std::int64_t(game::CosState::Active); }));
+    CHECK(rowOf().Int(0, 0) == row);
+
+    // Goods in its bag while he is away (as a trade's save leaves them: a stack, its buyer's alias).
+    const std::vector<std::int64_t> ids = server::ReserveItemIds(t.Db(), 1);
+    REQUIRE(ids.size() == 1);
+    REQUIRE(t.Db().Query("UPDATE _items SET refitemid = $2, data = 3, creatername = 'Seller1' WHERE id64 = $1", {ids[0], std::int64_t(kCartScroll)}).Ok());
+    REQUIRE(t.Db().Query("INSERT INTO _invcos (cosid, slot, itemid) VALUES ($1, 5, $2)", {row, ids[0]}).Ok());
+
+    // Its character enters again: its transport beside it with its goods, ridden again.
     bool ok = false;
     const std::int64_t account = server::FindAccount(t.Db(), "Carteracct", ok)->id;
     REQUIRE(t.Db().Query("DELETE FROM sro_vt_account.sr_online_sessions WHERE jid = $1", {account}).Ok());
@@ -761,19 +784,27 @@ TEST_CASE("Game server: a transport waits for its owner through a dropped connec
     REQUIRE(world.status == proto::WorldStatus::Ok);
     proto::CosSummoned back;
     bool told = false;
-    for (int i = 0; i < 100 && !told; ++i) {
-        if (again.Expect(back, 20ms)) told = back.entity == cart.entity;
+    for (int i = 0; i < 200 && !told; ++i) {
+        if (again.Expect(back, 20ms)) told = back.model == kCart;
     }
-    CHECK(told);
-    // A logout (not a drop): the transport is terminated with it.
-    again.Send(proto::LogoutRequest{proto::LogoutKind::Exit});
-    bool ended = false;
-    const auto asked = std::chrono::steady_clock::now();
-    while (!ended && std::chrono::steady_clock::now() - asked < 5s) {
-        proto::EntityGone g;
-        if (watcher.client->Expect(g, 50ms)) ended = g.entity == cart.entity;
-    }
-    CHECK(ended);
+    REQUIRE(told);
+    CHECK(back.kind == std::uint8_t(game::CosKind::Transport));
+    proto::CosBag bag;
+    REQUIRE(again.Expect(bag));
+    CHECK(bag.entity == back.entity);
+    REQUIRE(bag.items.size() == 1);
+    CHECK(bag.items[0].slot == 5);
+    CHECK(bag.items[0].quantity == 3);
+    CHECK(bag.items[0].creator == "Seller1");
+    proto::CosRiding riding;
+    REQUIRE(again.Expect(riding));
+    CHECK(riding.riding);
+    CHECK(riding.mount == back.entity);
+
+    // Sent away by its owner: its goods on the ground, its row and bag gone (the original's _DeleteCharCOS).
+    again.Send(proto::CosDismiss{back.entity});
+    CHECK(eventually([&] { return rowOf().Rows() == 0; }));
+    CHECK(t.Db().Query("SELECT count(*) FROM _invcos WHERE cosid = $1", {row}).Int(0, 0) == 0);
     s.game.Stop();
 }
 
@@ -1578,6 +1609,18 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     CHECK(loaded.items[0].quantity == 40);
     CHECK(loaded.items[0].creator == "Seller1");
     CHECK(Next<proto::TradeScale>(a).stars == 1);
+    // Written with its price in one transaction (the original's _STRG_ADD_SPECIALTY): the good in the transport's row
+    // (_CharCOS, _InvCOS), its buyer's alias, the gold.
+    const auto goods = [&] {
+        return t.Db().Query("SELECT coalesce(sum(it.data), 0)::bigint, coalesce(max(it.creatername), '') FROM _charcos c JOIN _invcos b ON b.cosid = c.id "
+                            "JOIN _items it ON it.id64 = b.itemid WHERE c.ownercharid = $1 AND b.itemid <> 0",
+                            {a.character});
+    };
+    const auto goldNow = [&] { return t.Db().Query("SELECT remaingold FROM _char WHERE charid = $1", {a.character}).Int(0, 0); };
+    for (int i = 0; i < 300 && goods().Int(0, 0) != 40; ++i) s.game.Poll(2ms);
+    CHECK(goods().Int(0, 0) == 40);
+    CHECK(goods().Text(0, 1) == "Seller1");
+    CHECK(goldNow() == 100'000 - 15'320);
 
     // Donwhang's prices: 834 a good (the quote 2.18, at UB).
     a.client->Send(proto::ShopOpen{wc});
@@ -1607,6 +1650,10 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     CHECK(pool == 3'336);
     CHECK(Next<proto::CosBag>(a).items.empty());
     CHECK(Next<proto::TradeScale>(a).stars == 0);
+    // The sale's goods gone and its payout written together (the original's _STRG_DEL_ITEM with RemainGold).
+    for (int i = 0; i < 300 && goods().Int(0, 0) != 0; ++i) s.game.Poll(2ms);
+    CHECK(goods().Int(0, 0) == 0);
+    CHECK(goldNow() == 100'000 - 15'320 + 33'360);
     a.client->Send(proto::ShopOpen{wc});
     prices = Next<proto::TradePrices>(a);
     CHECK(prices.prices[0].price == 831);

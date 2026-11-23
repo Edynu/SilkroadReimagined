@@ -29,8 +29,12 @@
 //   (UIIT_MSG_COSPETERR_CANT_PICKITEM1). Items move between its bag and its owner's inventory (CosBagMove; not a pet's
 //   summoning item into it, UIIT_MSG_COSPETERR_CANT_MOVETO_SUMITEM), both saved together (SaveCosItems).
 // - Unridden, a COS keeps near its owner: farther than game::kCosFollowFar it walks back towards it (Follow: at once).
-// - A scroll's COS goes with its owner's death, leaving, a teleport or a move to another game server (the original's
-//   runtime-only kind: nothing of it is saved). A pet goes back into its item on its owner's death or leaving
+// - A ride goes with its owner's death, leaving, a teleport or a move to another game server (nothing of it is saved).
+//   A transport is a _CharCOS row from its summon (its bag _InvCOS, every change written in its owner's order of saves
+//   with his gold: a purchase, a sale, a pick-up), as the original's: its owner's leaving (a logout, a dropped
+//   connection, a move to another game server) despawns it and keeps the row, and his next entry makes it again beside
+//   him with its goods, ridden again if it was (Entered); only its death and its owner's sending it away delete the row
+//   (its goods on the ground). A pet goes back into its item on its owner's death or leaving
 //   (Inactive), and comes out again after a teleport or a move to another game server (its row stays Summoned: the
 //   arriving server summons the pets of the items it finds Summoned, Entered). While it is out its item stays in the
 //   bag (KeepsItem: the original's UIIT_MSG_COSPETERR_CANT_TRADE, _CANT_MOVETO_CHEST2, _CANT_SELL_ACTIVATED_COSITEM);
@@ -192,13 +196,44 @@ public:
     // `owner`'s transport went (dismissed, dead, its owner gone): its goods with it (their drop
     // comes with step 7).
     virtual void CosTransportGone(std::uint32_t owner) { (void)owner; }
-    // `owner`'s transport, kept through its connection's drop (Coses::OwnerDropped), is its again: its goods count again.
+    // `owner`'s transport, kept in its row through his leaving, is out again (Entered): its goods count again.
     virtual void CosTransportBack(std::uint32_t owner) { (void)owner; }
     // A transport killed: every slot of its bag dropped whole where it fell, its goods with no owner's mark.
     virtual void CosCargoDropped(std::uint32_t owner, const game::proto::WorldPosition& at, std::map<std::uint8_t, game::ItemInstance> bag) {
         (void)owner;
         (void)at;
         (void)bag;
+    }
+    // --- A transport's row (_CharCOS and its bag _InvCOS), all in its owner's character's order of saves ---
+    // Made at its summon (`done` with its id, 0: failed); its older rows (`older`: the transports' models; kept and never
+    // brought back) gone first with their goods.
+    virtual void CosCartCreate(std::int64_t character, const CosRow& row, std::vector<std::uint32_t> older, std::function<void(std::int64_t)> done) {
+        (void)character;
+        (void)row;
+        (void)older;
+        done(0);
+    }
+    // Its bag changed: written as the owner's transport holds it at the save's turn, with his gold (one transaction).
+    virtual void CosCartSave(std::int64_t character) { (void)character; }
+    // It went with its row kept (its owner left, travelled without it, died on it): its health, whether it was ridden and
+    // its bag as it went (written with them: a save asked before may find it gone).
+    virtual void CosCartRelease(std::int64_t character, std::int64_t row, std::uint32_t hp, bool ridden, const std::map<std::uint8_t, game::ItemInstance>& bag) {
+        (void)character;
+        (void)row;
+        (void)hp;
+        (void)ridden;
+        (void)bag;
+    }
+    // It went for good (killed, sent away): its row and bag deleted.
+    virtual void CosCartDelete(std::int64_t character, std::int64_t row) {
+        (void)character;
+        (void)row;
+    }
+    // The character's transports kept (rows of these models, newest first, with their bags).
+    virtual void CosCartLoad(std::int64_t character, std::vector<std::uint32_t> models, std::function<void(std::vector<CosRow>)> done) {
+        (void)character;
+        (void)models;
+        done({});
     }
     // A town region (`_RefRegion.IsBattleField` 0): a thief's transport stays out of them.
     virtual bool CosTown(std::uint16_t region) const {
@@ -236,17 +271,12 @@ public:
     // The unridden follow their owners; the pets coming back come out once their owner stands.
     void Tick(Clock::time_point now);
     // Every COS of `owner` sent away: its death or leaving (`comesBack` false: its pets Inactive), a teleport or a move
-    // to another game server (true: its pets stay Summoned and come out again where it arrives).
-    // `terminate`: its transport terminated, its cargo on the ground (a logout; Dismiss).
-    void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false, bool terminate = false);
+    // to another game server (true: its pets stay Summoned and come out again where it arrives). Its transport's row
+    // stays (it comes back at the next entry).
+    void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false);
     // Its owner died: as the original's, only the COS it rides goes (its ride slot; a ridden transport too, its goods
     // not dropped); its pets and a transport it walks beside stay out.
     void OwnerDied(std::uint32_t owner);
-    // Its owner's connection dropped (not a logout): its transport stays in the world, goods aboard, with no owner, for
-    // kTransportWait; its character entering again within it takes it back (Entered), else it is terminated, its goods on
-    // the ground (upstream's review of 2026-11-22). Call before DismissAll, while the owner is still in the world.
-    void OwnerDropped(std::uint32_t owner, std::int64_t character, Clock::time_point now);
-    static constexpr std::chrono::minutes kTransportWait{5};
     // `owner`'s ride or transport (kept through DismissAll) brought beside `at`, where its owner arrives (the thieves'
     // town scroll, which works with a transport out:; a gate's or a ferry's link that allows one); told
     // again and boarded again, if it was, once its owner stands there (Tick).
@@ -260,7 +290,7 @@ public:
         std::int64_t id = 0, serial = 0;
     };
     // `owner` entered the world with these pets linked from its bag (its summoning items' _Items.Data): those
-    // Summoned come out once it stands.
+    // Summoned come out once it stands; so does its transport kept (its row), with its goods.
     void Entered(std::uint32_t owner, std::vector<PetLink> pets);
     // What carries `owner` (0: it is on foot).
     std::uint32_t MountOf(std::uint32_t owner) const;
@@ -272,6 +302,7 @@ public:
         std::uint32_t model = 0;
         std::map<std::uint8_t, game::ItemInstance>* bag = nullptr;
         int size = 0;
+        std::int64_t row = 0; // its _CharCOS row (0: not made yet)
     };
     std::optional<Cart> TransportCart(std::uint32_t owner);
     // Its transport's bag holds anything.
@@ -388,6 +419,8 @@ private:
         };
         std::vector<Job> jobs;
         int bagMost = 0; // a grab pet's places allocated (its row's InventorySize): the bag never grows past them
+        // A transport's: its _CharCOS row (0: not made yet) and its owner's character (its saves' order).
+        std::int64_t cart = 0, character = 0;
     };
     // Its states changed: its stand and its speed from them, those who see it told.
     void StatesChanged(Cos& c, Clock::time_point now);
@@ -430,9 +463,15 @@ private:
     void Refuse(std::uint32_t owner, const char* text, std::string arg = {});
     bool Ride(std::uint32_t owner, std::uint32_t entity, bool ride, Clock::time_point now);
     // Sent away; a pet's row saved Summoned (`comesBack`), Dead (`dead`: its rental over) or Inactive. A transport's
-    // cargo drops where it stands only when it is killed (`dead`) or terminated (`terminate`: its owner's own end, a
-    // logout, its wait for a dropped owner over); every other end takes it away with its goods (as the original's).
+    // cargo drops where it stands and its row goes only when it is killed (`dead`) or terminated (`terminate`: its
+    // owner sends it away); every other end keeps its row and goods for its owner's next entry (as the original's).
     void Dismiss(std::uint32_t entity, bool comesBack = false, bool dead = false, bool terminate = false);
+    // The transports' models (characterdata rows of kind Transport).
+    const std::vector<std::uint32_t>& TransportModels();
+    std::vector<std::uint32_t> transportModels_;
+    bool transportModelsRead_ = false;
+    // A kept transport made again beside its owner, standing (its row's bag, its health, ridden again if it was).
+    void RestoreCart(std::uint32_t owner, const CosRow& row, Clock::time_point now);
     // A pet's row as its item shows it, to its owner (CosPetItems).
     void SendPetItem(std::uint32_t owner, const CosRow& row);
     // A grab pet's rental run out: its row Dead (true: it was not yet; save it).
@@ -461,12 +500,9 @@ private:
         std::vector<Travelling> list;
     };
     std::unordered_map<std::uint32_t, Travel> travelling_;
-    // Transports left by a dropped connection (OwnerDropped), by their owner's character: the entity and its end.
-    struct Waiting {
-        std::uint32_t entity = 0;
-        Clock::time_point until{};
-    };
-    std::unordered_map<std::int64_t, Waiting> waiting_;
+    // Owners whose kept transports are being read (Entered), and those read, to make once their owner stands (Tick).
+    std::unordered_set<std::uint32_t> cartLoading_;
+    std::unordered_map<std::uint32_t, std::vector<CosRow>> carts_;
     void Arrived(); // Tick: those whose owner stands at the other end, told again
     Clock::time_point nextFollow_{}, lastFollow_{};
     std::mt19937 random_{0x5EED0C05u};
