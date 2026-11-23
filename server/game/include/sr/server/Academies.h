@@ -94,6 +94,9 @@ public:
     // `arrived`: from another game server of the shard (no online line).
     void Entered(const AcademyActor& actor, bool arrived = false);
     void Left(std::int64_t character);
+    // An academy's rows changed in the database under it (a member deleted for good): loaded again here and on the
+    // shard's other servers.
+    void RowsChanged(std::uint32_t academy);
     // Gone to another game server (nobody told).
     void MovedAway(std::int64_t character);
     void LevelChanged(std::int64_t character, int level, int maxLevel);

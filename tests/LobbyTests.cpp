@@ -270,13 +270,29 @@ TEST_CASE("Game server: the ticket, one session per account, and the lobby") {
     CHECK(result(proto::CharacterSelect{"Nobody"}) == proto::LobbyStatus::NotFound);
     CHECK(result(proto::CharacterSelect{"Hero"}) == proto::LobbyStatus::Ok);
 
-    // Once the deletion time has passed, the character is gone and its name free.
+    // A guild's master is not deleted while it leads its guild (the original refuses it).
+    REQUIRE(t.Db().Query("INSERT INTO sro_vt_shard._guildmember (guildid, charid, charname, memberclass, charlevel, gp_donation, joindate) "
+                         "SELECT 77, charid, charname16, 0, 1, 0, localtimestamp FROM sro_vt_shard._char WHERE charname16 = 'Second'")
+                .Ok());
+    CHECK(result(proto::CharacterDelete{"Second"}) == proto::LobbyStatus::GuildMaster);
+    REQUIRE(t.Db().Query("UPDATE sro_vt_shard._guildmember SET memberclass = 10 WHERE guildid = 77").Ok());
+    // A friendship both ways with Hero, and a letter to it: gone with it.
+    const std::string second = "(SELECT charid FROM sro_vt_shard._char WHERE charname16 = 'Second')", heroId = "(SELECT charid FROM sro_vt_shard._char WHERE charname16 = 'Hero')";
+    REQUIRE(t.Db().Query("INSERT INTO sro_vt_shard._friend (charid, friendcharid, friendcharname) SELECT " + second + ", " + heroId + ", 'Hero'").Ok());
+    REQUIRE(t.Db().Query("INSERT INTO sro_vt_shard._friend (charid, friendcharid, friendcharname) SELECT " + heroId + ", " + second + ", 'Second'").Ok());
+    REQUIRE(t.Db().Query("INSERT INTO sro_vt_shard._memo (charid, fromcharname, message, date, status) SELECT " + second + ", 'Hero', 'hi', localtimestamp, 0").Ok());
+
+    // Once the deletion time has passed, the character is gone (out of its guild too); its name stays taken, as the
+    // original keeps its _Char row.
     CHECK(result(proto::CharacterDelete{"Second"}) == proto::LobbyStatus::Ok);
     // (the original's _deletedchar keeps when it was asked; the wait is the server's, an hour here)
     t.Db().Query("UPDATE sro_vt_shard._deletedchar d SET deleteddate = localtimestamp - interval '8 days' FROM sro_vt_shard._char c "
                  "WHERE c.charid = d.charid AND c.charname16 = 'Second'");
     CHECK(list().characters.size() == 1);
-    CHECK(result(proto::CharacterNameCheck{"Second"}) == proto::LobbyStatus::Ok);
+    CHECK(t.Db().Query("SELECT count(*) FROM sro_vt_shard._guildmember WHERE guildid = 77").Int(0, 0) == 0);
+    CHECK(t.Db().Query("SELECT count(*) FROM sro_vt_shard._friend").Int(0, 0) == 0);
+    CHECK(t.Db().Query("SELECT count(*) FROM sro_vt_shard._memo").Int(0, 0) == 0);
+    CHECK(result(proto::CharacterNameCheck{"Second"}) == proto::LobbyStatus::NameTaken);
 
     // The game server reports its players for the gateway.
     bool counted = false;

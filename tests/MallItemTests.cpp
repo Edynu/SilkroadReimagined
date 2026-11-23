@@ -784,3 +784,32 @@ TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is 
     CHECK_FALSE(server::SaveStorageMove(t.Db(), bag, missing, true));
     CHECK(gold() == std::pair<std::int64_t, std::int64_t>{8000, 2000});
 }
+
+TEST_CASE("Game server: a save that does not land ends the session (the original's 'AQ Failed! Log out!!'); the next entry reads the database") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    ItemServer s(t);
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    auto p = s.Make("Unsaved", {Stored(kBooth, 1)});
+    const std::uint8_t booth = s.PlaceOf(p, kBooth);
+    const std::uint8_t to = booth == 20 ? 21 : 20;
+    // The bag's table away for a moment: the move's save fails, the player is put out.
+    REQUIRE(t.Db().Query("ALTER TABLE _inventory RENAME TO _inventory_away").Ok());
+    proto::ItemMove m;
+    m.from = booth;
+    m.to = to;
+    p.client->Send(m);
+    proto::Disconnected out;
+    CHECK(p.client->Expect(out, 10s));
+    CHECK(out.reason == proto::DisconnectReason::Kicked);
+    REQUIRE(t.Db().Query("ALTER TABLE _inventory_away RENAME TO _inventory").Ok());
+    // In again: the bag as the database has it, the item once (where it was, or moved if a retry landed).
+    p = s.Relog(p);
+    int found = 0;
+    for (const proto::ItemRecord& i : p.bag.items) {
+        if (i.item != kBooth) continue;
+        ++found;
+        CHECK((i.slot == booth || i.slot == to));
+    }
+    CHECK(found == 1);
+}

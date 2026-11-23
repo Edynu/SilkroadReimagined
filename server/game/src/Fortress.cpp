@@ -169,6 +169,7 @@ struct Fortresses::State {
         std::uint32_t entity = 0;   // standing in the world (0: not)
         bool dirty = false;         // its health to write
         bool open = false;          // a gate opened by its pulley (the state word's bit 1)
+        bool paying = false;        // a repair or an upgrade paid for, its transaction under way
     };
     struct Fortress {
         FortressSpec spec;
@@ -960,14 +961,18 @@ struct Fortresses::State {
         if (const FortressError e = TaxRefusal(a, f); e != FortressError::None) return refuse(e);
         if (amount <= 0) return refuse(FortressError::Failed);
         const std::uint32_t id = f->spec.id;
-        auto taken = std::make_shared<bool>(false);
-        host.FortressSubmit(
-            [id, amount, taken](Database& db) {
-                *taken = db.Query("UPDATE _siegefortress SET tax = tax - $2 WHERE fortressid = $1 AND tax >= $2 RETURNING tax", {std::int64_t(id), amount}).Rows() == 1;
+        // Out of the fortress's row and into the master's gold in one transaction (the original's tax collection is one
+        // procedure).
+        host.FortressPay(
+            a.character, 0, 0, 0,
+            [id, amount](Database& tx) -> std::optional<std::uint64_t> {
+                if (tx.Query("UPDATE _siegefortress SET tax = tax - $2 WHERE fortressid = $1 AND tax >= $2 RETURNING tax", {std::int64_t(id), amount}).Rows() != 1) {
+                    return std::nullopt;
+                }
+                return std::uint64_t(amount);
             },
-            [this, a, npc, id, amount, taken] {
-                if (!*taken) return Answer(a, proto::FortressAction::TaxLevy, FortressError::Failed, id, proto::FortressSide::Attack);
-                host.FortressGiveGold(a.peer, std::uint64_t(amount));
+            [this, a, npc, id, amount](bool ok, std::uint64_t) {
+                if (!ok) return Answer(a, proto::FortressAction::TaxLevy, FortressError::Failed, id, proto::FortressSide::Attack);
                 core::LogInfo("fortress war: {} levies {} tax from fortress {}", a.name, amount, id);
                 host.FortressSend(a.peer, proto::FortressAnswer::kId,
                                   Bytes(proto::FortressAnswer{proto::FortressAction::TaxLevy, true, 0, id, proto::FortressSide::Attack, 0, amount}));
@@ -1077,18 +1082,33 @@ struct Fortresses::State {
         if (s->state != kStructDestroyed && s->hp >= std::int64_t(maxHp)) return refuse(FortressError::RepairFull);
         if (s->state == kStructDestroyed && !Reference(s->refObjId)->canRevive) return refuse(FortressError::NoRevive);
         const std::uint64_t cost = RepairCost(*f, *s);
-        if (cost > 0 && !host.FortressTakeGold(a.peer, cost)) return refuse(FortressError::RepairGold);
+        if (a.gold < cost || s->paying) return refuse(FortressError::RepairGold);
         const std::size_t fi = std::size_t(f - forts.data()), si = std::size_t(s - f->structures.data());
-        Fell(*s);
-        s->hp = maxHp;
-        s->state = kStructStanding;
-        s->open = false; // a repair closes it (the state word to 0)
-        SaveStructure(*f, *s);
-        Stand(fi, si);
-        BlockZone(*f, *s);
-        core::LogInfo("fortress war: {} repairs {}'s structure {} for {} gold", a.name, f->spec.codename, m.zone, cost);
-        Answer(a, proto::FortressAction::Repair, FortressError::None, f->spec.id, proto::FortressSide::Attack, m.zone);
-        StructuresInfo(a, {m.npc, f->spec.id});
+        // The gold and the structure's row in one transaction; the structure whole again once it stands.
+        s->paying = true;
+        const FortressStructRow row{f->spec.id, s->owner, f->Spot(*s).eventId, s->refObjId, std::int64_t(maxHp), kStructStanding};
+        host.FortressPay(
+            a.character, cost, 0, 0,
+            [row](Database& tx) -> std::optional<std::uint64_t> {
+                if (!SaveFortressStruct(tx, row)) return std::nullopt;
+                return 0;
+            },
+            [this, a, fi, si, maxHp, cost, refObjId = row.refObjId, npc = m.npc, zone = m.zone](bool ok, std::uint64_t) {
+                if (fi >= forts.size() || si >= forts[fi].structures.size()) return;
+                Fortress& f = forts[fi];
+                Structure& s = f.structures[si];
+                s.paying = false;
+                if (!ok || s.refObjId != refObjId) return Answer(a, proto::FortressAction::Repair, FortressError::RepairGold, f.spec.id, proto::FortressSide::Attack, zone);
+                Fell(s);
+                s.hp = maxHp;
+                s.state = kStructStanding;
+                s.open = false; // a repair closes it (the state word to 0)
+                Stand(fi, si);
+                BlockZone(f, s);
+                core::LogInfo("fortress war: {} repairs {}'s structure {} for {} gold", a.name, f.spec.codename, zone, cost);
+                Answer(a, proto::FortressAction::Repair, FortressError::None, f.spec.id, proto::FortressSide::Attack, zone);
+                StructuresInfo(a, {npc, f.spec.id});
+            });
     }
     // A barricade built at the battle aide (its database answer in
     // kind 0x13), in the original's order: a
@@ -1513,17 +1533,30 @@ struct Fortresses::State {
         if (!g->master) return refuse(FortressError::OnlyMaster);
         if ((f.row.npcHired & bit) != 0) return refuse(FortressError::HireDone);
         if (a.gold < kHireGold) return refuse(FortressError::Gold);
-        if (!host.FortressTakeGuildPoints(g->id, kHirePoints)) return refuse(FortressError::GuildPoints);
-        if (!host.FortressTakeGold(a.peer, kHireGold)) return refuse(FortressError::Gold);
+        if (g->points < kHirePoints) return refuse(FortressError::GuildPoints);
+        // Hired now (a second hire waits), with the gold, the guild's points, their history and the flags in one
+        // transaction; undone if it does not stand.
         f.row.npcHired = std::uint8_t(f.row.npcHired | bit);
-        const std::uint32_t id = f.spec.id;
+        const std::uint32_t id = f.spec.id, guild = g->id;
         const std::uint8_t hired = f.row.npcHired;
-        Write([id, hired](Database& db) { SaveFortressHired(db, id, hired); });
-        host.FortressGpSpent(g->id, a.name, kHirePoints, game::kGpReasonNpc);
-        SendGuild(g->id, proto::FortressNotice::kId, Bytes(proto::FortressNotice{proto::FortressNoticeKind::Hired, id, hired}));
-        PublishRow(f);
-        core::LogInfo("fortress war: {} hires the NPC {} at {} (flags {})", a.name, bit, f.spec.codename, int(hired));
-        ManageAnswer(a, proto::FortressAction::Hire, FortressError::None, id, hired);
+        host.FortressPay(
+            a.character, kHireGold, guild, kHirePoints,
+            [id, hired, guild, name = a.name](Database& tx) -> std::optional<std::uint64_t> {
+                if (!SaveFortressHired(tx, id, hired) || !AddGpHistory(tx, guild, name, kHirePoints, game::kGpReasonNpc)) return std::nullopt;
+                return 0;
+            },
+            [this, a, id, bit, guild](bool ok, std::uint64_t) {
+                Fortress* f = Find(id);
+                if (f == nullptr) return;
+                if (!ok) {
+                    f->row.npcHired = std::uint8_t(f->row.npcHired & ~bit);
+                    return ManageAnswer(a, proto::FortressAction::Hire, FortressError::Gold, id);
+                }
+                SendGuild(guild, proto::FortressNotice::kId, Bytes(proto::FortressNotice{proto::FortressNoticeKind::Hired, id, f->row.npcHired}));
+                PublishRow(*f);
+                core::LogInfo("fortress war: {} hires the NPC {} at {} (flags {})", a.name, bit, f->spec.codename, int(f->row.npcHired));
+                ManageAnswer(a, proto::FortressAction::Hire, FortressError::None, id, f->row.npcHired);
+            });
     }
     // The war's schedule (action 5): the last and the next war's month, day, weekday, hour and minute, and whether
     // the player's guild applied.
@@ -1594,13 +1627,32 @@ struct Fortresses::State {
         if (!check.known) return refuse(FortressError::NoBless);
         if (!check.admitted) return refuse(FortressError::BlessOverlap);
         if (a.gold < row->gold) return refuse(FortressError::Gold);
-        if (!host.FortressTakeGuildPoints(g->id, row->guildPoints)) return refuse(FortressError::GuildPoints);
-        if (row->gold > 0 && !host.FortressTakeGold(a.peer, row->gold)) return refuse(FortressError::BlessFailed);
-        blessReady[{a.character, row->skill}] = nowMs + check.reuseMs;
-        host.FortressBlessGive(a.peer, row->skill);
-        host.FortressGpSpent(g->id, a.name, row->guildPoints, game::kGpReasonFortressBuff);
-        core::LogInfo("fortress war: {} takes {}'s blessing {} (skill {})", a.name, f.spec.codename, blessId, row->skill);
-        ManageAnswer(a, proto::FortressAction::Bless, FortressError::None, f.spec.id, row->skill);
+        if (g->points < row->guildPoints) return refuse(FortressError::GuildPoints);
+        // Its reuse begun now (a second ask waits), the gold, the guild's points and their history in one transaction; the
+        // blessing once it stands (its reuse forgotten if it does not).
+        const std::pair<std::int64_t, std::uint32_t> key{a.character, row->skill};
+        const auto before = blessReady.find(key);
+        const std::optional<std::int64_t> was = before != blessReady.end() ? std::optional(before->second) : std::nullopt;
+        blessReady[key] = nowMs + check.reuseMs;
+        host.FortressPay(
+            a.character, row->gold, g->id, row->guildPoints,
+            [guild = g->id, name = a.name, points = row->guildPoints](Database& tx) -> std::optional<std::uint64_t> {
+                if (!AddGpHistory(tx, guild, name, points, game::kGpReasonFortressBuff)) return std::nullopt;
+                return 0;
+            },
+            [this, a, key, was, skill = row->skill, id = f.spec.id, blessId](bool ok, std::uint64_t) {
+                if (!ok) {
+                    if (was) {
+                        blessReady[key] = *was;
+                    } else {
+                        blessReady.erase(key);
+                    }
+                    return ManageAnswer(a, proto::FortressAction::Bless, FortressError::BlessFailed, id);
+                }
+                host.FortressBlessGive(a.peer, skill);
+                core::LogInfo("fortress war: {} takes fortress {}'s blessing {} (skill {})", a.name, id, blessId, skill);
+                ManageAnswer(a, proto::FortressAction::Bless, FortressError::None, id, skill);
+            });
     }
     // The smith's, the trainer's and the Cave's actions.
     void ManageMore(const FortressActor& a, const proto::FortressManage& m) {
@@ -1680,16 +1732,39 @@ struct Fortresses::State {
             const std::uint32_t points = std::uint32_t(std::floor(double(row->guildPoints) * count * factor));
             const std::int64_t seconds = std::int64_t(std::floor(double(row->minutes) * count * config.forgeSecondsPerMinute * factor));
             if (a.gold < gold) return refuse(FortressError::Gold);
-            if (!host.FortressTakeGuildPoints(g->id, points)) return refuse(FortressError::GuildPoints);
-            if (gold > 0 && !host.FortressTakeGold(a.peer, gold)) return refuse(FortressError::Gold);
-            host.FortressGpSpent(g->id, a.name, points, game::kGpReasonForge);
+            if (g->points < points) return refuse(FortressError::GuildPoints);
+            // Begun now (the forge busy meanwhile), its row with the gold, the guild's points and their history in one
+            // transaction; taken back if it does not stand.
             const FortressForgeRow r{id, row->item, count, false, unixNow, unixNow + seconds};
             f->forges.push_back(r);
-            Write([r](Database& db) { InsertFortressForge(db, r); });
-            core::LogInfo("fortress war: {} starts {} x {} at {}'s {} ({} gold, {} GP, {} s)", a.name, count, row->item, f->spec.codename,
-                          trainer ? "trainer" : "smith", gold, points, seconds);
-            ManageAnswer(a, m.action, FortressError::None, id, r.finish);
-            return tell();
+            host.FortressPay(
+                a.character, gold, g->id, points,
+                [r, guild = g->id, name = a.name, points](Database& tx) -> std::optional<std::uint64_t> {
+                    if (!InsertFortressForge(tx, r) || !AddGpHistory(tx, guild, name, points, game::kGpReasonForge)) return std::nullopt;
+                    return 0;
+                },
+                [this, a, r, action = m.action, npc = m.npc, trainer, gold, points, seconds](bool ok, std::uint64_t) {
+                    Fortress* f = Find(r.fortress);
+                    if (f == nullptr) return;
+                    if (!ok) {
+                        std::erase_if(f->forges, [&](const FortressForgeRow& x) { return x.item == r.item && x.start == r.start; });
+                        return ManageAnswer(a, action, FortressError::Gold, r.fortress);
+                    }
+                    core::LogInfo("fortress war: {} starts {} x {} at {}'s {} ({} gold, {} GP, {} s)", a.name, r.amount, r.item, f->spec.codename,
+                                  trainer ? "trainer" : "smith", gold, points, seconds);
+                    ManageAnswer(a, action, FortressError::None, r.fortress, r.finish);
+                    // Its forge as it stands now (the query's answer).
+                    proto::FortressForge told{npc, std::uint8_t(trainer ? 1 : 0), f->spec.id};
+                    if (FortressForgeRow* x = Running(*f, trainer)) {
+                        told.has = true;
+                        told.item = x->item;
+                        told.count = std::uint16_t(x->amount);
+                        told.done = x->finished;
+                        told.finishes = x->finish;
+                    }
+                    host.FortressSend(a.peer, proto::FortressForge::kId, Bytes(told));
+                });
+            return;
         }
         if (running == nullptr) return refuse(FortressError::ForgeNone);
         const FortressForgeRow r = *running;
@@ -1837,9 +1912,22 @@ struct Fortresses::State {
             const std::uint64_t gold = row != nullptr ? row->gold : 0;
             const std::uint32_t points = row != nullptr ? row->guildPoints : 0;
             if (a.gold < gold) return refuse(FortressError::Gold);
-            if (!host.FortressTakeGuildPoints(g->id, points)) return refuse(FortressError::GuildPoints);
-            if (gold > 0 && !host.FortressTakeGold(a.peer, gold)) return refuse(FortressError::DungeonPay);
-            host.FortressGpSpent(g->id, a.name, points, game::kGpReasonDungeon);
+            if (g->points < points) return refuse(FortressError::GuildPoints);
+            // The gold, the guild's points and their history in one transaction; in once it stands.
+            host.FortressPay(
+                a.character, gold, g->id, points,
+                [guild = g->id, name = a.name, points](Database& tx) -> std::optional<std::uint64_t> {
+                    if (!AddGpHistory(tx, guild, name, points, game::kGpReasonDungeon)) return std::nullopt;
+                    return 0;
+                },
+                [this, a, action = m.action, id = f->spec.id](bool ok, std::uint64_t) {
+                    Fortress* f = Find(id);
+                    if (f == nullptr) return;
+                    if (!ok || f->dungeonLayer == 0 || !host.FortressDungeonAdmit(a.peer, f->dungeonLayer)) return ManageAnswer(a, action, FortressError::DungeonPay, id);
+                    core::LogInfo("fortress war: {} enters {}'s Cave of Discipline", a.name, f->spec.codename);
+                    ManageAnswer(a, action, FortressError::None, id);
+                });
+            return;
         }
         if (!host.FortressDungeonAdmit(a.peer, f->dungeonLayer)) return refuse(FortressError::DungeonPay);
         core::LogInfo("fortress war: {} enters {}'s Cave of Discipline", a.name, f->spec.codename);
@@ -1916,22 +2004,39 @@ struct Fortresses::State {
         if (a.gold < ref->gold) return refuse(FortressError::UpgradeGold);
         if (std::optional<FortressGuild> held = host.FortressGuildById(g->id); !held) return refuse(FortressError::UpgradePoints);
         if (unixNow < s->madeAt + std::int64_t(ref->minutes) * 60) return refuse(FortressError::UpgradeWait);
-        if (!host.FortressTakeGuildPoints(g->id, ref->guildPoints)) return refuse(FortressError::UpgradePoints);
-        if (ref->guildPoints > 0) host.FortressGpSpent(g->id, a.name, ref->guildPoints, game::kGpReasonStructure);
-
-        if (ref->gold > 0 && !host.FortressTakeGold(a.peer, ref->gold)) return refuse(FortressError::UpgradeGold);
+        if (g->points < ref->guildPoints) return refuse(FortressError::UpgradePoints);
+        if (s->paying) return refuse(FortressError::UpgradeGold);
         const std::size_t fi = std::size_t(f - forts.data()), si = std::size_t(s - f->structures.data());
-        Fell(*s);
-        s->refObjId = next->refObjId;
-        s->hp = MaxHp(f->Spot(*s), s->refObjId);
-        s->state = kStructStanding;
-        s->madeAt = unixNow;
-        SaveStructure(*f, *s);
-        Stand(fi, si);
-        BlockZone(*f, *s);
-        core::LogInfo("fortress war: {} upgrades {}'s structure {} to {}", a.name, f->spec.codename, m.zone, next->codename);
-        Answer(a, proto::FortressAction::Upgrade, FortressError::None, f->spec.id, proto::FortressSide::Attack, m.zone);
-        StructuresInfo(a, {m.npc, f->spec.id});
+        // The gold, the guild's points, their history and the structure's new row in one transaction; raised once it stands.
+        s->paying = true;
+        const std::uint32_t nextId = next->refObjId, from = s->refObjId;
+        const std::int64_t nextHp = MaxHp(f->Spot(*s), nextId);
+        const FortressStructRow row{f->spec.id, s->owner, f->Spot(*s).eventId, nextId, nextHp, kStructStanding};
+        host.FortressPay(
+            a.character, ref->gold, g->id, ref->guildPoints,
+            [row, guild = g->id, name = a.name, points = ref->guildPoints](Database& tx) -> std::optional<std::uint64_t> {
+                if (!SaveFortressStruct(tx, row)) return std::nullopt;
+                if (points > 0 && !AddGpHistory(tx, guild, name, points, game::kGpReasonStructure)) return std::nullopt;
+                return 0;
+            },
+            [this, a, fi, si, from, nextId, nextHp, npc = m.npc, zone = m.zone, made = unixNow](bool ok, std::uint64_t) {
+                if (fi >= forts.size() || si >= forts[fi].structures.size()) return;
+                Fortress& f = forts[fi];
+                Structure& s = f.structures[si];
+                s.paying = false;
+                if (!ok || s.refObjId != from) return Answer(a, proto::FortressAction::Upgrade, FortressError::UpgradeGold, f.spec.id, proto::FortressSide::Attack, zone);
+                Fell(s);
+                s.refObjId = nextId;
+                s.hp = nextHp;
+                s.state = kStructStanding;
+                s.madeAt = made;
+                Stand(fi, si);
+                BlockZone(f, s);
+                const StructureReference* to = Reference(nextId);
+                core::LogInfo("fortress war: {} upgrades {}'s structure {} to {}", a.name, f.spec.codename, zone, to != nullptr ? to->codename : std::string());
+                Answer(a, proto::FortressAction::Upgrade, FortressError::None, f.spec.id, proto::FortressSide::Attack, zone);
+                StructuresInfo(a, {npc, f.spec.id});
+            });
     }
 
     void Apply(const FortressActor& a, const proto::FortressApply& m) {
@@ -1956,21 +2061,30 @@ struct Fortresses::State {
         facts.gold = a.gold;
         facts.fee = f != nullptr ? f->spec.fee : 0;
         FortressError error = game::ApplyRefusal(facts);
-        // The fee is taken with the application (`_SiegeFortressRequestSiege`: -1003 without it).
-        if (error == FortressError::None && m.side == proto::FortressSide::Attack && facts.fee > 0 && !host.FortressTakeGold(a.peer, facts.fee)) {
-            error = FortressError::Gold;
-        }
-        if (error == FortressError::None) {
-            const FortressRequestRow row{f->spec.id, g->id, std::uint8_t(m.side)};
-            f->requests.push_back(row);
-            Publish(kBusRequest, Bytes(RequestWire{row.fortress, row.guild, row.type, true}));
-            Write([row](Database& db) {
-                if (!InsertFortressRequest(db, row)) core::LogWarning("fortress war: application of guild {} not written", row.guild);
+        if (error != FortressError::None) return Answer(a, proto::FortressAction::Apply, error, m.fortress, m.side);
+        // The application stands now (a second waits), its row and the fee (an attacker's) in one transaction, as
+        // `_SiegeFortressRequestSiege` takes them (-1003 without the gold); taken back if it does not stand.
+        const FortressRequestRow row{f->spec.id, g->id, std::uint8_t(m.side)};
+        f->requests.push_back(row);
+        const std::uint64_t fee = m.side == proto::FortressSide::Attack ? facts.fee : 0;
+        host.FortressPay(
+            a.character, fee, 0, 0,
+            [row](Database& tx) -> std::optional<std::uint64_t> {
+                if (!InsertFortressRequest(tx, row)) return std::nullopt;
+                return 0;
+            },
+            [this, a, row, side = m.side, name = g->name](bool ok, std::uint64_t) {
+                Fortress* f = Find(row.fortress);
+                if (f == nullptr) return;
+                if (!ok) {
+                    std::erase_if(f->requests, [&](const FortressRequestRow& r) { return r.guild == row.guild && r.fortress == row.fortress; });
+                    return Answer(a, proto::FortressAction::Apply, FortressError::Gold, row.fortress, side);
+                }
+                Publish(kBusRequest, Bytes(RequestWire{row.fortress, row.guild, row.type, true}));
+                core::LogInfo("fortress war: guild {} applies to {} {} ({})", name, side == proto::FortressSide::Attack ? "take" : "defend",
+                              f->spec.codename, a.name);
+                Answer(a, proto::FortressAction::Apply, FortressError::None, row.fortress, side);
             });
-            core::LogInfo("fortress war: guild {} applies to {} {} ({})", g->name, m.side == proto::FortressSide::Attack ? "take" : "defend",
-                          f->spec.codename, a.name);
-        }
-        Answer(a, proto::FortressAction::Apply, error, m.fortress, m.side);
     }
 
     void Cancel(const FortressActor& a, const proto::FortressCancel& m) {

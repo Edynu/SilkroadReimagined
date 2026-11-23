@@ -460,7 +460,7 @@ TEST_CASE("Import: the 1.188 export loads whole; its account logs in with the or
         REQUIRE(server::ListCharacters(t.Db(), 1, 1, 3600, ok).size() == 2);
         REQUIRE(server::DeleteCharacter(t.Db(), 1, 1, "Novice", 3600) == server::CharacterChange::Done);
         t.Db().Query("UPDATE sro_vt_shard._deletedchar SET deleteddate = localtimestamp - interval '2 hours'");
-        CHECK(server::ListCharacters(t.Db(), 1, 1, 3600, ok).size() == 1); // gone, every row of it
+        CHECK(server::ListCharacters(t.Db(), 1, 1, 3600, ok).size() == 1); // gone, every row of it but its _char (its name kept)
         CHECK(ids("SELECT questid FROM sro_vt_shard._charquest WHERE charid NOT IN (SELECT charid FROM sro_vt_shard._char)").empty());
     }
 

@@ -636,7 +636,13 @@ bool SaveAutoPotion(Database& db, std::int64_t character, const game::AutoPotion
 
 // The account's characters on `server` (the shard of the connection), oldest first; characters
 // asked to be deleted more than `deleteSeconds` ago (_deletedchar) are deleted first.
-std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std::uint16_t server, int deleteSeconds, bool& ok);
+// A character deleted for good (its wait over): the guild and the academy it left (0: none), whose rows changed.
+struct CharacterGone {
+    std::int64_t character = 0;
+    std::uint32_t guild = 0, academy = 0;
+};
+std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std::uint16_t server, int deleteSeconds, bool& ok,
+                                         std::vector<CharacterGone>* gone = nullptr);
 
 struct NewCharacter {
     std::string name;
@@ -662,7 +668,8 @@ bool CharacterNameFree(Database& db, std::uint16_t server, std::string_view name
 // should be out of the game. False with `error`.
 bool CopyCharacter(Database& db, std::int64_t account, std::string_view from, std::string_view to, std::string& error);
 
-enum class CharacterChange : std::uint8_t { Done, NotFound, Deleting, NotDeleting, Failed };
+// GuildMaster: a guild's master is not deleted while it leads its guild (the original refuses it).
+enum class CharacterChange : std::uint8_t { Done, NotFound, Deleting, NotDeleting, Failed, GuildMaster };
 // Starts the wait before a character is gone (`delaySeconds`); restorable until then.
 CharacterChange DeleteCharacter(Database& db, std::int64_t account, std::uint16_t server, std::string_view name, int delaySeconds);
 CharacterChange RestoreCharacter(Database& db, std::int64_t account, std::uint16_t server, std::string_view name, int delaySeconds);

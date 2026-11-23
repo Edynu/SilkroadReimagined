@@ -1840,6 +1840,18 @@ void Guilds::MovedAway(std::int64_t character) {
     s.remoteOnline.insert(character);
 }
 
+void Guilds::RowsChanged(std::uint32_t guild) {
+    State& s = *s_;
+    const State::Touched around = s.Around(guild);
+    std::vector<std::uint32_t> ids(around.guilds.begin(), around.guilds.end()), unions(around.alliances.begin(), around.alliances.end());
+    if (ids.empty()) ids.push_back(guild);
+    s.Reload(ids, unions);
+    // The others load them too (no change of ours counted: this server's own load is under way).
+    s.touched.guilds.insert(ids.begin(), ids.end());
+    s.touched.alliances.insert(unions.begin(), unions.end());
+    s.PublishTouched();
+}
+
 void Guilds::Left(std::int64_t character) {
     State& s = *s_;
     s.online.erase(character);
@@ -2101,7 +2113,7 @@ void Guilds::SpendPoints(std::int64_t character, std::uint32_t points, std::uint
 std::optional<Guilds::Facts> Guilds::FactsOfGuild(std::uint32_t guild) const {
     const auto g = s_->guilds.find(guild);
     if (guild == 0 || g == s_->guilds.end()) return std::nullopt;
-    Facts f{g->first, g->second.name, g->second.level, g->second.members.size(), g->second.alliance, false, {}, g->second.crest};
+    Facts f{g->first, g->second.name, g->second.level, g->second.members.size(), g->second.alliance, false, {}, g->second.crest, g->second.points};
     for (const auto& m : g->second.members) {
         if (m.memberClass == game::kGuildMaster) f.masterName = m.name;
     }
@@ -2117,6 +2129,33 @@ std::optional<Guilds::Facts> Guilds::FactsOf(std::int64_t character) const {
     const auto m = std::find_if(members.begin(), members.end(), [&](const auto& m) { return m.character == character; });
     f->master = m != members.end() && m->memberClass == game::kGuildMaster;
     return f;
+}
+
+bool Guilds::PayWithPoints(std::uint32_t guild, std::uint32_t points, std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done) {
+    State& s = *s_;
+    const auto g = s.guilds.find(guild);
+    if (g == s.guilds.end() || g->second.points < points) return false;
+    g->second.points -= points;
+    State* st = &s;
+    s.WritePaid(character, fee,
+                [work = std::move(work), guild, level = g->second.level, left = g->second.points](Database& tx) -> std::optional<std::uint64_t> {
+                    if (!SaveGuildPoints(tx, guild, level, left, 0, 0)) return std::nullopt;
+                    return work ? work(tx) : std::optional<std::uint64_t>(0);
+                },
+                [st, guild, points, done = std::move(done)](bool ok, std::uint64_t credit) {
+                    if (const auto it = st->guilds.find(guild); it != st->guilds.end()) {
+                        if (!ok) {
+                            it->second.points += points;
+                            st->SavePoints(it->second, 0, 0);
+                        } else {
+                            st->ToGuild(it->second, proto::GuildPoints{std::uint8_t(it->second.level), it->second.points});
+                        }
+                        st->Touch(guild);
+                        st->PublishTouched();
+                    }
+                    if (done) done(ok, credit);
+                });
+    return true;
 }
 
 std::size_t Guilds::Count() const { return s_->guilds.size(); }

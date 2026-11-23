@@ -185,6 +185,7 @@ enum class LobbyStatus : std::uint8_t {
     Deleting = 9,          // it waits to be deleted: restore it first
     NotDeleting = 10,      // restore of a character that is not being deleted
     Busy = 11,             // the server cannot answer now
+    GuildMaster = 12,      // a guild's master is not deleted while it leads its guild
 };
 
 struct LobbyResult {

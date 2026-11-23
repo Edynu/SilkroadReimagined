@@ -708,27 +708,57 @@ bool HasLiveSession(Database& db, std::int64_t account, int staleSeconds, bool& 
 
 namespace {
 
-// Everything of a character, once its deletion's wait has passed (as the original's permanent
-// deletion clears it; we also drop its _char row, so the name is free again).
-bool DeleteCharacterData(Database& tx, std::int64_t character) {
+// Everything of a character, once its deletion's wait has passed, as the original's permanent deletion
+// (_DeleteCharPermanently_NoTX) clears it: its own rows and items, its pets with their bags, its place in a guild and an
+// academy, both sides of its friendships, its letters and whisper blocks. Its _char row (marked deleted) and its name
+// in _charnamelist stay: the name is never free again, as in the original. A guild's master is left as it is (the
+// request refuses one; nothing is deleted while it leads). `gone`: what it left (its character 0 when nothing was done).
+bool DeleteCharacterData(Database& tx, std::int64_t character, CharacterGone& gone) {
+    gone = {};
+    const QueryResult master = tx.Query("SELECT 1 FROM _guildmember WHERE charid = $1 AND memberclass = 0", {character});
+    if (!master.Ok()) return false;
+    if (master.Rows() > 0) return true;
+    gone.character = character;
     QueryResult items = tx.Query("SELECT itemid FROM _inventory WHERE charid = $1 AND itemid <> 0 "
-                                 "UNION SELECT itemid FROM _inventoryforavatar WHERE charid = $1 AND itemid <> 0",
+                                 "UNION SELECT itemid FROM _inventoryforavatar WHERE charid = $1 AND itemid <> 0 "
+                                 "UNION SELECT b.itemid FROM _invcos b JOIN _charcos c ON c.id = b.cosid "
+                                 "WHERE c.ownercharid = $1 AND b.itemid IS NOT NULL AND b.itemid <> 0",
                                  {character});
     if (!items.Ok()) return false;
     for (int k = 0; k < items.Rows(); ++k) {
         if (!FreeItem(tx, items.Int(k, 0))) return false;
     }
+    // Its pets: their bags, timed jobs and rows.
+    if (!tx.Query("DELETE FROM _invcos WHERE cosid IN (SELECT id FROM _charcos WHERE ownercharid = $1)", {character}).Ok() ||
+        !tx.Query("DELETE FROM _timedjobforpet WHERE charid IN (SELECT id FROM _charcos WHERE ownercharid = $1)", {character}).Ok() ||
+        !tx.Query("DELETE FROM _charcos WHERE ownercharid = $1", {character}).Ok()) {
+        return false;
+    }
+    // Its guild and its academy.
+    const QueryResult guild = tx.Query("DELETE FROM _guildmember WHERE charid = $1 RETURNING guildid", {character});
+    const QueryResult camp = tx.Query("DELETE FROM _trainingcampmember WHERE charid = $1 RETURNING campid", {character});
+    if (!guild.Ok() || !camp.Ok()) return false;
+    if (guild.Rows() > 0) gone.guild = std::uint32_t(guild.Int(0, 0));
+    if (camp.Rows() > 0) gone.academy = std::uint32_t(camp.Int(0, 0));
+    // Its friends both ways, its letters, its whisper blocks, the academy's buffs it gave or held, its safe trade.
+    if (!tx.Query("DELETE FROM _trainingcampbuffstatus WHERE recipientcharid = $1 OR donorcharid = $1", {character}).Ok() ||
+        !tx.Query("DELETE FROM _friend WHERE charid = $1 OR friendcharid = $1", {character}).Ok() ||
+        !tx.Query("DELETE FROM _memo WHERE charid = $1", {character}).Ok() ||
+        !tx.Query("DELETE FROM _blockedwhisperers WHERE ownerid = $1", {character}).Ok() ||
+        !tx.Query("DELETE FROM _chartrijobsafetrade WHERE charid = $1", {character}).Ok()) {
+        return false;
+    }
     for (const char* table : {"_inventory", "_inventoryforavatar", "_charskill", "_charskillmastery", "_charquest", "_clientconfig", "_timedjob",
-                              "_staticavatar", "_chartrijob", "_deletedchar", "_charnamelist", "_user", "sr_char_state", "sr_auto_potion", "sr_char_records", "sr_bargain_lock",
-                              "_charcollectionbook", "_charinstanceworlddata", "_char"}) {
+                              "_staticavatar", "_chartrijob", "_deletedchar", "_user", "sr_char_state", "sr_auto_potion", "sr_char_records", "sr_bargain_lock",
+                              "_charcollectionbook", "_charinstanceworlddata"}) {
         if (!tx.Query(std::format("DELETE FROM {} WHERE charid = $1", table), {character}).Ok()) return false;
     }
-    return true;
+    return tx.Query("UPDATE _char SET deleted = 1 WHERE charid = $1", {character}).Ok();
 }
 
 } // namespace
 
-std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std::uint16_t, int deleteSeconds, bool& ok) {
+std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std::uint16_t, int deleteSeconds, bool& ok, std::vector<CharacterGone>* gone) {
     std::vector<CharacterRow> out;
     // Those whose wait has passed go first.
     QueryResult due = db.Query("SELECT d.charid FROM _deletedchar d JOIN _user u ON u.charid = d.charid "
@@ -738,7 +768,9 @@ std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std
     for (int k = 0; ok && k < due.Rows(); ++k) {
         std::string error;
         const std::int64_t character = due.Int(k, 0);
-        ok = db.Transaction([&](Database& tx) { return DeleteCharacterData(tx, character); }, error);
+        CharacterGone left;
+        ok = db.Transaction([&](Database& tx) { return DeleteCharacterData(tx, character, left); }, error);
+        if (ok && gone != nullptr && left.character != 0) gone->push_back(left);
     }
     QueryResult r = db.Query(
         "SELECT c.charid, c.charname16, c.refobjid, c.scale, c.curlevel, c.expoffset, c.strength, c.intellect, c.remainstatpoint, c.hp, c.mp, "
@@ -1093,6 +1125,11 @@ CharacterChange DeleteCharacter(Database& db, std::int64_t account, std::uint16_
     std::int64_t id = 0;
     const CharacterChange state = CharacterState(db, account, name, kForever, id);
     if (state != CharacterChange::Done) return state;
+    // A guild's master is not deleted while it leads its guild (the original refuses it: it leaves, or hands the guild
+    // on, first).
+    const QueryResult master = db.Query("SELECT 1 FROM _guildmember WHERE charid = $1 AND memberclass = 0", {id});
+    if (!master.Ok()) return CharacterChange::Failed;
+    if (master.Rows() > 0) return CharacterChange::GuildMaster;
     // As the original's: the request's time, and the character marked.
     std::string error;
     const bool ok = db.Transaction(

@@ -111,6 +111,7 @@ proto::LobbyStatus FromChange(CharacterChange change) {
     case CharacterChange::NotFound: return proto::LobbyStatus::NotFound;
     case CharacterChange::Deleting: return proto::LobbyStatus::Deleting;
     case CharacterChange::NotDeleting: return proto::LobbyStatus::NotDeleting;
+    case CharacterChange::GuildMaster: return proto::LobbyStatus::GuildMaster;
     case CharacterChange::Failed: break;
     }
     return proto::LobbyStatus::Busy;
@@ -962,7 +963,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // own saves still waiting folded in (SaveSideOf): neither side's earlier saves can land after it.
         ExchangeSaveSide bag = SaveSideOf(player.selected, player.inventory, r.inventoryTouched);
         bag.gone.insert(bag.gone.end(), r.gone.begin(), r.gone.end());
-        database.SubmitBarrier([bag = std::move(bag), side = std::move(side)](Database& db) { SaveStorageMove(db, bag, side, false); });
+        database.SubmitBarrier([this, bag = std::move(bag), side = std::move(side)](Database& db) {
+            if (!SaveStorageMove(db, bag, side, false)) completions->Post([this, character = bag.character] { SaveFailed(character, "a storage move"); });
+        });
     }
 
     // Gold into or out of the open storage: both columns in one transaction (the original's _UPDATE_USER_N_CHAR_GOLD /
@@ -988,7 +991,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             side.account = peer.account;
         }
         side.gold = storage->gold;
-        database.SubmitBarrier([bag = std::move(bag), side = std::move(side)](Database& db) { SaveStorageMove(db, bag, side, true); });
+        database.SubmitBarrier([this, bag = std::move(bag), side = std::move(side)](Database& db) {
+            if (!SaveStorageMove(db, bag, side, true)) completions->Post([this, character = bag.character] { SaveFailed(character, "the storage's gold"); });
+        });
     }
 
     // --- Shops (C7i) ---
@@ -1032,7 +1037,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         SendMessage(*peer.connection, answer);
         ExchangeSaveSide side = SaveSideOf(player.selected, player.inventory, touched);
         side.gone.insert(side.gone.end(), gone.begin(), gone.end());
-        database.SubmitBarrier([side = std::move(side), honorSpent](Database& db) { SaveShopDeal(db, side, honorSpent); });
+        database.SubmitBarrier([this, side = std::move(side), honorSpent](Database& db) {
+            if (!SaveShopDeal(db, side, honorSpent)) completions->Post([this, character = side.character] { SaveFailed(character, "a shop deal"); });
+        });
     }
 
     void RefuseDeal(Peer& peer, const PlayerWorld& player, std::uint32_t entity, proto::ItemStatus status) {
@@ -4077,8 +4084,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 emptied.push_back(place);
             }
         }
-        database.SubmitBarrier([side = SaveSideOf(p->selected, p->inventory, inventoryTouched), cos, present = std::move(present),
-                                emptied = std::move(emptied)](Database& db) { SaveCosItems(db, side, cos, present, emptied); });
+        database.SubmitBarrier([this, side = SaveSideOf(p->selected, p->inventory, inventoryTouched), cos, present = std::move(present),
+                                emptied = std::move(emptied)](Database& db) {
+            if (!SaveCosItems(db, side, cos, present, emptied)) completions->Post([this, character = side.character] { SaveFailed(character, "a pet's bag"); });
+        });
     }
     bool CosHasItem(std::uint32_t owner, std::int64_t serial) override {
         const PlayerWorld* p = PlayerByEntity(owner);
@@ -4092,7 +4101,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // side's own saves still waited to write: neither side's earlier saves can land after it.
     void ExchangeSave(std::int64_t a, const game::Inventory& bagA, const std::vector<std::uint8_t>& touchedA, std::int64_t b, const game::Inventory& bagB,
                       const std::vector<std::uint8_t>& touchedB) override {
-        database.SubmitBarrier([sa = SaveSideOf(a, bagA, touchedA), sb = SaveSideOf(b, bagB, touchedB)](Database& db) { SaveExchange(db, sa, sb); });
+        database.SubmitBarrier([this, sa = SaveSideOf(a, bagA, touchedA), sb = SaveSideOf(b, bagB, touchedB)](Database& db) {
+            if (SaveExchange(db, sa, sb)) return;
+            completions->Post([this, a = sa.character, b = sb.character] {
+                SaveFailed(a, "an exchange");
+                SaveFailed(b, "an exchange");
+            });
+        });
     }
     // A character's inventory as one transaction saves it (an exchange, a pet's bag): its places `touched` as they are
     // now, with its item saves still waiting folded in (taken from its queue: this save writes them).
@@ -7084,6 +7099,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // they are then); kept past the player's leaving until written.
     struct ItemSaves {
         bool busy = false;
+        int failures = 0; // saves in a row that did not land (written again up to kSaveRetries times)
         std::set<std::uint8_t> dirty;
         std::vector<std::int64_t> gone;
         std::map<std::uint8_t, game::ItemInstance> places; // the inventory as of the last move
@@ -7163,7 +7179,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         CharacterTask(character, [this, character]() -> std::function<void(Database&)> {
             CharacterWrites& w = characterWrites[character];
             w.goldQueued = false;
-            return [character, gold = w.gold](Database& db) { SaveGold(db, character, gold); };
+            return [this, character, gold = w.gold](Database& db) {
+                if (!SaveGold(db, character, gold)) completions->Post([this, character] { SaveFailed(character, "the gold"); });
+            };
         });
     }
     // A barrier save wrote the gold as the game holds it now: a gold save still waiting writes nothing older.
@@ -7179,7 +7197,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         CharacterTask(player.selected, [this, character = player.selected]() -> std::function<void(Database&)> {
             CharacterWrites& w = characterWrites[character];
             w.progressQueued = false;
-            return [p = w.progress](Database& db) { SaveProgress(db, {p}); };
+            return [this, p = w.progress](Database& db) {
+                if (!SaveProgress(db, {p})) completions->Post([this, character = p.character] { SaveFailed(character, "the progress"); });
+            };
         });
     }
     // `then` once the character's saves asked so far have landed (none waiting: at once).
@@ -7187,6 +7207,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto it = characterWrites.find(character);
         if (it == characterWrites.end()) return then();
         it->second.drained.push_back(std::move(then));
+    }
+    // A save of the character's that did not land (the database refused it, or was gone): its session ends, as the
+    // original logs the player out when a job fails ("AQ Failed! Log out!!"), so memory and the database cannot part
+    // for good; its next entry reads what the database holds (the bag's places are written again first, a few times).
+    static constexpr int kSaveRetries = 3;
+    void SaveFailed(std::int64_t character, const char* what) {
+        core::LogWarning("{}: {} of character {} not saved: its session ends", config.name, what, character);
+        std::uint64_t peerId = 0;
+        if (PlayerOfCharacter(character, &peerId) == nullptr) return;
+        Disconnect(peerId, proto::DisconnectReason::Kicked, "the server could not save your character; please log in again");
     }
     // A payment with its work in one transaction (Payment.h), in the character's order: the fee taken from the gold at
     // its turn, the gold column written with the work (as the game holds it then, less the fee, plus the credit); the
@@ -7253,7 +7283,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
     static std::optional<FortressGuild> AsFortressGuild(const std::optional<Guilds::Facts>& f) {
         if (!f) return std::nullopt;
-        return FortressGuild{f->id, f->name, f->level, f->members, f->alliance, f->master, f->masterName, f->crest};
+        return FortressGuild{f->id, f->name, f->level, f->members, f->alliance, f->master, f->masterName, f->crest, f->points};
     }
     void FortressSend(std::uint64_t peerId, proto::MessageId id, const std::vector<std::byte>& payload) override { GuildSend(peerId, id, payload); }
     void FortressBroadcast(proto::MessageId id, const std::vector<std::byte>& payload) override {
@@ -7274,6 +7304,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
     double FortressDistance(std::uint32_t a, std::uint32_t b) const override { return GuildDistance(a, b); }
     bool FortressTakeGold(std::uint64_t peerId, std::uint64_t amount) override { return TakeGold(peerId, amount); }
+    void FortressPay(std::int64_t character, std::uint64_t fee, std::uint32_t guild, std::uint32_t points, PaymentWork work, PaymentDone done) override {
+        if (points == 0) return Payment(character, fee, std::move(work), std::move(done));
+        if (!guilds || !guilds->PayWithPoints(guild, points, character, fee, std::move(work), done)) {
+            if (done) done(false, 0);
+        }
+    }
     void FortressGiveGold(std::uint64_t peerId, std::uint64_t amount) override { GiveGold(peerId, amount); }
     void FortressTaxRateChanged(std::uint32_t fortress, std::uint32_t guild, int rate) override { taxRules[fortress] = {guild, rate}; }
     std::uint32_t SpawnStructure(const FortressSpec::Structure& spot, std::uint32_t refObjId, std::uint32_t hp, std::uint32_t maxHp, bool destroyed) override {
@@ -9296,8 +9332,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         s.gone.clear();
         s.dirty.clear();
         s.avatarDirty.clear();
-        return [character, present = std::move(present), emptied = std::move(emptied), gone = std::move(gone), avatars = std::move(avatars)](Database& db) {
-            SaveItems(db, character, present, emptied, gone, avatars);
+        return [this, character, present = std::move(present), emptied = std::move(emptied), gone = std::move(gone), avatars = std::move(avatars)](Database& db) {
+            const bool saved = SaveItems(db, character, present, emptied, gone, avatars);
+            completions->Post([this, character, saved, present, emptied, gone, avatars] {
+                const auto it = itemSaves.find(character);
+                if (saved) {
+                    if (it != itemSaves.end()) it->second.failures = 0;
+                    return;
+                }
+                // Not landed: its places written again (as they are then), a few times; the session ends.
+                if (it != itemSaves.end() && ++it->second.failures <= kSaveRetries) {
+                    for (const StoredItem& i : present) it->second.dirty.insert(i.slot);
+                    it->second.dirty.insert(emptied.begin(), emptied.end());
+                    it->second.gone.insert(it->second.gone.end(), gone.begin(), gone.end());
+                    for (const StoredItem& i : avatars.present) it->second.avatarDirty.insert(i.slot);
+                    it->second.avatarDirty.insert(avatars.emptied.begin(), avatars.emptied.end());
+                }
+                SaveFailed(character, "the bag");
+            });
         };
     }
 
@@ -11095,8 +11147,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         peer.busy = true;
         database.Submit([this, peerId = peer.id, account = peer.account](Database& db) {
             bool ok = false;
-            std::vector<CharacterRow> rows = ListCharacters(db, account, config.id, config.deleteSeconds, ok);
-            completions->Post([this, peerId, rows = std::move(rows), ok] {
+            std::vector<CharacterGone> gone;
+            std::vector<CharacterRow> rows = ListCharacters(db, account, config.id, config.deleteSeconds, ok, &gone);
+            completions->Post([this, peerId, rows = std::move(rows), ok, gone = std::move(gone)] {
+                // Those deleted for good left their guild and academy: every server's memory of them loaded again.
+                for (const CharacterGone& g : gone) {
+                    if (guilds && g.guild != 0) guilds->RowsChanged(g.guild);
+                    if (academies && g.academy != 0) academies->RowsChanged(g.academy);
+                }
                 Peer* peer = peers->Find(peerId);
                 if (!peer) return;
                 peer->busy = false;
@@ -11573,12 +11631,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         CharacterTask(player.selected, [this, character = player.selected, leftAt, kept = std::move(kept), hp = player.hp, mp = player.mp,
                                         p = ProgressOf(player), dirty = player.progressDirty]() -> std::function<void(Database&)> {
             return [character, leftAt, kept, hp, mp, p, dirty, gold = characterWrites[character].gold](Database& db) {
-                if (leftAt) SavePlaces(db, {*leftAt});
-                SaveBuffs(db, character, kept);
-                SaveVitals(db, character, hp, mp);
-                SaveLogout(db, character);
-                if (dirty) SaveProgress(db, {p}); // what changed since its last save (every other change is saved as it comes)
-                SaveGold(db, character, gold);
+                bool saved = !leftAt || SavePlaces(db, {*leftAt});
+                saved = SaveBuffs(db, character, kept) && saved;
+                saved = SaveVitals(db, character, hp, mp) && saved;
+                saved = SaveLogout(db, character) && saved;
+                if (dirty) saved = SaveProgress(db, {p}) && saved; // what changed since its last save (every other change is saved as it comes)
+                saved = SaveGold(db, character, gold) && saved;
+                if (!saved) core::LogWarning("the logout of character {}: a save did not land", character);
             };
         }, {}, true);
         player.progressDirty = false;

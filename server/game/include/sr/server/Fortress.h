@@ -29,6 +29,7 @@
 #include "sr/game/FortressProtocol.h"
 #include "sr/game/WorldProtocol.h"
 #include "sr/server/FortressStore.h"
+#include "sr/server/Payment.h"
 
 namespace sr::assets {
 class CharacterTable;
@@ -99,6 +100,7 @@ struct FortressGuild {
     bool master = false;
     std::string masterName;
     std::uint32_t crest = 0; // the guild's emblem's revision (0: none)
+    std::uint32_t points = 0; // its guild points
 };
 
 // What the fortress war needs of the game server.
@@ -116,6 +118,16 @@ public:
     virtual std::string FortressNpc(std::uint32_t entity) const = 0;
     virtual double FortressDistance(std::uint32_t a, std::uint32_t b) const = 0;
     virtual bool FortressTakeGold(std::uint64_t peer, std::uint64_t amount) = 0;
+    // A payment of `character`'s (Payment.h) with `points` of guild `guild`'s points: the points, the fee, the gold and
+    // `work` (the fortress's rows) in one transaction, as the original's procedure for each paid operation.
+    virtual void FortressPay(std::int64_t character, std::uint64_t fee, std::uint32_t guild, std::uint32_t points, PaymentWork work, PaymentDone done) {
+        (void)character;
+        (void)fee;
+        (void)guild;
+        (void)points;
+        (void)work;
+        if (done) done(false, 0);
+    }
     // A structure standing in the world (a fixed monster of that characterdata id with that health;
     // 0: it could not be made), and gone.
     virtual std::uint32_t SpawnStructure(const FortressSpec::Structure& spot, std::uint32_t refObjId, std::uint32_t hp, std::uint32_t maxHp, bool destroyed) = 0;

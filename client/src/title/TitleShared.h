@@ -230,6 +230,7 @@ inline std::string LobbyStatusText(const UiData& d, game::proto::LobbyStatus sta
     case LobbyStatus::Deleting: return "The character is being deleted: restore it first.";
     case LobbyStatus::NotDeleting: return "The character is not being deleted.";
     case LobbyStatus::Busy: return d.Text("UIO_MSG_ERROR_SEVER_CONNECT");
+    case LobbyStatus::GuildMaster: return "A guild's master cannot be deleted: leave the guild or hand it on first.";
     }
     return {};
 }

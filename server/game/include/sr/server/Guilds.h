@@ -118,6 +118,9 @@ public:
     // A player entered the world (it is told its guild and union; its members see it online) or left it.
     void Entered(const GuildActor& actor);
     void Left(std::int64_t character);
+    // A guild's rows changed in the database under it (a member deleted for good): loaded again here, the shard's other
+    // servers told to.
+    void RowsChanged(std::uint32_t guild);
     // Gone to another game server of the shard: still online, nobody is told (Left if it never arrives).
     void MovedAway(std::int64_t character);
     void LevelChanged(std::int64_t character, int level);
@@ -183,8 +186,13 @@ public:
         bool master = false;
         std::string masterName; // its master's name (the fortress list's second string)
         std::uint32_t crest = 0; // its emblem's revision (0: none)
+        std::uint32_t points = 0; // its guild points
     };
     std::optional<Facts> FactsOf(std::int64_t character) const;
+    // A payment of `character`'s (Payment.h) with `points` of the guild's points: the points taken now (false: too few,
+    // nothing done), then written with the fee and `work` in one transaction at the guild writer's turn; given back if it
+    // does not stand.
+    bool PayWithPoints(std::uint32_t guild, std::uint32_t points, std::int64_t character, std::uint64_t fee, PaymentWork work, PaymentDone done);
     std::optional<Facts> FactsOfGuild(std::uint32_t guild) const;
     std::size_t Count() const;
     // Writes still to go (tests wait for them).

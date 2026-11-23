@@ -1359,6 +1359,8 @@ void Academies::Entered(const AcademyActor& actor, bool arrived) {
         });
 }
 
+void Academies::RowsChanged(std::uint32_t academy) { s_->Changed(academy); }
+
 void Academies::Left(std::int64_t character) {
     State& s = *s_;
     const auto it = s.online.find(character);
