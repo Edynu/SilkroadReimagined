@@ -227,8 +227,12 @@ int DropTable::RollGroup(const ClassRow& row, double scale, std::mt19937& random
     return -1;
 }
 
+int DropTable::PlusCapOfClass(int itemClass) {
+    return itemClass >= 1 && itemClass <= 23 ? 8 : 0;
+}
+
 int DropTable::RollPlus(std::mt19937& random) const {
-    // The original's (Loot_SelectEquipmentPlus GS:0x724400; its rows read by GS:0x6AA620): a 30-bit roll % 1,000,000, the
+    // The original's (its equipment plus's selection, _RefDropOptLvlSel's rows): a 30-bit roll % 1,000,000, the
     // first level whose cumulative Prob x 1,000,000 (rounded) is not under it; at most +7. Its ReqOnlineTime is read but
     // never asked.
     const std::uint32_t roll = ((std::uniform_int_distribution<std::uint32_t>(0, 32767)(random) << 15) |
@@ -399,7 +403,12 @@ bool DropTable::MakeEquipment(int group, bool rare, const assets::ObjectRow& mon
             chosen = same[std::size_t(Uniform(random) * double(same.size())) % same.size()];
         }
         if (chosen == nullptr || Uniform(random) > chosen->admit) return false;
-        out.item = Instance(*chosen->row, 1, RollPlus(random), random);
+        // Its plus within its item class's cap, else no piece this try (the original's: the drop data's caps by
+        // ItemClass, 8 for classes 1..23 and 0 above, never raised: from class 24, the 72nd level's degree-8 C on, a piece
+        // drops only at +0; a plussed roll there fails the try).
+        const int plus = RollPlus(random);
+        if (plus > PlusCapOfClass(chosen->row->itemClass)) return false;
+        out.item = Instance(*chosen->row, 1, plus, random);
         return true;
     }
     return false;

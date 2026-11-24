@@ -78,6 +78,8 @@ public:
     // A dropped piece's plus (the original's: the first level of the cumulative table not under a roll of 0..999,999; at
     // most +7).
     int RollPlus(std::mt19937& random) const;
+    // A dropped piece's highest plus by its item class (the original's caps: 8 for classes 1..23, 0 from 24).
+    static int PlusCapOfClass(int itemClass);
     void SetLevelGold(std::vector<std::pair<std::uint32_t, std::uint32_t>> byLevel) { levelGold_ = std::move(byLevel); }
     bool Empty() const { return budgets_.empty(); }
 

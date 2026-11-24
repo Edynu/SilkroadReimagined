@@ -528,4 +528,9 @@ TEST_CASE("Drops: a piece's plus from the cumulative table, at most +7 (the orig
     CHECK(zero + three == 2000);
     CHECK(zero > 850);
     CHECK(three > 850);
+    // The caps by item class (U5-07): +8 up to class 23 (the rolled +7 always within), 0 from class 24 (+0 only).
+    CHECK(server::DropTable::PlusCapOfClass(1) == 8);
+    CHECK(server::DropTable::PlusCapOfClass(23) == 8);
+    CHECK(server::DropTable::PlusCapOfClass(24) == 0);
+    CHECK(server::DropTable::PlusCapOfClass(31) == 0);
 }

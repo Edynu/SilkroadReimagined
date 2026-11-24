@@ -323,7 +323,7 @@ std::uint32_t FormulaPart(const CombatStats& attacker, const CombatStats& defend
     return std::uint32_t(std::trunc(Clamp(damage, 0.0, 16777215.0)));
 }
 
-// What a target's wall takes of one part of a hit (the original's wall formulas, GS:0x40EBE0 physical, 0x40EEF0
+// What a target's wall takes of one part of a hit (the original's wall formulas, physical and
 // magical): the attack's power rolled in its range (ours: evenly), divided by 1 + the wall's absorption / 100 less
 // its defence (ignoring the defence: the power), times the skill's power and the lane's damage; under 5 % of the power
 // 1 to 10 % of it; a physical critical's double; the attacker's final factor and the holder's taken one.
@@ -389,7 +389,7 @@ HitResult RollHit(const CombatStats& attacker, const CombatStats& defender, cons
             hit.critical = roll(int(std::trunc(double(chance) / (1.0 + defender.criticalResist / 100.0))), 'C');
         }
         ignoreDefence = who.attackerPlayer && !who.defenderPlayer && roll(int(std::trunc(attacker.ignoreDefenceChance)), 'M');
-        // A wall on the target (the original's hit outcome, GS:0x58E5F0): before the block, for a plain 'att' (not a life
+        // A wall on the target (the original's hit outcome): before the block, for a plain 'att' (not a life
         // steal nor one of fixed damage) and while it has HP, it takes its parts of the hit (each by its own formula, an
         // imbue's at the skill's share); covering every part the hit has (the physical, the magical or an imbue's),
         // the holder is untouched.
