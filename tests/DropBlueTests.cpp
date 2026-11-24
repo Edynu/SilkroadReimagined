@@ -503,3 +503,29 @@ TEST_CASE("Drops' blues: the ROC set's _SET options count by code (parry, durabi
     CHECK(game::ComputeStats(helm, worn, d.options.get(), 0, true).durability.high ==
           doctest::Approx(std::max(1.0, before.durability.high + std::trunc(before.durability.high * -40.0 / 100.0))));
 }
+
+TEST_CASE("Drops: a piece's plus from the cumulative table, at most +7 (the original's Loot_SelectEquipmentPlus; U5-05)") {
+    assets::ItemTable none;
+    std::string error;
+    // Every roll on level 10: +7 (a budget row too: a table needs one).
+    server::DropTable drops;
+    std::string text = "budget\t0\t8\t1\t1\n";
+    for (int level = 0; level <= 12; ++level) text += "plus\t" + std::to_string(level) + "\t" + (level >= 10 ? "1" : "0") + "\n";
+    REQUIRE_MESSAGE(drops.LoadText(text, none, error), error);
+    std::mt19937 random(5);
+    for (int i = 0; i < 200; ++i) CHECK(drops.RollPlus(random) == 7);
+    // Half on +0, half on +3.
+    server::DropTable split;
+    std::string half = "budget\t0\t8\t1\t1\n";
+    for (int level = 0; level <= 12; ++level) half += "plus\t" + std::to_string(level) + "\t" + (level < 3 ? "0.5" : "1") + "\n";
+    REQUIRE_MESSAGE(split.LoadText(half, none, error), error);
+    int zero = 0, three = 0;
+    for (int i = 0; i < 2000; ++i) {
+        const int plus = split.RollPlus(random);
+        zero += plus == 0;
+        three += plus == 3;
+    }
+    CHECK(zero + three == 2000);
+    CHECK(zero > 850);
+    CHECK(three > 850);
+}

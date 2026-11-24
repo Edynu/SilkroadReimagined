@@ -228,9 +228,13 @@ int DropTable::RollGroup(const ClassRow& row, double scale, std::mt19937& random
 }
 
 int DropTable::RollPlus(std::mt19937& random) const {
-    const double u = Uniform(random);
+    // The original's (Loot_SelectEquipmentPlus GS:0x724400; its rows read by GS:0x6AA620): a 30-bit roll % 1,000,000, the
+    // first level whose cumulative Prob x 1,000,000 (rounded) is not under it; at most +7. Its ReqOnlineTime is read but
+    // never asked.
+    const std::uint32_t roll = ((std::uniform_int_distribution<std::uint32_t>(0, 32767)(random) << 15) |
+                                std::uniform_int_distribution<std::uint32_t>(0, 32767)(random)) % 1000000u;
     for (std::size_t i = 0; i < plusCumulative_.size(); ++i) {
-        if (plusCumulative_[i] >= u) return int(i);
+        if (roll <= std::uint32_t(std::llround(plusCumulative_[i] * 1000000.0))) return std::min(int(i), 7);
     }
     return 0;
 }

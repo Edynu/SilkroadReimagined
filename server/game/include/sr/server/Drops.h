@@ -75,6 +75,9 @@ public:
     bool Load(const std::string& path, const assets::ItemTable& items, std::string& error);
     // The same records as text (ReferenceData.h: read from the database's original tables).
     bool LoadText(const std::string& text, const assets::ItemTable& items, std::string& error);
+    // A dropped piece's plus (the original's: the first level of the cumulative table not under a roll of 0..999,999; at
+    // most +7).
+    int RollPlus(std::mt19937& random) const;
     void SetLevelGold(std::vector<std::pair<std::uint32_t, std::uint32_t>> byLevel) { levelGold_ = std::move(byLevel); }
     bool Empty() const { return budgets_.empty(); }
 
@@ -141,7 +144,6 @@ private:
     const ClassRow* ClassesAtOrBelow(const ClassTable& table, int level) const;
     int RollGroup(const ClassRow& row, double scale, std::mt19937& random) const;
     bool MakeEquipment(int group, bool rare, const assets::ObjectRow& monster, std::mt19937& random, Drop& out) const;
-    int RollPlus(std::mt19937& random) const;
     // An extra piece (Loot_InitializeSpecialEquipmentProperties): an
     // equipment piece of the class, an accessory refused, the plus the least of two rolls 1..5, the blues, a piece they
     // refuse lost.
