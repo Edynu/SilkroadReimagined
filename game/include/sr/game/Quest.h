@@ -490,6 +490,7 @@ struct QuestDef {
         // there; the time over: `lost` said, the quest given up and `restart` (the chain's first) made new again.
         std::string escort;
         QuestText escortText;
+        std::vector<QuestText> escortSays; // said first as the COS comes (BAEKRYOUNG_16's WalYoung: "Here we are...")
         std::vector<UseRule::Place> to;
         struct Wave {
             std::string monster;
@@ -501,6 +502,9 @@ struct QuestDef {
         std::optional<Wave> waves;
         std::string restart;
         std::vector<std::pair<std::uint32_t, QuestText>> arrive;
+        // A scene at the arrival, after its lines (BAEKRYOUNG_16's 200 s); its goals met once it is over.
+        std::string arriveScene;
+        std::uint32_t arriveSceneSeconds = 0;
         bool operator==(const Trial&) const = default;
     };
     std::optional<Trial> trial;

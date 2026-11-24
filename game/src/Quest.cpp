@@ -190,9 +190,11 @@ std::string TrialLine(const QuestDef::Trial& t) {
     if (t.noJob) s += " no-job";
     if (!t.scene.empty()) s += std::format(" scene {} {}", t.scene, t.sceneSeconds);
     if (!t.escort.empty()) s += std::format(" escort {} {} minutes {}", t.escort, Text(t.escortText), t.minutes);
+    for (const QuestText& text : t.escortSays) s += " escort-says " + Text(text);
     for (const auto& p : t.to) s += std::format(" to {} {}", place(p), Number(p.radius));
     if (t.waves) s += std::format(" waves {} {} radius {} {} every {}", t.waves->monster, t.waves->count, Number(t.waves->near), Number(t.waves->far), t.waves->every);
     for (const auto& [ms, text] : t.arrive) s += std::format(" arrive {} {}", ms, Text(text));
+    if (!t.arriveScene.empty()) s += std::format(" arrive-scene {} {}", t.arriveScene, t.arriveSceneSeconds);
     if (!t.restart.empty()) s += " restart " + t.restart;
     if (t.finishHere) s += " finish-here";
     if (!t.finished.Empty()) s += " finished " + Text(t.finished);
@@ -954,18 +956,24 @@ bool ParseTrial(Reader& r, QuestDef& q) {
             std::pair<std::uint32_t, QuestText> a;
             ok = r.Integer(a.first, "the milliseconds after the line before") && r.Text(a.second, "the line");
             if (ok) t.arrive.push_back(std::move(a));
-        } else if (what == "restart") ok = r.Word(t.restart, "the quest made new again");
+        } else if (what == "escort-says") {
+            QuestText text;
+            ok = r.Text(text, "what the COS says first");
+            if (ok) t.escortSays.push_back(std::move(text));
+        } else if (what == "arrive-scene") ok = r.Word(t.arriveScene, "the arrival's scene") && r.Integer(t.arriveSceneSeconds, "its seconds");
+        else if (what == "restart") ok = r.Word(t.restart, "the quest made new again");
         else if (what == "finish-here") t.finishHere = true;
         else if (what == "finished") ok = r.Text(t.finished, "what is said when finished there");
         else if (what == "then") ok = r.Word(t.then, "the quest started then");
         else ok = r.Fail(std::format("'{}' is no part of 'trial' (at, row, start, refuse, no-job, after, boss, minutes, warn, adds, pass-on-time, "
-                                     "passed, lost, berserk, take, give, failed, out, scene, escort, to, waves, arrive, restart, finish-here, "
-                                     "finished, then)",
+                                     "passed, lost, berserk, take, give, failed, out, scene, escort, escort-says, to, waves, arrive, "
+                                     "arrive-scene, restart, finish-here, finished, then)",
                                      what));
         if (!ok) return false;
     }
-    if (t.npc.empty() || boss == !t.scene.empty())
-        return r.Fail("a trial names its NPC ('at NPC') and either its boss ('boss MOB REGION X Y Z radius A B') or its scene ('scene NAME S')");
+    if (t.npc.empty() || boss == (!t.scene.empty() || !t.escort.empty()))
+        return r.Fail("a trial names its NPC ('at NPC') and either its boss ('boss MOB REGION X Y Z radius A B') or its scene ('scene NAME S') "
+                      "or escort ('escort COS TEXT')");
     if (!t.escort.empty() && t.to.empty()) return r.Fail("an escort names where it goes ('to REGION X Y Z RADIUS')");
     if (t.near > t.far) return r.Fail("the boss's 'radius A B' takes A <= B");
     q.trial = std::move(t);

@@ -319,7 +319,8 @@ talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_10_15
 # ShinMoo (the quest's COS NPC_CH_QT_FLAMEMASTER_COS) beside the player (_18), two MOB_QT_TQ_THIEF_02 90..100 from the
 # player every minute, 15 minutes (_16, _17); within 100 of one of the four exit places: ShinMoo's _09, _14, _15, _10
 # 1.25 / 1.25 / 1.25 s apart, the quest paid there 2.5 s later, out. The time over: _19, given up, and 13 to be taken
-# again. Ours: Leebaek's row also lets one whose run was cut short (out of the game) go in again.
+# again. The escort's time: 30 minutes (its event clock 20 minutes, then 5 and 5; the gauge's 30). Ours: Leebaek's row also
+# lets one whose run was cut short (out of the game) go in again.
 quest QNO_TQ_BAEKRYOUNG_14
 start level 89-
 start after all QNO_TQ_BAEKRYOUNG_13
@@ -329,9 +330,49 @@ giver NPC_CH_GENARAL_SP
 npc NPC_CH_GENARAL_SP
 finish NPC_CH_GENARAL_SP
 goal talk NPC_CH_QT_FLAMEMASTER_COS text @SN_CON_QNO_TQ_BAEKRYOUNG_14_01
-trial INS_QNO_TQ_BAEKRYEONG_14 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_13_03 start -32763 712 13 1070 scene qno_tq_baekryoung_14 81 escort NPC_CH_QT_FLAMEMASTER_COS @SN_TALK_QNO_TQ_BAEKRYEONG_14_18 minutes 15 warn 10 @SN_TALK_QNO_TQ_BAEKRYEONG_14_16 warn 5 @SN_TALK_QNO_TQ_BAEKRYEONG_14_17 to -32763 15685 549 -19136 100 to -32763 -15539 549 19983 100 to -32763 -19279 584 -15979 100 to -32763 19343 549 15631 100 waves MOB_QT_TQ_THIEF_02 2 radius 90 100 every 60 arrive 0 @SN_TALK_QNO_TQ_BAEKRYEONG_14_09 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_14 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_15 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_10 lost @SN_TALK_QNO_TQ_BAEKRYEONG_14_19 restart QNO_TQ_BAEKRYOUNG_13 finish-here
+trial INS_QNO_TQ_BAEKRYEONG_14 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_13_03 start -32763 712 13 1070 scene qno_tq_baekryoung_14 81 escort NPC_CH_QT_FLAMEMASTER_COS @SN_TALK_QNO_TQ_BAEKRYEONG_14_18 minutes 30 warn 10 @SN_TALK_QNO_TQ_BAEKRYEONG_14_16 warn 5 @SN_TALK_QNO_TQ_BAEKRYEONG_14_17 to -32763 15685 549 -19136 100 to -32763 -15539 549 19983 100 to -32763 -19279 584 -15979 100 to -32763 19343 549 15631 100 waves MOB_QT_TQ_THIEF_02 2 radius 90 100 every 60 arrive 0 @SN_TALK_QNO_TQ_BAEKRYEONG_14_09 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_14 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_15 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_10 lost @SN_TALK_QNO_TQ_BAEKRYEONG_14_19 restart QNO_TQ_BAEKRYOUNG_13 finish-here
 talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
 talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_13_05
+
+# QNO_TQ_BAEKRYOUNG_15 ("The Truth 1"; SR_GameServer's own class). Leebaek's "gift": under way his _36 with the row _03
+# "Follow Leebaek"; alone into INS_QNO_TQ_BAEKRYEONG_15 by Jangan where the client plays its scene (202 s: Leebaek's
+# ambush, WalYoung, the truth told); then the quest paid there (_15 "The Truth quest has been completed.") and
+# QNO_TQ_BAEKRYOUNG_16 begun at once.
+quest QNO_TQ_BAEKRYOUNG_15
+start level 88-
+start after all QNO_TQ_BAEKRYOUNG_14
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP
+finish NPC_CH_GENARAL_SP
+goal talk NPC_CH_SINMU text @SN_CON_QNO_TQ_BAEKRYOUNG_15_01
+trial INS_QNO_TQ_BAEKRYEONG_15 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_15_03 start 25255 642 40 1438 scene qno_tq_baekryoung_15 202 finish-here finished @SN_TALK_QNO_TQ_BAEKRYEONG_15_15 then QNO_TQ_BAEKRYOUNG_16
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_15_01
+talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_15_02
+talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_15_16
+talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_15_36
+
+# QNO_TQ_BAEKRYOUNG_16 ("The Truth 2"; SR_GameServer's own class), begun by 15, never offered (ours: 'never 15'). Into
+# INS_QNO_TQ_BAEKRYEONG_16_1 (the 5th floor, _RefInstance_World_Start_Pos 23): WalYoung (the quest's COS
+# NPC_CH_QT_MOONSHADOW_COS) beside the player at once (her _09; _40), two MOB_QT_TQ_SNAKEMAN 90..100 from the player every
+# minute, 30 minutes (_38, _39); within 500 of the Flame Sprite (0x8003: 141, -18, -2584) the scene (200 s: ShinMoo and
+# WalYoung), its goal met, out to WalYoung at Jangan for the pay (_19). The time over: _42, given up, 15 to be taken again.
+quest QNO_TQ_BAEKRYOUNG_16
+start level 89-
+start after all QNO_TQ_BAEKRYOUNG_15
+start never QNO_TQ_BAEKRYOUNG_15
+repeat 1
+giver NPC_CH_MOONSHADOW
+npc NPC_CH_MOONSHADOW NPC_CH_GENARAL_SP
+finish NPC_CH_MOONSHADOW
+goal talk NPC_CH_QT_MOONSHADOW_COS text @SN_CON_QNO_TQ_BAEKRYOUNG_16_01
+trial INS_QNO_TQ_BAEKRYEONG_16_1 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_13_03 start -32765 290 -35 -13671 escort NPC_CH_QT_MOONSHADOW_COS @SN_TALK_QNO_TQ_BAEKRYEONG_16_40 minutes 30 escort-says @SN_TALK_QNO_TQ_BAEKRYEONG_16_09 warn 10 @SN_TALK_QNO_TQ_BAEKRYEONG_16_38 warn 5 @SN_TALK_QNO_TQ_BAEKRYEONG_16_39 to -32765 141 -18 -2584 500 waves MOB_QT_TQ_SNAKEMAN 2 radius 90 100 every 60 arrive-scene qno_tq_baekryoung_16 200 lost @SN_TALK_QNO_TQ_BAEKRYEONG_16_42 restart QNO_TQ_BAEKRYOUNG_15
+talk NPC_CH_MOONSHADOW greeting @SN_NPC_CH_MOONSHADOW_QS
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_13_05
+talk NPC_CH_MOONSHADOW done @SN_TALK_QNO_TQ_BAEKRYEONG_16_19
+talk NPC_CH_MOONSHADOW bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_16_20
 
 quest QNO_TQ_BAEKRYOUNG_11
 start level 88-

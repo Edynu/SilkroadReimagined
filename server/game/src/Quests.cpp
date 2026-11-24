@@ -2324,7 +2324,7 @@ void Quests::TrialPassed(std::uint32_t entity, const QuestDef& q) {
     if (it == p->records.end() || !UnderWay(it->second)) return;
     // The quest's state 8: its goals met; ours its kill goals at their count (a scene's: its talks and deliveries too, its
     // person inside).
-    const bool scene = q.trial && !q.trial->scene.empty();
+    const bool scene = q.trial && q.trial->boss.empty(); // a scene's or an escort's
     for (std::size_t i = 0; i < q.goals.size() && i < it->second.progress.size(); ++i) {
         const QuestGoalKind k = q.goals[i].kind;
         // A scene's delivery: its items handed over there (BAEKRYOUNG_13's letter to ShinMoo).
@@ -2367,6 +2367,12 @@ void Quests::TickTrials(Clock::time_point now) {
         if (who->position.layer != run.layer) continue; // on its way in
         switch (run.phase) {
         case TrialRun::Phase::Waiting: {
+            if (t.scene.empty() && !t.escort.empty()) {
+                // An escort from the start (BAEKRYOUNG_16: WalYoung beside the player at once).
+                run.phase = TrialRun::Phase::Scene;
+                run.next = now;
+                break;
+            }
             if (!t.scene.empty()) {
                 // A scene (CQNO_TQ_BAEKRYOUNG_10's update: step 0 the script played, step 1 until 39 s have passed, step 2
                 // the talk with its NPC done for everyone inside and the instance closed).
@@ -2451,6 +2457,7 @@ void Quests::TickTrials(Clock::time_point now) {
             if (!t.escort.empty()) {
                 // BAEKRYOUNG_14's step 2: the escorted COS beside the player, its words, the waves from a minute on, the time.
                 run.cos = host_.QuestResummon(run.player, t.escort);
+                for (const game::QuestText& text : t.escortSays) say(text);
                 say(t.escortText);
                 run.phase = TrialRun::Phase::Escort;
                 run.ends = now + std::chrono::minutes(t.minutes);
@@ -2505,6 +2512,13 @@ void Quests::TickTrials(Clock::time_point now) {
                 say(t.arrive[run.line].second);
                 ++run.line;
                 run.next = now + std::chrono::milliseconds(run.line < t.arrive.size() ? t.arrive[run.line].first : 2500);
+                break;
+            }
+            // Its scene there (BAEKRYOUNG_16's 200 s: ShinMoo and WalYoung), once.
+            if (!t.arriveScene.empty() && run.line == t.arrive.size()) {
+                host_.QuestScene(run.player, t.arriveScene);
+                ++run.line;
+                run.next = now + std::chrono::seconds(t.arriveSceneSeconds);
                 break;
             }
             if (run.cos != 0) host_.QuestCosRemove(run.cos);

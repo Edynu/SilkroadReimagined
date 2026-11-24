@@ -515,7 +515,7 @@ TEST_CASE("Quest trial: BAEKRYOUNG_13's letter in its scene, paid inside, 14 beg
         CHECK(host.removed.contains(901u));
     }
     SUBCASE("the 15 minutes over: the warnings, lost, 14 given up and 13 to be taken again") {
-        for (auto at = start + 150s; at <= start + 82s + 15min + 10s; at += 5s) quests.Tick(at);
+        for (auto at = start + 150s; at <= start + 82s + 30min + 10s; at += 5s) quests.Tick(at);
         CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_16"));
         CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_17"));
         CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_19"));
@@ -524,6 +524,58 @@ TEST_CASE("Quest trial: BAEKRYOUNG_13's letter in its scene, paid inside, 14 beg
         CHECK(quests.Record(1, q13->id)->status == proto::QuestStatus::Abandoned);
         CHECK(host.layers[1] == 0);
     }
+}
+
+TEST_CASE("Quest trial: BAEKRYOUNG_15's scene, paid inside, 16 begun; 16's escort of WalYoung to the Flame Sprite, its scene there, out to her for the pay (a made-up host)") {
+    const auto coded = Coded();
+    TrialHost host;
+    host.npcs[12] = "NPC_CH_MOONSHADOW";
+    host.who.position = {proto::WorldPosition{25000, 100.0f, 0.0f, 100.0f, 0}};
+    server::Quests quests(host, {});
+    quests.Load(Numbered(coded));
+    const game::QuestDef* q15 = quests.Find("QNO_TQ_BAEKRYOUNG_15");
+    const game::QuestDef* q16 = quests.Find("QNO_TQ_BAEKRYOUNG_16");
+    REQUIRE(q15 != nullptr);
+    REQUIRE(q16 != nullptr);
+    game::QuestDef again;
+    std::string error;
+    REQUIRE_MESSAGE(game::ParseQuest(game::WriteQuest(*q16), again, error), error);
+    CHECK(again.trial == q16->trial);
+    quests.Enter(1, {Record(q15->id, proto::QuestStatus::Achieving)});
+    REQUIRE(Ask(quests, proto::QuestTalk{10, q15->id}));
+    CHECK(host.Last<proto::QuestSays>().moment == "trial");
+    REQUIRE(Ask(quests, proto::QuestHandIn{10, q15->id, {}}));
+    auto start = std::chrono::steady_clock::now();
+    quests.Tick(start);
+    CHECK(host.scenes.back().second == "qno_tq_baekryoung_15");
+    // 202 s: paid inside, its words; 16 begun and entered: WalYoung at once with her words.
+    quests.Tick(start + 203s);
+    CHECK(quests.Record(1, q15->id)->status == proto::QuestStatus::Done);
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_15_15"));
+    REQUIRE(quests.Record(1, q16->id));
+    REQUIRE(quests.Trials().size() == 1);
+    CHECK(host.enteredAt->region == 0x8003);
+    start += 204s;
+    quests.Tick(start);
+    quests.Tick(start + 1s);
+    REQUIRE(host.coses.size() == 1);
+    CHECK(host.coses[0] == "NPC_CH_QT_MOONSHADOW_COS");
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_16_09"));
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_16_40"));
+    quests.Tick(start + 62s);
+    CHECK(host.Count("MOB_QT_TQ_SNAKEMAN") == 2);
+    // At the Flame Sprite (within 500): its scene, 200 s; then met and out; WalYoung's done talk.
+    host.who.position = {0x8003, 300.0f, -18.0f, -2400.0f, 0};
+    quests.Tick(start + 70s);
+    quests.Tick(start + 73s);
+    CHECK(host.scenes.back().second == "qno_tq_baekryoung_16");
+    quests.Tick(start + 200s);
+    CHECK(quests.Record(1, q16->id)->status == proto::QuestStatus::Achieving);
+    quests.Tick(start + 280s);
+    CHECK(quests.Record(1, q16->id)->status == proto::QuestStatus::Achieved);
+    CHECK(host.layers[1] == 0);
+    REQUIRE(Ask(quests, proto::QuestTalk{12, q16->id}));
+    CHECK(host.Last<proto::QuestSays>().moment == "done");
 }
 
 TEST_CASE("Quest trial: the ritual's ghost counts only in berserk; in berserk the charm becomes the piece, else failed; out 10 s on (a made-up host)") {
