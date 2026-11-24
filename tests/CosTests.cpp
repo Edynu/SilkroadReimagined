@@ -1885,8 +1885,14 @@ TEST_CASE("Game server: the bandits: a trader's caravan out of town draws a wave
         const auto m = Next<proto::EntityAppeared>(a);
         if (m.character.model == kSpecial) npc = m.entity;
     }
-    a.client->Send(proto::UseItem{PlaceOf(a.bag, kCartScroll)});
-    const auto cart = Next<proto::CosSummoned>(a);
+    // The scroll used (again while the entry's load of a kept transport still runs: refused as a second COS meanwhile).
+    proto::CosSummoned cart;
+    bool summoned = false;
+    for (int tries = 0; tries < 20 && !summoned; ++tries) {
+        a.client->Send(proto::UseItem{PlaceOf(a.bag, kCartScroll)});
+        summoned = a.client->Expect(cart, 2s);
+    }
+    REQUIRE(summoned);
     Next<proto::CosBag>(a);
     // Riding it: a hit on the rider strikes the transport.
     a.client->Send(proto::CosRide{cart.entity, true});
