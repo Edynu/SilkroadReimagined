@@ -2745,6 +2745,19 @@ bool SaveCubeChange(Database& db, const ExchangeSaveSide& side, std::int64_t cub
     return ok;
 }
 
+bool SaveCubeUse(Database& db, std::int64_t cube, std::uint8_t slot, std::int64_t item, const StoredItem* left) {
+    std::string error;
+    const bool ok = db.Transaction(
+        [&](Database& tx) {
+            if (left != nullptr) return WriteItem(tx, left->id, *left, error);
+            return tx.Query("DELETE FROM _inventoryforlinkedstorage WHERE linkeditemid = $1 AND slot = $2", {cube, int(slot)}).Ok() &&
+                   tx.Query("DELETE FROM _items WHERE id64 = $1", {item}).Ok();
+        },
+        error);
+    if (!ok) core::LogWarning("magic cube {}: an elixir used: {}", cube, error);
+    return ok;
+}
+
 bool SaveCharacterModel(Database& db, std::int64_t character, std::uint32_t model, std::uint8_t scale) {
     return db.Query("UPDATE _char SET refobjid = $2, scale = $3 WHERE charid = $1", {character, std::int64_t(model), int(scale)}).Affected() == 1;
 }

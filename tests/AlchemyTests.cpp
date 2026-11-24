@@ -404,6 +404,97 @@ TEST_CASE("Alchemy on the game server: a strengthening's result on the 4th tick,
     CHECK(bench.bag.At(20)->count == 1);
 }
 
+TEST_CASE("Alchemy on the game server: a magic cube stands for the elixir: its first elixir's kind and chance, one used out of its last place, the cube kept") {
+    REQUIRE_GAME_DATA(d);
+    // A cube of our own (TID 3/2/3/1) beside the game's items; its store as the game server keeps it.
+    struct CubeBench : AlchemyBench {
+        assets::ItemTable items;
+        std::map<std::uint8_t, game::ItemInstance> store;
+        std::uint8_t cubePlace = 0;
+        explicit CubeBench(const Data& data) : AlchemyBench(data), items(data.items) {
+            assets::ItemRow cube;
+            cube.refObjId = 990001;
+            cube.codename = "ITEM_T_MAGIC_CUBE";
+            cube.typeId = {3, 2, 3, 1};
+            cube.inService = true;
+            cube.maxStack = 1;
+            items.Add(cube);
+        }
+        const assets::ItemTable* AlchemyItems() const override { return &items; }
+        std::optional<game::ItemInstance> AlchemyCubeElixir(std::uint32_t, std::uint8_t place) override {
+            if (place != cubePlace || store.empty()) return std::nullopt;
+            return store.begin()->second;
+        }
+        bool AlchemyCubeUseOne(std::uint32_t, std::uint8_t place) override {
+            if (place != cubePlace || store.empty()) return false;
+            auto last = std::prev(store.end());
+            if (last->second.count > 1) --last->second.count;
+            else store.erase(last);
+            return true;
+        }
+        void Store(std::uint8_t slot, const char* code, int count) {
+            game::ItemInstance item;
+            item.refId = d.Row(code).refObjId;
+            item.count = std::uint16_t(count);
+            item.serial = nextSerial++;
+            store[slot] = item;
+        }
+    };
+    CubeBench bench(d);
+    server::Alchemy alchemy(bench, 17);
+    bench.Put(13, "ITEM_CH_SWORD_01_A");
+    game::ItemInstance cube;
+    cube.refId = 990001;
+    cube.count = 1;
+    cube.serial = bench.nextSerial++;
+    bench.bag.places[14] = cube;
+    bench.cubePlace = 14;
+    bench.Put(15, "ITEM_ETC_ARCHEMY_REINFORCE_PROB_UP_A_01", 2);
+    auto now = server::Alchemy::Clock::now();
+    const auto run = [&] {
+        for (int i = 0; i < 4; ++i) {
+            now += std::chrono::seconds(1);
+            alchemy.Tick(now);
+        }
+    };
+    // Empty: no elixir (0x5407).
+    bench.Ask(alchemy, game::proto::AlchemyStrengthen{13, 14, 15});
+    REQUIRE(bench.results.size() == 1);
+    CHECK(bench.results[0].code == game::alchemy::code::kRecipeMissing);
+    bench.results.clear();
+    // An armour elixir first in it: not for a sword (its kind checked as the elixir's own).
+    bench.Store(0, "ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_ARMOR_B", 1);
+    bench.Ask(alchemy, game::proto::AlchemyStrengthen{13, 14, 15});
+    REQUIRE(bench.results.size() == 1);
+    CHECK(bench.results[0].outcome == game::proto::AlchemyOutcome::Refused);
+    CHECK(bench.results[0].code != 0);
+    bench.results.clear();
+    // Weapon elixirs: +0 with elixir B and powder A at 100 %; one leaves the cube's last place, the cube stays.
+    bench.store.clear();
+    bench.Store(0, "ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B", 1);
+    bench.Store(1, "ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_B", 2);
+    bench.Ask(alchemy, game::proto::AlchemyStrengthen{13, 14, 15});
+    run();
+    REQUIRE(bench.results.size() == 1);
+    CHECK(bench.results[0].outcome == game::proto::AlchemyOutcome::Success);
+    CHECK(bench.bag.At(13)->plus == 1);
+    REQUIRE(bench.bag.At(14) != nullptr); // the cube kept
+    CHECK(bench.bag.At(14)->refId == 990001);
+    CHECK(bench.bag.At(15)->count == 1);   // the powder used
+    REQUIRE(bench.store.size() == 2);
+    CHECK(bench.store[1].count == 1);
+    CHECK(bench.store[0].count == 1);
+    bench.results.clear();
+    // Again (no powder): the last place emptied and gone.
+    bench.Ask(alchemy, game::proto::AlchemyStrengthen{13, 14, 0});
+    run();
+    REQUIRE(bench.results.size() == 1);
+    CHECK(bench.results[0].outcome != game::proto::AlchemyOutcome::Refused);
+    CHECK(bench.store.size() == 1);
+    CHECK(bench.store.contains(0));
+    REQUIRE(bench.bag.At(14) != nullptr);
+}
+
 TEST_CASE("Alchemy on the game server: a piece dismantled with the Destroyer Rondos it needs; refused without them") {
     REQUIRE_GAME_DATA(d);
     AlchemyBench bench(d);

@@ -420,6 +420,9 @@ std::unordered_map<std::int64_t, std::vector<StoredItem>> LoadCubeItems(Database
 // A cube's change and the bag's side in one transaction: `item` into the cube's place `slot` (`into`), or the place
 // emptied (its item now in the bag's side).
 bool SaveCubeChange(Database& db, const ExchangeSaveSide& side, std::int64_t cube, std::uint8_t slot, const StoredItem* item, bool into);
+// An elixir used out of a magic cube's place (an alchemy's): `left` the stack that stays there (its count saved), or with
+// none the item gone (its place and its row deleted).
+bool SaveCubeUse(Database& db, std::int64_t cube, std::uint8_t slot, std::int64_t item, const StoredItem* left);
 // The skin change: the character's model and scale (`_char.refobjid`, `scale`).
 bool SaveCharacterModel(Database& db, std::int64_t character, std::uint32_t model, std::uint8_t scale);
 // A skill withdrawn: its group's row `previous` gone, `now` (0: none) learned instead.

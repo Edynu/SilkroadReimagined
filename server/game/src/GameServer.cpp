@@ -7675,6 +7675,38 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         SendService(peer, proto::ServiceRequest::Cube, 0);
         if (quests) quests->BagChanged(player.entity);
     }
+    // A magic cube standing for an elixir in a strengthening (U7-03): its store's first elixir; one used out of its last place.
+    std::optional<game::ItemInstance> AlchemyCubeElixir(std::uint32_t entity, std::uint8_t cube) override {
+        const PlayerWorld* p = PlayerByEntity(entity);
+        if (p == nullptr) return std::nullopt;
+        const auto c = p->inventory.places.find(cube);
+        if (c == p->inventory.places.end()) return std::nullopt;
+        const auto it = cubeItems.find(c->second.serial);
+        if (it == cubeItems.end() || it->second.empty()) return std::nullopt;
+        return it->second.begin()->second;
+    }
+    bool AlchemyCubeUseOne(std::uint32_t entity, std::uint8_t cube) override {
+        PlayerWorld* p = PlayerByEntity(entity);
+        if (p == nullptr) return false;
+        const auto c = p->inventory.places.find(cube);
+        if (c == p->inventory.places.end()) return false;
+        const std::int64_t cubeId = c->second.serial;
+        const auto it = cubeItems.find(cubeId);
+        if (it == cubeItems.end() || it->second.empty()) return false;
+        auto last = std::prev(it->second.end());
+        const std::uint8_t slot = last->first;
+        const std::int64_t serial = last->second.serial;
+        std::optional<StoredItem> left;
+        if (last->second.count > 1) {
+            --last->second.count;
+            left = StoredOf(slot, last->second);
+        } else {
+            it->second.erase(last);
+        }
+        database.SubmitBarrier([cubeId, slot, serial, left](Database& db) { SaveCubeUse(db, cubeId, slot, serial, left ? &*left : nullptr); });
+        if (Peer* peer = peers->Find(world->PeerOf(entity))) SendCube(*peer, cubeId, cube);
+        return true;
+    }
     // A player entering: its cubes' items read and told.
     // Any cube in the bag whose items are not held yet (it came in since the entry): read now.
     void LoadNewCubes(const PlayerWorld& player) {

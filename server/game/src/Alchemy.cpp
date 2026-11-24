@@ -5,6 +5,7 @@
 
 #include "sr/assets/GameData.h"
 #include "sr/core/Log.h"
+#include "sr/game/MallServices.h"
 
 namespace sr::server {
 
@@ -210,6 +211,17 @@ void Alchemy::Strengthen(std::uint32_t entity, const proto::AlchemyStrengthen& m
     for (const game::ItemInstance* put : {item, material, powder}) {
         if (put != nullptr && put->rentUntil != 0 && put->rentUntil <= unixNow) return Refuse(entity, op, alchemy::code::kNotMaterial, m.target);
     }
+    // A magic cube in the elixir's place (TID 3/2/3/1): its store's first elixir stands for it in the checks and the chance;
+    // holding none: 0x5407 (the original's).
+    bool cube = false;
+    if (game::IsMagicCube(*materialRow)) {
+        const auto elixir = host_.AlchemyCubeElixir(entity, m.material);
+        const assets::ItemRow* elixirRow = elixir ? items->Find(elixir->refId) : nullptr;
+        if (elixirRow == nullptr) return Refuse(entity, op, alchemy::code::kRecipeMissing, m.target);
+        if (alchemy::KindOf(*elixirRow) != alchemy::Kind::Elixir) return Refuse(entity, op, alchemy::code::kNotMaterial, m.target);
+        materialRow = elixirRow;
+        cube = true;
+    }
     std::uint16_t code = 0;
     switch (alchemy::KindOf(*materialRow)) {
     case alchemy::Kind::Elixir: code = alchemy::CheckReinforce(*targetRow, *item, *materialRow, powderRow); break;
@@ -227,6 +239,7 @@ void Alchemy::Strengthen(std::uint32_t entity, const proto::AlchemyStrengthen& m
     run.targetSerial = item->serial;
     run.materialSerial = material->serial;
     run.powderSerial = powder != nullptr ? powder->serial : 0;
+    run.cube = cube;
     runs_[entity] = std::move(run);
 }
 
@@ -248,6 +261,12 @@ void Alchemy::Complete(std::uint32_t entity, Run& run) {
     const assets::ItemRow* targetRow = items->Find(item->refId);
     const assets::ItemRow* materialRow = items->Find(material->refId);
     const assets::ItemRow* powderRow = powder != nullptr ? items->Find(powder->refId) : nullptr;
+    // Out of a magic cube: its first elixir again (emptied meanwhile: nothing).
+    if (run.cube) {
+        const auto elixir = host_.AlchemyCubeElixir(entity, run.material);
+        materialRow = elixir ? items->Find(elixir->refId) : nullptr;
+        if (materialRow != nullptr && alchemy::KindOf(*materialRow) != alchemy::Kind::Elixir) materialRow = nullptr;
+    }
     if (targetRow == nullptr || materialRow == nullptr) return Refuse(entity, op, alchemy::code::kNothing, run.target);
 
     proto::AlchemyResult r;
@@ -276,7 +295,12 @@ void Alchemy::Complete(std::uint32_t entity, Run& run) {
             if (stats.durability.high > 0) item->durability = std::min<std::uint32_t>(item->durability, std::uint32_t(stats.durability.high));
         }
         r.plusAfter = std::uint8_t(std::min(255, game::TotalPlus(*item)));
-        UseOne(bag, run.material, touched, gone);
+        // One elixir used (out of the cube: the cube stays, one leaves its store).
+        if (run.cube) {
+            host_.AlchemyCubeUseOne(entity, run.material);
+        } else {
+            UseOne(bag, run.material, touched, gone);
+        }
         if (run.powder != 0) UseOne(bag, run.powder, touched, gone);
         if (result.destroyed) {
             gone.push_back(item->serial);

@@ -64,6 +64,11 @@ public:
     virtual bool AlchemyGive(std::uint32_t entity, const std::vector<game::ItemInstance>& items, std::vector<std::uint8_t>& touched) = 0;
     // The bag changed at `touched` (`gone`: the items deleted): told to the player, then saved.
     virtual void AlchemyBag(std::uint32_t entity, std::vector<std::uint8_t> touched, std::vector<std::int64_t> gone) = 0;
+    // A magic cube in the bag's place `cube` standing for an elixir: the elixir in its store's first place (none: it holds
+    // none, or it is no cube), and one elixir used out of it (the last place's: the original's latest slot; told and
+    // saved; false: none).
+    virtual std::optional<game::ItemInstance> AlchemyCubeElixir(std::uint32_t /*entity*/, std::uint8_t /*cube*/) { return std::nullopt; }
+    virtual bool AlchemyCubeUseOne(std::uint32_t /*entity*/, std::uint8_t /*cube*/) { return false; }
 };
 
 class Alchemy {
@@ -89,6 +94,7 @@ private:
         std::vector<std::uint8_t> queue; // disjoining: the stacks still to do
         int phase = 0;
         std::uint8_t socket = 0; // a socket stone's insertion: the socket (its stone in `material`)
+        bool cube = false;       // a strengthening's elixir out of the magic cube in `material`
     };
 
     void Strengthen(std::uint32_t entity, const game::proto::AlchemyStrengthen& m);
