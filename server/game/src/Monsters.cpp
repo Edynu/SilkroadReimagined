@@ -36,6 +36,36 @@ float Distance(const proto::WorldPosition& a, const proto::WorldPosition& b) {
 
 } // namespace
 
+std::optional<proto::WorldPosition> MonsterWayRound(
+    const proto::WorldPosition& from, const proto::WorldPosition& to,
+    const std::function<std::optional<proto::WorldPosition>(const proto::WorldPosition&, const proto::WorldPosition&)>& walkEnd) {
+    const auto reached = [&](const proto::WorldPosition& goal) {
+        const auto end = walkEnd(from, goal);
+        return end && Distance(*end, goal) <= 1.0f;
+    };
+    if (reached(to)) return std::nullopt;
+    const proto::FlatPosition a = proto::ToFlat(from), b = proto::ToFlat(to);
+    const double dx = b.x - a.x, dz = b.z - a.z, length = std::hypot(dx, dz);
+    if (length < 1.0) return std::nullopt;
+    // Its bucket: the reversed step's angle from the x axis, 0..180 degrees in tens (AI_Vec3_AngleBucket10Deg: the step
+    // times -1 against (1, 0, 0), so the side of z is lost); the directions tried, the table's (cos t, -sin t) at
+    // t = 5 + 10 k degrees for k = bucket + 1 .. bucket + 35 (AI_BuildDirectionVectorTable), each for min(length, 15).
+    const double degree = std::numbers::pi / 180.0, probe = std::min(length, 15.0);
+    const double alpha = std::acos(std::clamp(-dx / length, -1.0, 1.0)) / degree;
+    const int bucket = std::clamp(int(alpha / 10.0), 0, 35);
+    for (int i = 1; i < 36; ++i) {
+        const double t = (5.0 + 10.0 * double((bucket + i) % 36)) * degree;
+        const double ux = std::cos(t), uz = -std::sin(t);
+        proto::WorldPosition probeTo = proto::FromFlat({a.x + ux * probe, a.z + uz * probe}, from.y);
+        probeTo.layer = from.layer;
+        if (!reached(probeTo)) continue;
+        proto::WorldPosition step = proto::FromFlat({a.x + ux * 20.0, a.z + uz * 20.0}, from.y);
+        step.layer = from.layer;
+        return step;
+    }
+    return std::nullopt;
+}
+
 struct Monsters::State {
     World& world;
     const assets::CharacterTable& characters;
@@ -957,6 +987,15 @@ struct Monsters::State {
             m.nextThink = now + Seconds(0.5f);
             return;
         }
+        // Outside its home boundary (its nest's radius; 1.5 times it for homing kind 1; kind 2 none), it goes home (the
+        // original's on entering idle and at each wander; ours: not for a point without its nest's record, radius 0).
+        if (nest.spec.homing != 2 && nest.spec.radius > 0.0f && !m.states.Rooted()) {
+            const float boundary = nest.spec.radius * (nest.spec.homing == 1 ? 1.5f : 1.0f);
+            if (Distance(place->position, nest.spec.position) >= boundary) {
+                Events none;
+                return GoHome(m, now, none);
+            }
+        }
         m.nextThink = now + Seconds(Uniform(2.0f, 6.0f));
         if (Percent() < 25 || m.states.Rooted()) return;
         const proto::FlatPosition here = proto::ToFlat(place->position), centre = proto::ToFlat(nest.spec.position);
@@ -1028,6 +1067,13 @@ struct Monsters::State {
                 summons.push_back(raised);
             }
         }
+    }
+    // The outdoor chase's way round an obstacle (the original's probe, at each step of a chase: MonsterWayRound); none
+    // free (or in a dungeon, whose chase goes by the original's own route data: not read), the straight step all the
+    // same.
+    std::optional<proto::WorldPosition> WayRound(const proto::WorldPosition& from, const proto::WorldPosition& to) const {
+        if ((from.region & 0x8000) != 0 || !world.HasNavigation()) return std::nullopt;
+        return MonsterWayRound(from, to, [&](const proto::WorldPosition& a, const proto::WorldPosition& b) { return world.WalkEnd(a, b); });
     }
     // Its attack for this swing: drawn by weight, each its AI_AttackChance (0: never) and half of how far the target stands
     // inside its reach ((range + its body + the target's - distance) x 5 / 10, when positive); r = rand % (sum + 1) on the
@@ -1147,12 +1193,17 @@ struct Monsters::State {
                 const double length = std::max(1.0, std::hypot(a.x - b.x, a.z - b.z));
                 // Not struck for 5 s: it walks while its target is over 100 away (moving) or 150 (standing), runs nearer.
                 const bool walk = now - m.lastStrike > std::chrono::seconds(5) && distance > (world.Moving(m.target) ? 100.0f : 150.0f);
+                proto::WorldPosition step;
                 if (length > kChaseLeg) { // a far end: a leg's worth toward it (one walk's reach, never refused)
-                    world.MoveTo(m.entity, proto::FromFlat({a.x + (b.x - a.x) / length * kChaseLeg, a.z + (b.z - a.z) / length * kChaseLeg}, goal.y), walk);
+                    step = proto::FromFlat({a.x + (b.x - a.x) / length * kChaseLeg, a.z + (b.z - a.z) / length * kChaseLeg}, goal.y);
                 } else {
                     const double stop = spot >= 0 ? 0.0 : std::min(double(reach) * 0.7, length); // onto its place's point
-                    world.MoveTo(m.entity, proto::FromFlat({b.x + (a.x - b.x) / length * stop, b.z + (a.z - b.z) / length * stop}, goal.y), walk);
+                    step = proto::FromFlat({b.x + (a.x - b.x) / length * stop, b.z + (a.z - b.z) / length * stop}, goal.y);
                 }
+                step.layer = place->position.layer;
+                // An obstacle in the way outdoors: 20 the first free way round (WayRound), the next step looking again.
+                if (const auto round = WayRound(place->position, step)) step = *round;
+                world.MoveTo(m.entity, step, walk);
                 m.aim = goal;
             }
             return;
@@ -1441,6 +1492,11 @@ Monsters::Monsters(World& world, const assets::CharacterTable& characters, const
     }
     s_->GroupHives();
     s_->GroupCrowds();
+}
+
+bool Monsters::Homeward(std::uint32_t entity) const {
+    const auto it = s_->monsters.find(entity);
+    return it != s_->monsters.end() && it->second.mode == State::Mode::Home;
 }
 
 int Monsters::CrowdRate(std::uint32_t hive) const {

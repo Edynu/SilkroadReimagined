@@ -985,7 +985,25 @@ TEST_CASE("static monsters: walk and run speeds 0 (Hotan's Blood Devils, the tru
     f.Step(40.0);
     CHECK(Distance(f.world.Where(flowerId)->position, flowerAt) < 0.01f);
     CHECK(Distance(f.world.Where(walkerId)->position, walkerAt) > 1.0f);
-    // Hit from 200 away: the flower does not come after the player; the other does.
+    // Hit from 200 away: the flower does not come after the player; the other does. The walker first put 200 from the
+    // player where the straight way between them is clear (its wander may have ended behind a wall, where a chase steps
+    // back by the original's probe, Monsters' WayRound; Constantinople's streets have many).
+    const sr::game::proto::WorldPosition me = f.world.Where(f.player)->position;
+    const auto clear = [&](const sr::game::proto::WorldPosition& u, const sr::game::proto::WorldPosition& v) {
+        const auto end = f.world.WalkEnd(u, v);
+        return end && Distance(*end, v) < 1.0f;
+    };
+    bool placed = false;
+    for (int k = 0; k < 24 && !placed; ++k) {
+        const double t = double(k) * 2.0 * 3.14159265358979 / 24.0;
+        const sr::game::proto::FlatPosition c = sr::game::proto::ToFlat(me);
+        const sr::game::proto::WorldPosition spot = sr::game::proto::FromFlat({c.x + 200.0 * std::cos(t), c.z + 200.0 * std::sin(t)}, me.y);
+        if (!clear(me, spot)) continue;
+        REQUIRE(f.world.Teleport(walkerId, *f.world.WalkEnd(me, spot)));
+        f.Step(0.5);
+        placed = clear(f.world.Where(walkerId)->position, me);
+    }
+    REQUIRE(placed);
     for (const std::uint32_t mob : {flowerId, walkerId}) {
         server::Monsters::Affliction hit;
         hit.from = f.world.Where(f.player)->position;

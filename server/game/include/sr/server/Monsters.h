@@ -58,6 +58,14 @@ class World;
 // The original's 32 Resist columns of each monster (characterdata RefObjID -> ResistFrozen ..
 // Resist32), from the database: the client's files do not carry them.
 using MonsterResistances = std::unordered_map<std::uint32_t, std::array<std::uint8_t, 32>>;
+// The outdoor chase's way round an obstacle (the original's probe): the straight step `from` -> `to` cut short by the
+// navigation (`walkEnd`: where a straight walk ends; none: no ground), the first free of the original's 35 other
+// directions 10 degrees apart (from its bucket's, the reversed step's angle, turning one way), each tried for
+// min(length, 15); the step of 20 that way.
+// None: the straight step is free, or no way is.
+std::optional<game::proto::WorldPosition> MonsterWayRound(
+    const game::proto::WorldPosition& from, const game::proto::WorldPosition& to,
+    const std::function<std::optional<game::proto::WorldPosition>(const game::proto::WorldPosition&, const game::proto::WorldPosition&)>& walkEnd);
 // A monster's defence against states from its level and its Resist columns.
 game::StateDefence MonsterStateDefence(int level, const std::array<std::uint8_t, 32>& resist);
 
@@ -74,6 +82,9 @@ struct MonsterNest {
     // most (dwMaxIncreaseRate), in percent of a nest's delay cut.
     int crowdPlayers = 0;
     int crowdStep = 0, crowdMax = 0;
+    // Its tactics' home boundary (btHomingType): idle or wandering outside its nest's radius (0), 1.5 times it (1), it
+    // goes home; 2: never.
+    int homing = 0;
     float delayMin = 1, delayMax = 1; // seconds before a gap refills
     int maxCount = 1;
     bool aggressive = false; // attacks players it sees
@@ -292,6 +303,8 @@ public:
     // A crowded hunting ground's delay cut now, in percent (Monsters' every 30 s: the players in its nests' regions, the
     // average of two minutes, over the players it is made for, times its step, held to its most); 0 for another hive.
     int CrowdRate(std::uint32_t hive) const;
+    // Whether it is on its way home (a fight given up, or out of its home boundary).
+    bool Homeward(std::uint32_t entity) const;
     // The states it is in, with their time left (EntityStates).
     std::vector<game::proto::StateRecord> StatesOf(std::uint32_t entity, Clock::time_point now) const;
     // A living monster's health now (0: none, or dead).

@@ -1,7 +1,9 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <numbers>
 #include <functional>
 #include <set>
 #include <string>
@@ -353,12 +355,13 @@ TEST_CASE("Party monsters: a nest an exp-shared party's kill marked hatches one 
     server::World world(config, jobs, &fs);
     server::Monsters monsters(world, characters, nullptr, {nest(400, 0, true), nest(800, 0, false), nest(1200, 101, true)}, 11);
     std::vector<server::WorldMessage> out;
+    auto clock = server::WorldClock::now(); // the monsters' own, moved on by hand past each refill's second
     const auto pump = [&](const std::function<bool()>& until, int rounds = 2000) {
         for (int i = 0; i < rounds; ++i) {
-            const auto now = server::WorldClock::now();
-            world.Update(now, out);
+            world.Update(server::WorldClock::now(), out);
+            clock = std::max(clock, server::WorldClock::now());
             server::Monsters::Events events;
-            monsters.Update(now, {}, events);
+            monsters.Update(clock, {}, events);
             out.clear();
             if (until()) return true;
             std::this_thread::sleep_for(2ms);
@@ -382,7 +385,8 @@ TEST_CASE("Party monsters: a nest an exp-shared party's kill marked hatches one 
         std::uint32_t victim = 0;
         REQUIRE(pump([&] { return (victim = at(x)) != 0; }));
         const std::uint32_t hp = monsters.Hp(victim);
-        const server::Monsters::Damaged d = monsters.Damage(victim, me, 2'000'000'000, std::chrono::steady_clock::now());
+        const server::Monsters::Damaged d = monsters.Damage(victim, me, 2'000'000'000, clock);
+        clock += std::chrono::milliseconds(1100);
         REQUIRE(d.killed);
         CHECK(hp == proto::MonsterMaxHp(tiger->maxHp, d.rarity));
         if (party) monsters.PartyKilled(victim);
@@ -504,4 +508,115 @@ TEST_CASE("Crowded hunting grounds: every 30 s the players in its nests' regions
     at(213.5, none);
     at(244, none);
     CHECK(monsters.CrowdRate(900) == 0);
+}
+
+TEST_CASE("Home boundaries: an idle monster outside its nest's radius goes home; 1.5 times it for homing kind 1; never for kind 2") {
+    const char* gameDir = std::getenv("SR_GAME_DIR");
+    if (gameDir == nullptr) {
+        MESSAGE("SR_GAME_DIR not set: skipped");
+        return;
+    }
+    std::string error;
+    assets::FileSystem fs;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, gameDir, error), error);
+    assets::CharacterTable characters;
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    const assets::ObjectRow* tiger = characters.Find(std::string_view("MOB_CH_TIGER"));
+    REQUIRE(tiger != nullptr);
+
+    const std::uint16_t region = assets::RegionId(168, 97);
+    const auto nest = [&](float x, int homing) {
+        server::MonsterNest n;
+        n.refObjId = tiger->refObjId;
+        n.position = {region, x, 0.0f, 1300.0f};
+        n.spawnRadius = 5;
+        n.radius = 100;
+        n.homing = homing;
+        n.maxCount = 1;
+        return n;
+    };
+    core::JobSystem jobs(2);
+    server::WorldConfig config;
+    server::World world(config, jobs, &fs);
+    server::Monsters monsters(world, characters, nullptr, {nest(400, 0), nest(800, 1), nest(1200, 2)}, 3);
+    std::vector<server::WorldMessage> out;
+    std::vector<server::Monsters::Player> none;
+    const auto pump = [&](const std::function<bool()>& until, int rounds = 2000) {
+        for (int i = 0; i < rounds; ++i) {
+            const auto now = server::WorldClock::now();
+            world.Update(now, out);
+            server::Monsters::Events events;
+            monsters.Update(now, none, events);
+            out.clear();
+            if (until()) return true;
+            std::this_thread::sleep_for(2ms);
+        }
+        return false;
+    };
+    const auto at = [&](float x) {
+        const auto found = monsters.Near({region, x, 0, 1300}, 50);
+        return found.empty() ? 0u : found.front();
+    };
+    server::WorldPlayer player;
+    player.peer = 1;
+    player.character = 77;
+    player.position = {region, 800, 0, 1300};
+    player.dropOnGround = true;
+    world.Enter(player);
+    REQUIRE(pump([&] { return at(400) != 0 && at(800) != 0 && at(1200) != 0; }));
+    const std::uint32_t plain = at(400), wide = at(800), never = at(1200);
+
+    // Each put 130 from its point (kind 2's 300): outside 100, inside 150.
+    REQUIRE(world.Teleport(plain, {region, 400, 0, 1430}));
+    REQUIRE(world.Teleport(wide, {region, 800, 0, 1430}));
+    REQUIRE(world.Teleport(never, {region, 1200, 0, 1600}));
+    for (int i = 0; i < 20; ++i) world.Update(server::WorldClock::now(), out), out.clear();
+    // Its next thoughts (the clock moved on by hand, past any wander).
+    const auto start = server::WorldClock::now();
+    bool wideHome = false, neverHome = false;
+    for (int k = 1; k <= 4; ++k) {
+        server::Monsters::Events events;
+        monsters.Update(start + std::chrono::seconds(7 * k), none, events);
+        wideHome = wideHome || monsters.Homeward(wide);
+        neverHome = neverHome || monsters.Homeward(never);
+        if (k == 1) CHECK(monsters.Homeward(plain));
+    }
+    CHECK_FALSE(wideHome);
+    CHECK_FALSE(neverHome);
+}
+
+TEST_CASE("A chase's way round outdoors: its straight step blocked, the original's 10-degree sweep from its bucket, 20 the first free way") {
+    // A wall 14 east of the monster and one 12.5 south (a walk crossing one ends there; a walk ending within 1 of its goal
+    // counts as free).
+    const proto::WorldPosition from{assets::RegionId(168, 97), 500.0f, 0.0f, 500.0f};
+    const proto::FlatPosition a = proto::ToFlat(from);
+    const double east = a.x + 14.0, south = a.z - 12.5;
+    const auto walkEnd = [&](const proto::WorldPosition& s, const proto::WorldPosition& goal) -> std::optional<proto::WorldPosition> {
+        const proto::FlatPosition p = proto::ToFlat(s), q = proto::ToFlat(goal);
+        double t = 1.0;
+        if (q.x > east && p.x < east) t = std::min(t, (east - p.x) / (q.x - p.x));
+        if (q.z < south && p.z > south) t = std::min(t, (south - p.z) / (q.z - p.z));
+        if (t >= 1.0) return goal;
+        return proto::FromFlat({p.x + (q.x - p.x) * t, p.z + (q.z - p.z) * t}, s.y);
+    };
+    const auto at = [&](double dx, double dz) { return proto::FromFlat({a.x + dx, a.z + dz}, from.y); };
+    const auto heading = [&](const proto::WorldPosition& w) {
+        const proto::FlatPosition r = proto::ToFlat(w);
+        CHECK(std::hypot(r.x - a.x, r.z - a.z) == doctest::Approx(20.0).epsilon(0.001));
+        return std::atan2(r.z - a.z, r.x - a.x) * 180.0 / std::numbers::pi;
+    };
+    // West: free, no change.
+    CHECK_FALSE(server::MonsterWayRound(from, at(-100, 0), walkEnd).has_value());
+    // East, through the wall: the reversed step's bucket is 18; the first tried, 195 degrees in the table ((cos, -sin)):
+    // west-north-west, free.
+    const auto round = server::MonsterWayRound(from, at(100, 0), walkEnd);
+    REQUIRE(round.has_value());
+    CHECK(heading(*round) == doctest::Approx(165.0).epsilon(0.001));
+    // South, through the other wall: bucket 9; 105 and 115 degrees (south-south-west) still cross it at 15, 125 does not.
+    const auto down = server::MonsterWayRound(from, at(0, -100), walkEnd);
+    REQUIRE(down.has_value());
+    CHECK(heading(*down) == doctest::Approx(-125.0).epsilon(0.001));
+    // Shut in on every side: none.
+    const auto shut = [&](const proto::WorldPosition& s, const proto::WorldPosition&) -> std::optional<proto::WorldPosition> { return s; };
+    CHECK_FALSE(server::MonsterWayRound(from, at(100, 0), shut).has_value());
 }

@@ -409,7 +409,8 @@ bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::s
         "       n.dwdelaytimemin, n.dwdelaytimemax, n.dwmaxtotalcount, t.btaggresstype, t.nsightrange, "
         "       n.dwnestid, n.dwhiveid, coalesce(h.dwoverwritemaxtotalcount, 0), coalesce(h.gameworldid, 1) BETWEEN 51 AND 59, "
         "       t.tracedata, t.bttraceboundary, coalesce(c.nsightrange, 0), coalesce(h.btkeepmonstercounttype, 0), "
-        "       coalesce(h.fmonstercountperpc, 0), coalesce(h.dwspawnspeedincreaserate, 0), coalesce(h.dwmaxincreaserate, 0) "
+        "       coalesce(h.fmonstercountperpc, 0), coalesce(h.dwspawnspeedincreaserate, 0), coalesce(h.dwmaxincreaserate, 0), "
+        "       t.bthomingtype "
         "FROM tab_refnest n JOIN tab_reftactics t ON t.dwtacticsid = n.dwtacticsid JOIN _refobjcommon o ON o.id = t.dwobjid "
         "LEFT JOIN tab_reftactics c ON c.dwtacticsid = t.dwchampiontacticsid AND t.dwchampiontacticsid <> 0 "
         "LEFT JOIN tab_refhive h ON h.dwhiveid = n.dwhiveid "
@@ -438,12 +439,13 @@ bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::s
         if (rows.contains(key)) continue;
         const double perPlayer = r.Double(i, 20);
         const int madeFor = r.Int(i, 19) == 1 && perPlayer > 0.0 ? int(std::nearbyint(double(hiveTotals[r.Int(i, 13)]) / perPlayer)) : 0;
-        rows[key] = std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.Int(i, 4), r.Int(i, 5), r.Int(i, 6),
+        rows[key] = std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.Int(i, 4), r.Int(i, 5), r.Int(i, 6),
                                 r.Int(i, 7), r.Int(i, 8), r.Int(i, 9), r.Int(i, 10) == 0 ? 1 : 0, r.Int(i, 11), r.Int(i, 12), r.Int(i, 13), r.Int(i, 14),
-                                r.Int(i, 16), r.Int(i, 17), r.Int(i, 18), madeFor, madeFor > 0 ? r.Int(i, 21) : 0, madeFor > 0 ? r.Int(i, 22) : 0);
+                                r.Int(i, 16), r.Int(i, 17), r.Int(i, 18), madeFor, madeFor > 0 ? r.Int(i, 21) : 0, madeFor > 0 ? r.Int(i, 22) : 0,
+                                r.Int(i, 23));
     }
     out = "# codename\tregion\tx\tz\tradius\tspawnRadius\tchampion%\tdelayMin\tdelayMax\tmaxCount\taggressive\tsight\tnest\thive\thiveMax\ttrace\tboundary"
-          "\tchampionSight\tcrowdPlayers\tcrowdStep\tcrowdMax (from the database's original tables; championSight 0: the tactics "
+          "\tchampionSight\tcrowdPlayers\tcrowdStep\tcrowdMax\thoming (from the database's original tables; championSight 0: the tactics "
           "names no champion row, so no champion nor giant; crowdPlayers 0: not a crowded hunting ground)\n";
     for (const auto& [key, values] : rows) {
         out += std::format("{}\t{}\t{}\t{}\t{}\n", std::get<0>(key), std::get<1>(key), std::get<2>(key), std::get<3>(key), values);

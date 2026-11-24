@@ -822,6 +822,9 @@ int main(int argc, char** argv) {
                     // Then the crowded hunting ground's players, step and most (0: not one).
                     int crowdPlayers = 0, crowdStep = 0, crowdMax = 0;
                     if (!(row >> crowdPlayers >> crowdStep >> crowdMax)) crowdPlayers = crowdStep = crowdMax = 0;
+                    // Then its tactics' home boundary kind (0: the radius).
+                    int homing = 0;
+                    if (!(row >> homing)) homing = 0;
                     server::MonsterNest& n = policies[{code, region, x, z}];
                     n.radius = radius;
                     n.spawnRadius = spawnRadius;
@@ -840,6 +843,7 @@ int main(int argc, char** argv) {
                     n.crowdPlayers = crowdPlayers;
                     n.crowdStep = crowdStep;
                     n.crowdMax = crowdMax;
+                    n.homing = homing;
                 }
             }
             std::size_t matched = 0, instanceOwn = 0;
