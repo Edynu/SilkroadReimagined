@@ -1690,9 +1690,13 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     CHECK(r.code == proto::TradeCode::Ok);
     CHECK(r.gold == 191);
 
-    // The bargain hours run (they began at the server's start); a bargain good bought, then not again within 10 minutes.
+    // The bargain hours run (they began at the server's start); bargain goods bought, again in the same visit; the lock
+    // starts when the trader closes the NPC with them aboard: no more for 10 minutes.
     a.client->Send(proto::ShopBuy{ch, 0, 1, 1});
     CHECK(Next<proto::TradeAnswer>(a).code == proto::TradeCode::Ok);
+    a.client->Send(proto::ShopBuy{ch, 0, 1, 1});
+    CHECK(Next<proto::TradeAnswer>(a).code == proto::TradeCode::Ok);
+    a.client->Send(proto::ShopClose{ch});
     // Its lock-out told (the buff board's kind 6) and kept in our sr_bargain_lock (the original's _timedjob has no row for it).
     CHECK(Next<proto::TradeBargainLock>(a).seconds == 600);
     std::int64_t lockJobs = 0;
@@ -1701,6 +1705,7 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
         lockJobs = t.Db().Query("SELECT count(*) FROM sr_bargain_lock WHERE charid = $1 AND until > 0", {a.character}).Int(0, 0);
     }
     CHECK(lockJobs == 1);
+    a.client->Send(proto::ShopOpen{ch});
     a.client->Send(proto::ShopBuy{ch, 0, 1, 1});
     CHECK(Next<proto::TradeAnswer>(a).code == proto::TradeCode::BargainLocked);
     s.game.Stop();

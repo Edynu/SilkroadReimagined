@@ -109,8 +109,14 @@ std::uint64_t JobRules::ExpToNext(JobType type, int level) const {
 }
 
 int MarketRow::Quote() const {
-    const std::int64_t step = fluctuate > 0 ? (stock - baseStock) / fluctuate : 0; // whole hundredths (cut toward 0)
-    return int(std::clamp<std::int64_t>(std::int64_t(baseQuote) - step, lowQuote, highQuote));
+    const double step = fluctuate > 0 ? double(stock - baseStock) / double(fluctuate) * 0.01 : 0.0;
+    const double q = std::clamp(double(baseQuote) - step, double(lowQuote), double(highQuote));
+    return int(std::trunc(q * 100.0));
+}
+
+void MarketRow::Sold(std::int64_t count) {
+    const std::int64_t atLow = baseStock + std::llround(double(baseQuote - lowQuote) * 100.0) * fluctuate;
+    stock = std::min(stock + count, std::max(atLow, stock));
 }
 
 std::uint32_t MarketRow::Price(std::uint32_t price) const {
@@ -120,8 +126,8 @@ std::uint32_t MarketRow::Price(std::uint32_t price) const {
 
 void MarketRow::Recover() {
     // The stocks at the high and the low quote bound it (the quote never leaves [LB, UB] in either direction).
-    const std::int64_t atHigh = baseStock - std::int64_t(highQuote - baseQuote) * fluctuate;
-    const std::int64_t atLow = baseStock + std::int64_t(baseQuote - lowQuote) * fluctuate;
+    const std::int64_t atHigh = baseStock - std::llround(double(highQuote - baseQuote) * 100.0) * fluctuate;
+    const std::int64_t atLow = baseStock + std::llround(double(baseQuote - lowQuote) * 100.0) * fluctuate;
     stock = std::max<std::int64_t>(0, stock - fluctuate);
     stock = std::clamp(stock, std::min(atHigh, atLow), std::max(atHigh, atLow));
 }
@@ -148,9 +154,13 @@ int TradeStars(const JobRules& rules, std::uint32_t value) {
 
 int BanditCount(const JobRules& rules, std::uint32_t value, bool bargain, bool extra, bool twice) {
     const std::uint32_t factor = std::max<std::uint32_t>(1, rules.monsterFactor);
+    // No value, no bandits; bargain goods aboard: their formula at any value; else one up to the first scale.
+    if (value == 0) return 0;
     int count = 1;
-    if (value > rules.scale[0]) {
-        count = bargain ? int((double(value) * 1.55 - 1.0) / double(factor)) + 1 : int((value - 1) / factor) + 1;
+    if (bargain) {
+        count = int((double(value) * 1.55 - 1.0) / double(factor) + 1.0);
+    } else if (value > rules.scale[0]) {
+        count = int((value - 1) / factor) + 1;
     }
     if (extra) ++count;
     if (twice) count *= 2;

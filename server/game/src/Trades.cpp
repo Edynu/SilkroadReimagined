@@ -134,12 +134,8 @@ void Trades::Buy(std::uint32_t entity, std::uint32_t npc, const assets::ItemRow&
         item.creator = t->alias; // its buyer's alias
     }
     item.count = std::uint16_t(item.count + count);
-    if (game::IsBargainGood(good)) {
-        bargainLock_[entity] = now + kBargainLock;
-        const std::int64_t until = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() +
-                                   std::chrono::duration_cast<std::chrono::seconds>(kBargainLock).count();
-        host_.TradeBargainLocked(entity, until);
-    }
+    // Bargain goods bought: the lock comes when the trader closes the NPC with them aboard (ShopClosed), not now.
+    if (game::IsBargainGood(good)) bargainBought_.insert(entity);
     if (tax != 0) host_.TradeCollectTax(npc, tax);
     core::LogInfo("trade: {} buys {} x{} for {} into its transport (place {})", t->name, good.codename, count, price, place);
     host_.TradeCartChanged(cart->entity);
@@ -258,6 +254,15 @@ void Trades::Left(std::uint32_t entity) {
     watching_.erase(entity);
     stars_.erase(entity);
     bargainLock_.erase(entity);
+    bargainBought_.erase(entity);
+}
+
+void Trades::ShopClosed(std::uint32_t entity, bool bargainAboard, Clock::time_point now) {
+    if (bargainBought_.erase(entity) == 0 || !bargainAboard) return;
+    bargainLock_[entity] = now + kBargainLock;
+    const std::int64_t until = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() +
+                               std::chrono::duration_cast<std::chrono::seconds>(kBargainLock).count();
+    host_.TradeBargainLocked(entity, until);
 }
 
 void Trades::Tick(Clock::time_point now) {

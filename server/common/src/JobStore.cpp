@@ -188,7 +188,7 @@ bool LoadMarkets(Database& db, const std::vector<std::uint32_t>& npcs, std::vect
     std::string ids = "{";
     for (const std::uint32_t npc : npcs) ids += (ids.size() > 1 ? "," : "") + std::to_string(npc);
     ids += "}";
-    QueryResult r = db.Query("SELECT id, assocnpc, refitemid, round(basequot * 100), round(quot_lb * 100), round(quot_ub * 100), basestockamount, "
+    QueryResult r = db.Query("SELECT id, assocnpc, refitemid, basequot, quot_lb, quot_ub, basestockamount, "
                              "fluctuateamount, curstockamount FROM _itemquotation WHERE service = 1 AND assocnpc = ANY($1::int[]) ORDER BY id",
                              {ids});
     if (!r.Ok()) {
@@ -200,9 +200,9 @@ bool LoadMarkets(Database& db, const std::vector<std::uint32_t>& npcs, std::vect
         m.id = std::uint32_t(r.Int(k, 0));
         m.npc = std::uint32_t(r.Int(k, 1));
         m.item = std::uint32_t(r.Int(k, 2));
-        m.baseQuote = int(r.Int(k, 3));
-        m.lowQuote = int(r.Int(k, 4));
-        m.highQuote = int(r.Int(k, 5));
+        m.baseQuote = float(r.Double(k, 3)); // the original's 32-bit floats
+        m.lowQuote = float(r.Double(k, 4));
+        m.highQuote = float(r.Double(k, 5));
         m.baseStock = r.Int(k, 6);
         m.fluctuate = std::max<std::int64_t>(1, r.Int(k, 7));
         m.stock = r.Int(k, 8);

@@ -42,12 +42,12 @@ TEST_CASE("Jobs: the suit gives the state; the hostile pairs; the league's fees"
 }
 
 TEST_CASE("Jobs: the market's quote and price; the worked example at Donwhang to the gold") {
-    // NPC_WC_SPECIAL's row for ITEM_ETC_TRADE_CH_01: BaseQuot 1.88, LB 1.58, UB 2.18, BaseStock 50,000, Fluctuate 250,
-    // CurStock 42,499 (at rest at the UB point).
+    // NPC_WC_SPECIAL's row for ITEM_ETC_TRADE_CH_01: BaseQuot 1.88, LB 1.58, UB 2.18 (32-bit floats: 1.88 is
+    // 1.8799999...), BaseStock 50,000, Fluctuate 250, CurStock 42,499 (just past the UB point).
     game::MarketRow row;
-    row.baseQuote = 188;
-    row.lowQuote = 158;
-    row.highQuote = 218;
+    row.baseQuote = 1.88f;
+    row.lowQuote = 1.58f;
+    row.highQuote = 2.18f;
     row.baseStock = 50000;
     row.fluctuate = 250;
     row.stock = 42499;
@@ -68,13 +68,18 @@ TEST_CASE("Jobs: the market's quote and price; the worked example at Donwhang to
     row.stock = 50000 + 30 * 250;
     CHECK(row.Quote() == 158);
     CHECK(row.Price() == 605);
-    // The 10-minute tick takes the stock back toward the UB point, one hundredth at a time, and no farther.
+    // A sale's stock held at the low quote's.
+    row.Sold(40);
+    CHECK(row.stock == 50000 + 30 * 250);
+    // The 10-minute tick takes the stock back toward the UB point, one hundredth at a time, and no farther. The quote is
+    // cut to hundredths from the float: 1.8799999 + 0.29 reads 1.58, and at rest on the UB point 2.17 (the original's
+    // 0.01 below the decimal).
     row.Recover();
-    CHECK(row.Quote() == 159);
+    CHECK(row.Quote() == 158);
     row.stock = 42500;
     row.Recover();
     CHECK(row.stock == 42500);
-    CHECK(row.Quote() == 218);
+    CHECK(row.Quote() == 217);
     // The same 40 stolen, sold in the thieves' town: 11,490; the thief's experience on the margin of 15,320: 6,128.
     CHECK(game::StolenGoodsPayout(40) == 11490);
     CHECK(game::SaleJobExp(game::JobType::Thief, 40u * game::kGoodsPrice, 0) == 6128);
@@ -101,6 +106,8 @@ TEST_CASE("Jobs: the trade scale's value and stars; the bandits' count and level
     CHECK(game::BanditCount(r, 2850, false, true, false) == 11);
     CHECK(game::BanditCount(r, 2850, false, true, true) == 22);
     CHECK(game::BanditCount(r, 400, false, false, false) == 1);
+    CHECK(game::BanditCount(r, 0, false, false, false) == 0); // no value, none
+    CHECK(game::BanditCount(r, 400, true, false, false) == int((400 * 1.55 - 1) / 306 + 1)); // bargain goods at any value: 3
     CHECK(game::BanditCount(r, 2850, true, false, false) == int((2850 * 1.55 - 1) / 306) + 1);
     // Their levels: 60..63 for the five-star level-60 trader.
     CHECK(game::BanditLevel(60, 5, 0, false) == 60);

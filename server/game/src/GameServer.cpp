@@ -3884,9 +3884,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const int before = player.job.level;
         const bool up = gain > 0 && game::GainJobExp(jobRules, player.job, gain);
         if (gain > 0 && (player.job.type == game::JobType::Thief || player.job.type == game::JobType::Hunter)) {
-            player.job.contribution = std::uint32_t(std::min<std::uint64_t>(0xFFFFFFFFu, std::uint64_t(player.job.contribution) + gain));
+            player.job.contribution = std::uint32_t(std::min<std::uint64_t>(kMostContribution, std::uint64_t(player.job.contribution) + gain));
         }
-        if (donated > 0) player.job.contribution = std::uint32_t(std::min<std::uint64_t>(0xFFFFFFFFu, std::uint64_t(player.job.contribution) + donated));
+        if (donated > 0) player.job.contribution = std::uint32_t(std::min<std::uint64_t>(kMostContribution, std::uint64_t(player.job.contribution) + donated));
         TellJobExp(player, std::int64_t(gain), up, donated);
         if (up) core::LogInfo("{}: {}'s job level {} -> {}", config.name, player.name, before, player.job.level);
     }
@@ -3894,8 +3894,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (player.job.type == game::JobType::None || loss == 0) return;
         const std::uint64_t had = player.job.exp;
         game::LoseJobExp(player.job, loss);
+        // A thief's or hunter's contribution follows every change of its job experience, the loss too (not below 0).
+        if (player.job.type == game::JobType::Thief || player.job.type == game::JobType::Hunter) {
+            player.job.contribution = std::uint32_t(std::uint64_t(player.job.contribution) - std::min<std::uint64_t>(player.job.contribution, had - player.job.exp));
+        }
         TellJobExp(player, -std::int64_t(had - player.job.exp), false, 0);
     }
+    static constexpr std::uint64_t kMostContribution = 2'000'000'000;
     void TellJobExp(PlayerWorld& player, std::int64_t delta, bool up, std::uint64_t donated) {
         database.Submit([character = player.selected, job = player.job](Database& db) { SaveJob(db, character, job); });
         Peer* peer = peers->Find(world->PeerOf(player.entity));
@@ -3937,6 +3942,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (PlayerWorld* p = PlayerByEntity(owner)) ResetSafeTrade(*p); // the scale off one
     }
     std::uint64_t TradeSold(std::uint32_t seller, std::uint64_t gold, std::uint64_t payout, std::uint64_t margin, int stars) override {
+        (void)payout;
         PlayerWorld* s = PlayerByEntity(seller);
         if (s == nullptr) return 0;
         ResetSafeTrade(*s); // a sale at a specialty NPC
@@ -3944,6 +3950,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto give = [&](PlayerWorld& p, std::uint64_t amount) {
             if (Peer* peer = peers->Find(world->PeerOf(p.entity))) GiveGold(peer->id, amount);
         };
+        // No profit (a town's own goods, a quote at or under the goods' price): a plain sale, its gold alone.
+        if (margin == 0) {
+            give(*s, gold);
+            return gold;
+        }
+        // The pool's share and a trader's donation: 10 % of the payout after the tax, cut, never bonused.
+        const std::uint64_t tenth = std::uint64_t(std::trunc(double(gold) * 0.1));
         if (s->jobState == std::uint8_t(game::JobType::Thief)) {
             std::vector<PlayerWorld*> thieves;
             for (PlayerWorld* p : near) {
@@ -3956,25 +3969,29 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 give(*p, each);
                 AddJobExp(*p, std::uint64_t(double(reward) * bonus / n));
             }
-            AddToPool(game::JobType::Thief, std::uint64_t(double(payout) * bonus) / 10);
+            AddToPool(game::JobType::Thief, tenth);
             return each;
         }
+        // A trader: the profit (the margin M) bonused by the traders near, G = trunc(M x (1 + 0.05 (t - 1))); he gets his
+        // share of G and his outlay back (trunc(G x 4 / (h + 4)) - M + P), each hunter near trunc(G x 1.05 / (h + 4)); the
+        // job experience on G (his own reward; each hunter's trunc(reward x (1 + 0.05 (h - 1)) / (h + 4))).
         std::vector<PlayerWorld*> hunters;
         double traders = 0;
         for (PlayerWorld* p : near) {
             if (p->jobState == std::uint8_t(game::JobType::Hunter)) hunters.push_back(p);
             if (p->jobState == std::uint8_t(game::JobType::Trader)) traders += 1;
         }
-        const double h = double(hunters.size()), g = double(gold) * (1.0 + 0.05 * (std::max(1.0, traders) - 1.0));
-        const std::uint64_t own = std::uint64_t(g * 4.0 / (h + 4.0));
+        const double h = double(hunters.size());
+        const std::uint64_t g = std::uint64_t(std::trunc(double(margin) * (1.0 + 0.05 * (std::max(1.0, traders) - 1.0))));
+        const std::int64_t ownSigned = std::int64_t(std::trunc(double(g) * 4.0 / (h + 4.0))) - std::int64_t(margin) + std::int64_t(gold);
+        const std::uint64_t own = std::uint64_t(std::max<std::int64_t>(0, ownSigned));
         give(*s, own);
-        const std::uint64_t donated = std::uint64_t(double(payout) * (1.0 + 0.05 * (std::max(1.0, traders) - 1.0))) / 10;
-        AddJobExp(*s, game::SaleJobExp(game::JobType::Trader, margin, stars), donated);
+        AddJobExp(*s, game::SaleJobExp(game::JobType::Trader, g, stars), tenth);
         for (PlayerWorld* p : hunters) {
-            give(*p, std::uint64_t(g * 1.05 / (h + 4.0)));
-            AddJobExp(*p, std::uint64_t(double(margin) * (1.0 + 0.05 * (h - 1.0)) / (h + 4.0)));
+            give(*p, std::uint64_t(std::trunc(double(g) * 1.05 / (h + 4.0))));
+            AddJobExp(*p, std::uint64_t(std::trunc(double(game::SaleJobExp(game::JobType::Hunter, g, stars)) * (1.0 + 0.05 * (h - 1.0)) / (h + 4.0))));
         }
-        AddToPool(game::JobType::Hunter, donated);
+        AddToPool(game::JobType::Hunter, tenth);
         return own;
     }
     // The week's pools (`_TrijobRewards`, the original's `_AddTrijobReward`): shared out by SroDb --job-week.
@@ -3993,11 +4010,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             takers.push_back(p);
         }
         if (takers.empty()) return;
-        const std::uint64_t exp = game::KillJobExp(jobRules, victimLevel, killer.level, killer.jobState == std::uint8_t(game::JobType::Trader));
+        // Each taker's K from his own level, halved when he is a trader; his share by his level, the party's bonus.
         double levels = 0;
         for (const PlayerWorld* p : takers) levels += double(std::max(1, p->level));
         const double bonus = 1.0 + 0.05 * double(takers.size() - 1);
-        for (PlayerWorld* p : takers) AddJobExp(*p, std::uint64_t(double(exp) * bonus * double(std::max(1, p->level)) / levels));
+        for (PlayerWorld* p : takers) {
+            const std::uint64_t k = game::KillJobExp(jobRules, victimLevel, p->level, p->jobState == std::uint8_t(game::JobType::Trader));
+            AddJobExp(*p, std::uint64_t(std::trunc(double(k) * double(std::max(1, p->level)) / levels * bonus)));
+        }
     }
     // A job monster's kill: a thief monster's by traders and hunters, a hunter monster's by thieves.
     void BanditKilled(std::uint32_t killerEntity, const assets::ObjectRow& row) {
@@ -9993,7 +10013,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // a stall up or a purchase from afar in flight; an exchange holds the bag as it does for any move.
         const bool busy = stalls && stalls->Holding(player.entity);
         const auto place = world->Where(player.entity);
-        const bool inTown = place && place->position.layer == 0 && towns && towns->TownAt(place->position.region, place->position.x, place->position.z) >= 0;
+        // A town region (`_RefRegion.IsBattleField` 0, as the bandits' and the PvP rules); without the region table,
+        // regioninfo's town rectangles (ours).
+        const bool inTown = place && place->position.layer == 0 &&
+                            (!regionKinds.empty() ? BanditTown(place->position.region)
+                                                  : towns && towns->TownAt(place->position.region, place->position.x, place->position.z) >= 0);
         const bool party = parties && parties->PartyOf(player.entity) != 0;
         game::Inventory trial = player.inventory;
         inventory = trial.Move(*config.rules->items, WearerOf(player), m.from, m.to, m.quantity).status;
@@ -11009,13 +11033,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // exactly one star; option 1 never, 2 always, 0 the limit tested first (0x41), then counted once while not active.
     void CloseShop(PlayerWorld& p, const proto::ShopClose& close) {
         const auto it = npcs.find(close.entity);
-        if (it == npcs.end() || !game::IsSpecialtyNpc(it->second->codename) || !LeagueTrader(p)) return;
+        if (it == npcs.end() || !game::IsSpecialtyNpc(it->second->codename)) return;
         bool bargain = false;
         if (const auto cart = coses ? coses->TransportCart(p.entity) : std::nullopt; cart && cart->bag != nullptr && config.rules->items) {
             for (const auto& [place, item] : *cart->bag) {
                 if (const assets::ItemRow* row = config.rules->items->Find(item.refId); row != nullptr && game::IsBargainGood(*row)) bargain = true;
             }
         }
+        if (trades) trades->ShopClosed(p.entity, bargain, Clock::now()); // the bargain goods' lock from now
+        if (!LeagueTrader(p)) return;
         std::uint8_t code = 0x40;
         if (!bargain && trades && trades->StarsOf(p.entity) == 1) {
             if (jobRules.safetyOption == 2) {

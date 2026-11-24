@@ -110,14 +110,16 @@ inline constexpr float kCartReach = 1000.0f;          // a trader's transport wi
 struct MarketRow {
     std::uint32_t id = 0; // its `_ItemQuotation` row
     std::uint32_t npc = 0, item = 0;
-    int baseQuote = 100, lowQuote = 100, highQuote = 100;
+    // BaseQuot, Quot_LB, Quot_UB as the original keeps them: 32-bit floats (1.88 is 1.8799999...).
+    float baseQuote = 1.0f, lowQuote = 1.0f, highQuote = 1.0f;
     std::int64_t baseStock = 0, fluctuate = 1, stock = 0;
-    // The quote now: BaseQuot - (CurStock - BaseStock) / Fluctuate hundredths, held to [LB, UB].
+    // The quote now in hundredths: q = BaseQuot - (CurStock - BaseStock) / Fluctuate x 0.01 in floating point, held to
+    // [LB, UB], cut to hundredths (trunc(q x 100)): a quote at rest on a bound stored just below its decimal reads 0.01 less.
     int Quote() const;
     // A good's price at that quote (`price` its Price, 383): price + trunc(price x (quote - 1)).
     std::uint32_t Price(std::uint32_t price = kGoodsPrice) const;
-    // `count` sold here: the stock rises (the quote falls by one hundredth each `fluctuate`).
-    void Sold(std::int64_t count) { stock += count; }
+    // `count` sold here: the stock rises (the quote falls by one hundredth each `fluctuate`), held at the low quote's stock.
+    void Sold(std::int64_t count);
     // The 10-minute tick: the stock falls by `fluctuate`, not below 0 and kept
     // between the stocks of the high and the low quote.
     void Recover();

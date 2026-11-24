@@ -27,6 +27,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -131,6 +132,9 @@ public:
     // The trader's cargo changed by other means (its transport gone): its stars told again.
     void CargoChanged(std::uint32_t owner);
     void Left(std::uint32_t entity);
+    // A specialty NPC closed by a trader: bargain goods bought there and aboard lock further bargain purchases for 10
+    // minutes from now (the original's timed job (7, 0) turned (7, 1) at the close).
+    void ShopClosed(std::uint32_t entity, bool bargainAboard, Clock::time_point now);
     // A lock-out kept from before (the character's timed job), `left` of it to run.
     void SetBargainLock(std::uint32_t entity, Clock::duration left) { bargainLock_[entity] = Clock::now() + left; }
     // The markets' 10-minute recovery.
@@ -160,6 +164,7 @@ public:
 private:
     std::unordered_map<std::uint32_t, std::uint8_t> stars_;                   // a trader -> its stars last told
     std::unordered_map<std::uint32_t, Clock::time_point> bargainLock_;        // a trader -> no bargain goods until then
+    std::unordered_set<std::uint32_t> bargainBought_;                          // traders who bought bargain goods this visit
     Clock::time_point nextRecovery_{};
     bool bargainHours_ = false;
 };
