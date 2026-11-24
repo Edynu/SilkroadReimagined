@@ -311,14 +311,16 @@ bool LoadGameWorlds(Database& db, const assets::FileSystem& files, const assets:
         };
         spec.minLevel = number("ENTER_LIMIT_CONDITION_LEVEL_MINIMUM_NUM", 1);
         spec.maxLevel = number("ENTER_LIMIT_CONDITION_LEVEL_MAXIMUM_NUM", 0);
-        spec.gapMs = std::uint32_t(std::max(10'000, number("GAMEWORLD_DISAPPEARANCE_TIME", 300'000)));
+        spec.gapMs = 300'000; // ours: the gap's own life is not traced (GAMEWORLD_DISAPPEARANCE_TIME is the end's warnings)
         if (const auto it = cfg.find("ENTER_LIMIT_CONDITION_JOB_CLOTHES_TAKE_OFF"); it != cfg.end()) spec.noJobSuit = it->second == "ON";
         if (const auto it = cfg.find("ENTER_LIMIT_CONDITION_PARTY"); it != cfg.end()) spec.party = it->second == "ON";
         if (const auto it = cfg.find("ENTER_LIMIT_CONDITION_ENTRY"); it != cfg.end() && it->second == "NUM_LIMIT") {
             spec.entriesPerDay = std::max(0, number("ENTER_LIMIT_CONDITION_ENTRY_MAXIMUM_NUM", 0));
         }
-        // The tomb's warnings before its end (the Forgotten World's one value is its gap's time: GameWorldSpec::gapMs).
-        if (const auto it = warnings.find(Trim(w.Text(i, 6))); it != warnings.end() && spec.codename.starts_with("INS_PHARAOH_")) {
+        // The warnings before its end: GAMEWORLD_DISAPPEARANCE_TIME's rows, the time left at each (the original's shard
+        // manager hands a new copy its group's rows, sorted; its tick tells the minutes left as each comes due): the
+        // Forgotten World's 60, 10 and 5 minutes, the Cave's 10, 5 and 1, the Pharaoh's tomb's 30, 10 and 5, the temples'.
+        if (const auto it = warnings.find(Trim(w.Text(i, 6))); it != warnings.end()) {
             spec.warnMs = it->second;
             std::sort(spec.warnMs.rbegin(), spec.warnMs.rend());
         }

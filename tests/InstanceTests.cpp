@@ -162,6 +162,13 @@ TEST_CASE("Forgotten World: the catalog, a hole's instance in its own layer, its
     CHECK(togui->doors.size() == 15); // three big, twelve small
     CHECK(togui->npcs.size() == 6);   // four recall pillars, two exits
     CHECK(togui->triggers.size() == 17);
+    // Its end's warnings (GAMEWORLD_DISAPPEARANCE_TIME: 60, 10 and 5 minutes left of its 2 hours), the gap's 5 minutes ours;
+    // the Cave's 10, 5 and 1.
+    CHECK(togui->warnMs == std::vector<std::uint32_t>{3'600'000, 600'000, 300'000});
+    CHECK(togui->durationMs == 7'200'000);
+    CHECK(togui->gapMs == 300'000);
+    REQUIRE(catalog->siege.has_value());
+    CHECK(catalog->siege->warnMs == std::vector<std::uint32_t>{600'000, 300'000, 60'000});
     std::size_t waiting = 0;
     for (const server::MonsterNest& n : togui->nests) waiting += n.waiting ? 1 : 0;
     CHECK(waiting == 36);

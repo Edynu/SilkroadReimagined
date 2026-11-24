@@ -1281,7 +1281,7 @@ void Instances::Tick(Clock::time_point now) {
             inst.gap = 0;
         }
         s.RunDelayed(inst.spec->triggers, inst.delayed, &inst, now);
-        // Its end's warnings (the tomb's GAMEWORLD_DISAPPEARANCE_TIME: 30, 10 and 5 minutes left).
+        // Its end's warnings (its world's GAMEWORLD_DISAPPEARANCE_TIME rows: the time left at each).
         while (inst.warned < inst.spec->warnMs.size() && now >= inst.ends - std::chrono::milliseconds(inst.spec->warnMs[inst.warned])) {
             const auto left = std::chrono::duration_cast<std::chrono::seconds>(inst.ends - now).count();
             for (const std::uint32_t entity : inst.inside) s.Send(entity, proto::InstanceAlert{std::uint32_t(std::max<std::int64_t>(0, left))});

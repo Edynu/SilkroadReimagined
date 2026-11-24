@@ -77,7 +77,7 @@ struct GameWorldSpec {
     std::string codename;
     std::uint32_t maxCount = 50, maxUsers = 4;  // instances at once, players in one
     std::uint32_t durationMs = 7'200'000, emptyMs = 600'000;
-    std::uint32_t gapMs = 300'000;              // GAMEWORLD_DISAPPEARANCE_TIME: the gap stands this long
+    std::uint32_t gapMs = 300'000;              // the gap stands this long (ours: its life in the original not traced)
     int minLevel = 1, maxLevel = 0;             // ENTER_LIMIT_CONDITION_LEVEL_* (0: none)
     bool noJobSuit = true;                      // ENTER_LIMIT_CONDITION_JOB_CLOTHES_TAKE_OFF
     game::proto::WorldPosition start;           // _RefInstance_World_Start_Pos
@@ -101,8 +101,8 @@ struct GameWorldSpec {
     std::vector<TriggerSpec> triggers;
     // A party world entered through a gate (the Pharaoh's tomb): its party's master opens it, the
     // members join his; `entriesPerDay` (ENTER_LIMIT_CONDITION_ENTRY_MAXIMUM_NUM, 0: none) entries a character a day; the
-    // gate point that leads in (`_RefTeleport` of the world) and its name (the difficulty's, SN_ZONE_21836_10..12); the
-    // warnings before its end (GAMEWORLD_DISAPPEARANCE_TIME, ms left).
+    // gate point that leads in (`_RefTeleport` of the world) and its name (the difficulty's, SN_ZONE_21836_10..12). Every
+    // world's warnings before its end (GAMEWORLD_DISAPPEARANCE_TIME, ms left: proto::InstanceAlert to those inside).
     bool party = false;
     int entriesPerDay = 0;
     std::uint32_t gatePoint = 0;
