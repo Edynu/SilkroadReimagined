@@ -43,7 +43,8 @@ struct QinRig : server::InstanceHost, server::QinTombHost {
     void InstanceTeleport(std::uint32_t entity, const proto::WorldPosition& to) override { world->Teleport(entity, to); }
     std::uint32_t InstanceItemAt(std::uint32_t, std::uint8_t) override { return 0; }
     bool InstanceTakeOne(std::uint32_t, std::uint8_t) override { return false; }
-    void InstanceSaveEntry(std::int64_t, const server::InstanceEntry&) override {}
+    std::vector<server::InstanceEntry> entries; // the entry records saved, in turn
+    void InstanceSaveEntry(std::int64_t, const server::InstanceEntry& e) override { entries.push_back(e); }
     void InstanceSaveBook(std::int64_t, const server::BookEntry&) override {}
     void InstanceSaveWait(std::int64_t, const server::ItemWait&) override {}
     void InstanceBookChanged(std::uint32_t) override {}
@@ -268,4 +269,105 @@ TEST_CASE("Qin-Shi tomb: the snake gate, floors 5 and 6 and the copies' end (gam
     qin.Shut(server::WorldClock::now());
     REQUIRE(pump([&] { return qin.Floor5() == 0 && qin.Floor6() == 0; }, 50));
     CHECK(instances.Count() == 0);
+}
+
+TEST_CASE("Instances: out of the game inside an instance, back inside where it left while the instance stands (game files)") {
+    const char* gameDir = std::getenv("SR_GAME_DIR");
+    if (!gameDir) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    std::string error;
+    assets::FileSystem fs;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, gameDir, error), error);
+    assets::CharacterTable characters;
+    auto skills = std::make_shared<assets::SkillTable>();
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    REQUIRE_MESSAGE(skills->Load(fs, error), error);
+    core::JobSystem jobs(2);
+    server::WorldConfig config;
+    server::World world(config, jobs, &fs);
+    server::Monsters monsters(world, characters, skills.get(), {}, 7);
+    QinRig rig;
+    rig.world = &world;
+    server::Instances instances(rig, world, monsters, characters, std::make_shared<server::GameWorldCatalog>(), 11);
+    std::vector<server::WorldMessage> out;
+    std::vector<server::Monsters::Player> fighters;
+    const auto pump = [&](const std::function<bool()>& until, int rounds = 3000) {
+        for (int i = 0; i < rounds; ++i) {
+            const auto now = server::WorldClock::now();
+            world.Update(now, out);
+            server::Monsters::Events events;
+            monsters.Update(now, fighters, events);
+            instances.Tick(now);
+            out.clear();
+            if (until()) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        return false;
+    };
+    // A world of its own code's (as the Roc's Peak), its inside on the Roc's mountain, entered from the mountain's gate.
+    server::GameWorldSpec spec;
+    spec.id = 99;
+    spec.codename = "INS_T_LEFT";
+    spec.maxUsers = 4;
+    spec.durationMs = 3'600'000;
+    spec.emptyMs = 3'600'000;
+    spec.gapMs = 0;
+    const proto::WorldPosition gate{23406, 1382.0f, 4056.0f, 1558.0f};
+    const proto::WorldPosition inside{26045, 1027.0f, -41.0f, 822.0f};
+    const auto enter = [&](std::vector<server::InstanceEntry> entries) {
+        server::WorldPlayer p;
+        p.peer = 1;
+        p.character = 1001;
+        p.position = gate; // kept where it entered from
+        p.dropOnGround = true;
+        const std::uint32_t e = world.Enter(p);
+        instances.Enter(e, 1001, {}, std::move(entries));
+        return e;
+    };
+    std::uint32_t me = enter({});
+    REQUIRE(pump([&] { return world.Where(me).has_value(); }));
+    const std::uint32_t layer = instances.OpenWorld(spec, "the test");
+    REQUIRE(layer != 0);
+    REQUIRE(instances.AdmitAt(me, layer, inside));
+    REQUIRE(pump([&] { return world.Where(me) && world.Where(me)->position.layer == layer; }));
+    REQUIRE_FALSE(rig.entries.empty());
+    CHECK(rig.entries.back().active);
+
+    // Out of the game inside, then back while it stands: inside again where it left, its entry still active.
+    const proto::WorldPosition leftAt = world.Where(me)->position;
+    instances.Leave(me);
+    world.Leave(me);
+    me = enter({rig.entries.back()});
+    REQUIRE(pump([&] { return world.Where(me) && world.Where(me)->position.layer == layer; }));
+    CHECK(world.Where(me)->position.region == leftAt.region);
+    CHECK(std::hypot(world.Where(me)->position.x - leftAt.x, world.Where(me)->position.z - leftAt.z) < 30.0f);
+    CHECK(instances.LayerOf(me) == layer);
+    CHECK(instances.Inside(layer) == 1);
+    CHECK(rig.entries.back().active);
+
+    // Out again, the instance gone meanwhile: it stays where it entered from, the entry no longer active.
+    instances.Leave(me);
+    world.Leave(me);
+    instances.CloseWorld(layer);
+    me = enter({rig.entries.back()});
+    REQUIRE(pump([&] { return world.Where(me).has_value(); }, 200));
+    pump([] { return false; }, 50);
+    CHECK(world.Where(me)->position.layer == 0);
+    CHECK(world.Where(me)->position.region == gate.region);
+    CHECK(instances.LayerOf(me) == 0);
+    CHECK_FALSE(rig.entries.back().active);
+
+    // A quest's own world: its quest ends when its player is out; no coming back.
+    const std::uint32_t questLayer = instances.OpenQuestWorld("INS_QNO_T_LEFT", 98, "the test");
+    REQUIRE(questLayer != 0);
+    REQUIRE(instances.AdmitAt(me, questLayer, inside));
+    REQUIRE(pump([&] { return world.Where(me) && world.Where(me)->position.layer == questLayer; }));
+    instances.Leave(me);
+    world.Leave(me);
+    me = enter({rig.entries.back()});
+    REQUIRE(pump([&] { return world.Where(me).has_value(); }, 200));
+    pump([] { return false; }, 50);
+    CHECK(world.Where(me)->position.layer == 0);
 }

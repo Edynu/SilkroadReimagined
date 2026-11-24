@@ -11,8 +11,9 @@
 //   way until a trigger opens them) are seen and met only in it. Its world's triggers run on its kills and
 //   entrances (Triggers below).
 // - A player leaves by an exit (back where it entered from), when the instance's time is over (everyone back), or
-//   by leaving the game (it comes back where it entered from: its saved place). Nobody inside for
-//   WorldEmptyRemainTime once its gap is gone, the instance ends.
+//   by leaving the game (it is kept where it entered from; coming back while that instance stands, it is put back inside
+//   where it left, as the original's login does). Nobody inside for WorldEmptyRemainTime once its gap is gone, the
+//   instance ends.
 // - World 1's triggers (the Dimension Pillars) run on the kills in the shared world.
 // - The collection book: a talisman used from the bag is registered (_CharCollectionBook), one taken; the quests'
 //   `collect` goals ask whether a theme is complete.
@@ -211,7 +212,8 @@ public:
     Instances(const Instances&) = delete;
     Instances& operator=(const Instances&) = delete;
 
-    // A player in the world: its book, its instance entries, its holes' wait; it is told its book and the wait left.
+    // A player in the world: its book, its instance entries, its holes' wait; it is told its book and the wait left. Out
+    // of the game inside an instance that still stands (not a quest's), it goes back inside where it left.
     void Enter(std::uint32_t entity, std::int64_t character, std::vector<BookEntry> book, std::vector<InstanceEntry> entries,
                std::vector<ItemWait> waits = {});
     // Gone from the world (out of the game, or to another server): out of its instance.

@@ -139,6 +139,7 @@ struct Instances::State {
         std::vector<bool> fired;
         std::vector<Delayed> delayed;
         std::size_t warned = 0; // its end's warnings told (GameWorldSpec::warnMs)
+        bool quest = false;     // a quest's own world (OpenQuestWorld): its quest ends when its player is out
     };
     std::map<std::uint32_t, Instance> instances; // by layer
     // Summons: asked by this server's masters (by the member's character), asked of this server's
@@ -165,6 +166,12 @@ struct Instances::State {
         Clock::time_point expires;
     };
     std::unordered_map<std::uint32_t, Arrival> arrivals;
+    // Out of the game inside an instance: where (by character), to come back there while it stands (Enter).
+    struct Left {
+        std::uint32_t layer = 0, key = 0;
+        proto::WorldPosition at;
+    };
+    std::unordered_map<std::int64_t, Left> left;
     std::unordered_map<std::uint32_t, Clock::time_point> summonPause; // a master's next summon
     std::uint32_t nextLayer = 1;
     std::deque<GameWorldSpec> questWorlds; // the quests' worlds opened so far (OpenQuestWorld), kept for their instances
@@ -967,9 +974,26 @@ void Instances::Enter(std::uint32_t entity, std::int64_t character, std::vector<
     }
     for (const BookEntry& b : book) p.book.insert(BookKey(b.theme, b.slot));
     p.entries = std::move(entries);
-    // Left inside last time (it comes back where it entered from): no longer inside.
+    // Out of the game inside an instance that still stands (its key the same, room in it, not a quest's): back inside where
+    // it was (the original keeps the place inside with its world, _Char.WorldID, and at login admits the character to its
+    // own layer while that layer stands, else moves it out). Ours keeps that place here (an instance lives in this
+    // server's memory alone); the character itself was kept where it entered from, the place it is now.
+    State::Instance* again = nullptr;
+    proto::WorldPosition inside;
+    if (const auto l = s_->left.find(character); l != s_->left.end()) {
+        again = s_->Of(l->second.layer);
+        if (again != nullptr && (again->key != l->second.key || again->quest || again->inside.size() >= again->spec->maxUsers)) again = nullptr;
+        inside = l->second.at;
+        s_->left.erase(l);
+    }
+    // Its entry of that instance (where it came in from; saved no longer active at the logout).
+    const InstanceEntry* back = nullptr;
+    for (const InstanceEntry& e : p.entries) {
+        if (again != nullptr && e.key == again->key && e.world == again->spec->id) back = &e;
+    }
+    // Left inside last time and not back in it: no longer inside (it came back where it entered from).
     for (InstanceEntry& e : p.entries) {
-        if (!e.active) continue;
+        if (!e.active || &e == back) continue;
         e.active = false;
         s_->host.InstanceSaveEntry(character, e);
     }
@@ -977,6 +1001,12 @@ void Instances::Enter(std::uint32_t entity, std::int64_t character, std::vector<
     for (const BookEntry& b : book) message.entries.push_back({b.theme, b.slot});
     s_->Send(entity, message);
     if (const proto::InstanceState state = s_->StateFor(p, 0, 0); state.jobSeconds > 0) s_->Send(entity, state); // the re-entry limit still runs
+    if (again != nullptr && back != nullptr) {
+        const proto::WorldPosition from{back->region, float(back->x), float(back->y), float(back->z)};
+        core::LogInfo("instances: character {} back inside {} (layer {}) where it left", character, again->spec->codename, again->layer);
+        s_->Admit(entity, p, *again, from, &inside, false);
+        return;
+    }
     s_->TakeArrival(entity, p);
 }
 
@@ -986,6 +1016,12 @@ void Instances::Leave(std::uint32_t entity) {
     if (it == s.players.end()) return;
     if (it->second.layer != 0) {
         if (State::Instance* inst = s.Of(it->second.layer)) {
+            // Its place inside kept for its coming back (Enter), alive and placed in it (not a quest's world).
+            const auto place = s.world.Where(entity);
+            const auto who = s.host.InstancePlayer(entity);
+            if (!inst->quest && place && place->position.layer == inst->layer && who && !who->dead) {
+                s.left[it->second.character] = {inst->layer, inst->key, place->position};
+            }
             inst->inside.erase(entity);
             if (inst->inside.empty()) inst->emptySince = Clock::now();
         }
@@ -1172,6 +1208,7 @@ std::uint32_t Instances::OpenQuestWorld(const std::string& codename, std::uint32
     State::Instance* inst = s.Open(*spec, HoleSpec{}, master, 0, {}, 0.0f, Clock::now());
     if (inst == nullptr) return 0;
     inst->gapEnds = Clock::now();
+    inst->quest = true;
     return inst->layer;
 }
 
@@ -1294,6 +1331,11 @@ void Instances::Tick(Clock::time_point now) {
         }
     }
     for (const std::uint32_t layer : over) s.Close(layer);
+    // The places left inside instances gone since.
+    std::erase_if(s.left, [&](const auto& kv) {
+        const State::Instance* inst = s.Of(kv.second.layer);
+        return inst == nullptr || inst->key != kv.second.key;
+    });
     s.RunDelayed(s.catalog->sharedTriggers, s.sharedDelayed, nullptr, now);
     std::erase_if(s.summons, [&](const auto& kv) { return now > kv.second.expires; });
     std::erase_if(s.asked, [&](const auto& kv) { return now > kv.second.expires; });
