@@ -564,6 +564,21 @@ private:
         }
         r.expected["rangeUsed"] = range;
         r.expected["distance"] = distance;
+        // A bard's dance plays only while one of its songs does ('reqc' 0x20; U3-04): a song of its masteries started
+        // first (the lowest of the battle songs, 'scls').
+        if ((assets::FindSkillParam(skill, assets::SkillTag("reqc")).Int(0) & 0x20) != 0) {
+            const assets::SkillRow* song = nullptr;
+            for (const auto& [id, row] : skills_->rows()) {
+                if (!row.inService || !assets::FindSkillParam(row, assets::SkillTag("scls")) || row.masteries != skill.masteries) continue;
+                if (song == nullptr || row.level < song->level) song = &row;
+            }
+            if (song != nullptr) {
+                std::size_t m = c.Mark();
+                c.Send(proto::UseSkill{song->id, 0});
+                c.Wait<proto::BuffAdded>(m, [&](const proto::BuffAdded& b) { return b.skill == song->id; }, 5s);
+                r.expected["song"] = song->codename;
+            }
+        }
         // The cast.
         mark = c.Mark();
         const auto t0 = Clock::now();

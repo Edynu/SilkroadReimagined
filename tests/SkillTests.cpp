@@ -903,6 +903,8 @@ TEST_CASE("every buff group changes exactly its numbers while it lasts, gives wa
         // A skill object's buff (Harmony's circle, the poison field) comes from its object (K10's case);
         // a detection's ('dttp') goes on those around, not on its caster (the stealth test, K12).
         if (assets::FindSkillParam(s, assets::SkillTag("efr"), 3) || assets::FindSkillParam(s, assets::SkillTag("dttp"))) continue;
+        // A bard's dance needs one of its songs playing ('reqc' 0x20: its own test, U3-04).
+        if ((assets::FindSkillParam(s, assets::SkillTag("reqc")).Int(0) & 0x20) != 0) continue;
         auto& [top, bottom] = groups[s.group];
         if (top == nullptr || s.level > top->level) top = &s;
         if (bottom == nullptr || s.level < bottom->level) bottom = &s;
@@ -3174,4 +3176,48 @@ TEST_CASE("a wall's HP: its 'pw' words read from the running buff; what it takes
     CHECK_FALSE(skills.WallOf(f.player.state).has_value());
     REQUIRE_FALSE(f.host.All<proto::BuffRemoved>().empty());
     CHECK(f.host.All<proto::BuffRemoved>().back().token == 77);
+}
+
+TEST_CASE("a bard's dance only while one of its songs plays (reqc 0x20, 0x3032); it ends with the last song (game files; U3-04)") {
+    if (GameDir() == nullptr) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    assets::FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, GameDir(), error), error);
+    assets::SkillTable table;
+    REQUIRE_MESSAGE(table.Load(fs, error), error);
+    Field f;
+    server::Skills skills(f.host, &table, 7);
+    const assets::SkillRow* song = table.Find(std::string_view("SKILL_EU_BARD_BATTLAA_GUARD_A_01"));
+    const assets::SkillRow* dance = Learn(f, table, "SKILL_EU_BARD_DANCEA_WARRIOR_A_01");
+    REQUIRE(song != nullptr);
+    REQUIRE(dance != nullptr);
+    f.player.book.groups[song->group] = song->level;
+    // No song: the dance refused, its own code.
+    server::SkillCaster c0 = f.player.Caster();
+    CHECK_FALSE(skills.Use(c0, {dance->id, 0}, Clock::now()));
+    CHECK(f.host.All<proto::SkillUseAnswer>().back().status == proto::SkillUseStatus::Music);
+    CHECK_FALSE(skills.PlaysMusic(f.player.state));
+    // A song running: music; the dance passes that check.
+    server::SkillState::Buff playing;
+    playing.token = 501;
+    playing.skill = song->id;
+    playing.until = Clock::time_point::max();
+    f.player.state.buffs.push_back(playing);
+    CHECK(skills.PlaysMusic(f.player.state));
+    server::SkillCaster c1 = f.player.Caster();
+    skills.Use(c1, {dance->id, 0}, Clock::now());
+    CHECK(f.host.All<proto::SkillUseAnswer>().back().status != proto::SkillUseStatus::Music);
+    // A dance running and the song ending (its time up): the dance ends with it.
+    server::SkillState::Buff dancing;
+    dancing.token = 502;
+    dancing.skill = dance->id;
+    dancing.until = Clock::time_point::max();
+    f.player.state.buffs = {playing, dancing};
+    f.player.state.buffs[0].until = Clock::now() - std::chrono::seconds(1);
+    server::SkillCaster c2 = f.player.Caster();
+    skills.ExpireBuffs(c2, Clock::now());
+    CHECK(f.player.state.buffs.empty());
 }

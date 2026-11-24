@@ -620,6 +620,9 @@ public:
     void EndBuffsOf(SkillCaster& holder, const std::vector<std::uint32_t>& skills);
     // Its running wall ('pw' buff: an Ice Wall, a Fire Wall): its kinds, defence, absorption and HP left (none: no wall).
     std::optional<game::WallSpec> WallOf(const SkillState& state) const;
+    // Whether it plays music: one of its songs ('scls' with a byte of 1: the bards' battle songs) running, those at
+    // `ending` (indices of its buffs) left out. A dance ('reqc' 0x20) needs it.
+    bool PlaysMusic(const SkillState& state, const std::vector<std::size_t>& ending = {}) const;
     // Its wall took `amount` of a hit: at its HP the wall ends (told to the holder); true when it ended.
     bool WallTook(SkillCaster& holder, std::uint32_t amount);
     const assets::SkillRow* Imbue(const SkillState& state, Clock::time_point now) const;

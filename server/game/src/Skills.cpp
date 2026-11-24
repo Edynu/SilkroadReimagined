@@ -215,6 +215,10 @@ bool Skills::Use(SkillCaster& caster, const proto::UseSkill& u, Clock::time_poin
     if (caster.stats.weaponKind == 16 && !host_.FortressWeaponAllowed(caster.entity)) return refuse(proto::SkillUseStatus::FortressPosition);
     // Its conditions on what is worn (a shield, a weapon, armour: 'reqi', 0x300D).
     if (!game::EquipmentFits(*skill, caster.state.worn)) return refuse(proto::SkillUseStatus::Weapon);
+    // A dance ('reqc' 0x20) only while the caster plays music: one of its songs running (0x3032).
+    if ((assets::FindSkillParam(*skill, assets::SkillTag("reqc")).Int(0) & 0x20) != 0 && !PlaysMusic(caster.state)) {
+        return refuse(proto::SkillUseStatus::Music);
+    }
     SkillState& s = caster.state;
     // A toggle of its group that is on: turned off whatever its wait (ours: how the client asks for it is not traced).
     for (std::size_t i = 0; i < s.buffs.size(); ++i) {
@@ -949,6 +953,22 @@ void Skills::EndBuffsOf(SkillCaster& holder, const std::vector<std::uint32_t>& s
     }
 }
 
+bool Skills::PlaysMusic(const SkillState& state, const std::vector<std::size_t>& ending) const {
+    if (table_ == nullptr) return false;
+    for (std::size_t i = 0; i < state.buffs.size(); ++i) {
+        if (std::find(ending.begin(), ending.end(), i) != ending.end()) continue;
+        const assets::SkillRow* row = table_->Find(state.buffs[i].skill);
+        const assets::SkillParam scls = row != nullptr ? assets::FindSkillParam(*row, assets::SkillTag("scls")) : assets::SkillParam{};
+        if (!scls) continue;
+        // The original's music flag: a byte of the mask equal to 1 (CSkillManager_InstallSelector).
+        const std::uint32_t mask = std::uint32_t(scls.Int(0));
+        for (int shift = 0; shift < 32; shift += 8) {
+            if (((mask >> shift) & 0xFF) == 1) return true;
+        }
+    }
+    return false;
+}
+
 void Skills::ExpireBuffs(SkillCaster& caster, Clock::time_point now) {
     // The toggles' MP each period (out of MP: it ends), then the buffs whose time has passed.
     std::vector<SkillState::Buff>& buffs = caster.state.buffs;
@@ -967,6 +987,15 @@ void Skills::ExpireBuffs(SkillCaster& caster, Clock::time_point now) {
             }
         }
         if (b.until <= now) ended.push_back(i);
+    }
+    // Its own dances ('reqc' 0x20) end with its music (the original's persistent check on the music flag).
+    if (table_ != nullptr && !PlaysMusic(caster.state, ended)) {
+        for (std::size_t i = 0; i < buffs.size(); ++i) {
+            const assets::SkillRow* row = buffs[i].own ? table_->Find(buffs[i].skill) : nullptr;
+            if (row == nullptr || (assets::FindSkillParam(*row, assets::SkillTag("reqc")).Int(0) & 0x20) == 0) continue;
+            if (std::find(ended.begin(), ended.end(), i) == ended.end()) ended.push_back(i);
+        }
+        std::sort(ended.begin(), ended.end());
     }
     if (spent) host_.VitalsChanged(caster.entity);
     if (ended.empty()) return;

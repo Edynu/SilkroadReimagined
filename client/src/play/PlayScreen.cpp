@@ -768,6 +768,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         case proto::SkillUseStatus::Weapon: key = "UIIT_SKILL_USE_FAIL_WRONGWEAPON"; break;
         case proto::SkillUseStatus::Obstacle: key = "UIIT_SKILL_USE_FAIL_PATH_INTERRUPTED"; break; // "Cannot attack due to an obstacle." (0x3010)
         case proto::SkillUseStatus::FortressPosition: key = "UIIT_MSG_FORT_STRUCTURE_ACTION_ERROR_06"; break; // 0x3047
+        case proto::SkillUseStatus::Music: key = "UIIT_STT_SKILL_USE_FAIL_MUSICAL_RANGE"; break; // 0x3032
         case proto::SkillUseStatus::Target: key = "UIIT_SKILL_USE_FAIL_NONESELECTETARGET"; break;
         case proto::SkillUseStatus::Dead: key = "UIIT_SKILL_USE_FAIL_CHAR_DEAD"; break;
         case proto::SkillUseStatus::Untouchable: key = "UIIT_MSG_SKILL_USE_FAIL_CANT_ATTACK_TEMPORARILY"; break;

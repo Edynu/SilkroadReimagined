@@ -1422,7 +1422,10 @@ enum class SkillUseStatus : std::uint8_t {
     // The target out of the caster's line of sight: the walk on the floor from one to the other is blocked (0x3010).
     Obstacle = 28,
     // A fortress weapon's skill without a fitting fortress position (0x3047, UIIT_MSG_FORT_STRUCTURE_ACTION_ERROR_06).
-    FortressPosition = 29
+    FortressPosition = 29,
+    // A dance (reqc 0x20) while the caster plays no music: none of its songs ('scls') running (0x3032,
+    // UIIT_STT_SKILL_USE_FAIL_MUSICAL_RANGE).
+    Music = 30
 };
 // The action list's count (the original's B074 second byte): the commands the server
 // holds for the player, 0, 1 (the one running) or 2 (and one waiting). Two held: the client sends no attack and no
