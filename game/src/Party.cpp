@@ -54,7 +54,8 @@ std::vector<std::uint64_t> SplitPartyGold(std::uint64_t amount, std::size_t rece
 std::uint8_t PartyTenths(std::uint32_t value, std::uint32_t most, bool atLeastOne) {
     if (most == 0) return 0;
     const std::uint64_t tenths = std::min<std::uint64_t>(10, std::uint64_t(value) * 10 / most);
-    if (atLeastOne && value > 0 && tenths == 0) return 1;
+    // A living member's HP: 1 + trunc(10 x HP / most), 1..11 (the bar rounds up: at 91 % it shows full); MP as it is.
+    if (atLeastOne) return value > 0 ? std::uint8_t(1 + tenths) : std::uint8_t(0);
     return std::uint8_t(tenths);
 }
 

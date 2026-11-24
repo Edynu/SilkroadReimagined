@@ -756,10 +756,13 @@ struct Instances::State {
         Instance* inst = me != players.end() ? Of(me->second.layer) : nullptr;
         const auto p = host.InstancePlayer(entity);
         if (inst == nullptr || !p) return;
+        // The original's refusals in order: no party (0x1C33), not its master (0x1C34); himself or no such member (3) and a
+        // party of fewer than 2 (2) unanswered lines; the member already in this world (0x1C35).
+        const std::vector<InstanceHost::Member> members = host.InstancePartyMembers(entity);
+        if (members.empty()) return TellMaster(entity, "UIIT_MGS_ERR_GOD_TELEPORT_HOLE_NOT_PARTY", "");
         if (!p->partyMaster) return TellMaster(entity, "UIIT_MGS_ERR_PARTY_SUMMON_NOT", "");
         const auto now = Clock::now();
         if (const auto pause = summonPause.find(entity); pause != summonPause.end() && now < pause->second) return; // the button's 5 s
-        const std::vector<InstanceHost::Member> members = host.InstancePartyMembers(entity);
         const auto m = std::find_if(members.begin(), members.end(), [&](const InstanceHost::Member& x) { return x.character == character; });
         if (m == members.end() || (m->server == host.InstanceServerId() && m->entity == entity)) return;
         if (inst->inside.size() >= inst->spec->maxUsers) return TellMaster(entity, "UIIT_STT_PARTY_SUMMON_IMPOSSILBE_2", m->name);
@@ -771,6 +774,10 @@ struct Instances::State {
         if (m->server == host.InstanceServerId()) {
             const auto who = host.InstancePlayer(m->entity);
             const auto them = players.find(m->entity);
+            if (them != players.end() && them->second.layer == inst->layer) {
+                summons.erase(character);
+                return TellMaster(entity, "UIIT_MGS_ERR_GOD_INS_WORLD", m->name); // already in this world (0x1C35)
+            }
             if (!who || them == players.end() || them->second.layer != 0 || Ineligible(*who, inst->spec->minLevel, inst->spec->maxLevel) != 0) {
                 summons.erase(character);
                 return TellMaster(entity, "UIIT_STT_GNGWC_PARTY_MEMBER_CALL_CANNOT", m->name);

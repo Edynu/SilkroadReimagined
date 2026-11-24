@@ -125,8 +125,9 @@ TEST_CASE("parties: the shared rules: sizes, experience shares, gold, tenths") {
     CHECK(game::SplitPartyGold(100, 3) == std::vector<std::uint64_t>{34, 33, 33});
     CHECK(game::SplitPartyGold(7, 1) == std::vector<std::uint64_t>{7});
     // Tenths: a living member at least one.
-    CHECK(game::PartyTenths(1000, 1000, true) == 10);
-    CHECK(game::PartyTenths(549, 1000, true) == 5);
+    CHECK(game::PartyTenths(1000, 1000, true) == 11); // a living member's HP: 1 + trunc(10 x HP / most)
+    CHECK(game::PartyTenths(910, 1000, true) == 10);  // 91 %: the bar shows full
+    CHECK(game::PartyTenths(549, 1000, true) == 6);
     CHECK(game::PartyTenths(1, 1000, true) == 1);
     CHECK(game::PartyTenths(1, 1000, false) == 0);
     CHECK(game::PartyTenths(0, 1000, true) == 0);
@@ -284,13 +285,13 @@ TEST_CASE("parties: the members' news: HP and MP by the tenth, level, place") {
     const server::Parties::Clock::time_point t0{};
     parties.Tick(t0 + std::chrono::seconds(1)); // the first news: the places
     host.told.clear();
-    host.players[2].hp = 960; // still 9 tenths... and 10 before: a tenth less
+    host.players[2].hp = 960; // 1 + 9 tenths... and 11 before: a tenth less
     parties.Tick(t0 + std::chrono::seconds(2));
     auto u = host.Last<proto::PartyMemberUpdate>(1);
     REQUIRE(u);
     CHECK(u->member == 1002);
     CHECK((u->mask & proto::kPartyVitals) != 0);
-    CHECK(u->hpTenths == 9);
+    CHECK(u->hpTenths == 10);
     host.players[2].hp = 950; // the same tenth: nothing
     parties.Tick(t0 + std::chrono::seconds(3));
     CHECK_FALSE(host.Last<proto::PartyMemberUpdate>(1));
@@ -1084,7 +1085,7 @@ TEST_CASE("Parties on two servers: what a server decides, and a server gone sile
     flush();
     const auto news = hostA.Take<proto::PartyMemberUpdate>(10);
     REQUIRE(news.size() == 1);
-    CHECK(news[0].hpTenths == 1);
+    CHECK(news[0].hpTenths == 2); // 1 + a tenth
     CHECK(news[0].entity == 0u);
     CHECK((news[0].mask & proto::kPartyPosition) == 0);
 

@@ -65,8 +65,8 @@ std::vector<std::uint64_t> SplitPartyGold(std::uint64_t amount, std::size_t rece
 
 // --- What members are told of each other
 
-// HP or MP in tenths (0..10), as the members' bars show them: told when the tenth changes. Ours: a
-// living member's HP shows at least one tenth (the original counts it as 1 + whole tenths).
+// HP or MP in tenths, as the members' bars show them: told when the tenth changes. MP 0..10; a living member's HP
+// (`atLeastOne`) 1 + whole tenths, 1..11 (the original's: the bar, clamped at full, rounds up).
 std::uint8_t PartyTenths(std::uint32_t value, std::uint32_t most, bool atLeastOne);
 
 // --- Party matching

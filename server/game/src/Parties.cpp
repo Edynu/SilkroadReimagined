@@ -954,6 +954,11 @@ void Parties::Register(const PartyHost::Player& me, const proto::PartyMatchForm&
     if (party == nullptr && me.level < game::kPartyMinLevel) return refuse(S::LowLevel);
     if (form.purpose >= game::kPartyPurposes || form.title.empty()) return refuse(S::Unknown);
     if (me.arenaTeam != 0) return refuse(S::ArenaMatching); // not in a Battle Arena match (0x2C29)
+    // Not while a party invitation of its own or a join request of its own waits (the party state 1 or 4: JOIN_ERROR_DUPLE).
+    if (applying_.contains(me.character) ||
+        std::any_of(proposals_.begin(), proposals_.end(), [&](const auto& p) { return p.second.inviterCharacter == me.character; })) {
+        return refuse(S::MatchJoining);
+    }
     // The jobs: no suit's
     // change under way (0x2C26), an alias in a suit (5), the purpose the job's (0x2C23).
     if (me.jobChanging) return refuse(S::JobChanging);
