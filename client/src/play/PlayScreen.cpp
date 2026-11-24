@@ -766,6 +766,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         case proto::SkillUseStatus::Cooling: key = "UIIT_SKILL_USE_FAIL_TIMEDELAY_COOL_TIME"; break;
         case proto::SkillUseStatus::Weapon: key = "UIIT_SKILL_USE_FAIL_WRONGWEAPON"; break;
         case proto::SkillUseStatus::Obstacle: key = "UIIT_SKILL_USE_FAIL_PATH_INTERRUPTED"; break; // "Cannot attack due to an obstacle." (0x3010)
+        case proto::SkillUseStatus::FortressPosition: key = "UIIT_MSG_FORT_STRUCTURE_ACTION_ERROR_06"; break; // 0x3047
         case proto::SkillUseStatus::Target: key = "UIIT_SKILL_USE_FAIL_NONESELECTETARGET"; break;
         case proto::SkillUseStatus::Dead: key = "UIIT_SKILL_USE_FAIL_CHAR_DEAD"; break;
         case proto::SkillUseStatus::Untouchable: key = "UIIT_MSG_SKILL_USE_FAIL_CANT_ATTACK_TEMPORARILY"; break;
@@ -962,7 +963,10 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                       {0x1843, "UIIT_MSG_STRGERR_INVALID_TARGET_STORAGE"},
                       {0x1834, "UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED"},
                       {0x1829, "UIIT_MSG_STRGERR_SPECIFY_POSITIVE_NUMBER_ONLY"},
-                      {0x180F, "UIIT_MSG_STRGERR_NOT_ENOUGH_GOLD"}};
+                      {0x180F, "UIIT_MSG_STRGERR_NOT_ENOUGH_GOLD"},
+                      // A quest's trap: a monster within 5 times its radius (0x3038), another trap or object in it (0x3037).
+                      {0x3038, "UIIT_MSG_QUEST_ERR_CANNOT_MAKE_TRAP_EXIST_MONSTER"},
+                      {0x3037, "UIIT_MSG_QUEST_ERR_CANNOT_MAKE_TRAP"}};
         const char* key = "UIIT_MSG_COSPETERR_CANT_USEITEM";
         for (const auto& t : kTexts) {
             if (t.code == refused->code) key = t.key;

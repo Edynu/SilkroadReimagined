@@ -6,6 +6,7 @@
 
 #include <random>
 
+#include "sr/assets/GameData.h"
 #include "sr/game/Combat.h"
 
 namespace {
@@ -62,6 +63,34 @@ TEST_CASE("the hit: divided by the absorption, less the defence, then the skill'
     magic.kind = 10;
     magic.magical = true;
     CHECK(Hit(Attacker(), Defender(), magic) == 400);
+}
+
+TEST_CASE("the hit: a monster's grade (the original's scale): a titan's, a giant's or an elite's x 1.5, an event's strong one's x 1.8") {
+    CHECK(Hit(Attacker(), Defender(), Melee()) == 400);
+    CombatStats titan = Attacker();
+    titan.hitScale = MonsterCombatStats(sr::assets::ObjectRow{}, 5).hitScale;
+    CHECK(Hit(titan, Defender(), Melee()) == 600);
+    CombatStats strong = Attacker();
+    strong.hitScale = MonsterCombatStats(sr::assets::ObjectRow{}, 7).hitScale;
+    CHECK(Hit(strong, Defender(), Melee()) == 720);
+    CHECK(MonsterCombatStats(sr::assets::ObjectRow{}, 3).hitScale == 1.0); // a unique as it is
+    // An elite's range 1.5 times: (1000 x 1.5) / 2 - 100.
+    CombatStats elite = Attacker();
+    elite.rangeFactor = MonsterCombatStats(sr::assets::ObjectRow{}, 6).rangeFactor;
+    CHECK(Hit(elite, Defender(), Melee()) == 650);
+}
+
+TEST_CASE("the hit: an attack of neither melee nor ranged (kind 8) takes no lane's damage percent nor block bonus") {
+    CombatStats a = Attacker();
+    a.damagePercent = {100, 100, 100, 100};
+    AttackSpec dot = Melee();
+    dot.kind = 8; // magical, neither melee nor ranged
+    dot.magical = true;
+    CHECK(Hit(a, Defender(), dot) == 400);
+    AttackSpec melee = Melee();
+    melee.kind = 9; // magical melee
+    melee.magical = true;
+    CHECK(Hit(a, Defender(), melee) == 800);
 }
 
 TEST_CASE("the hit: the level above the target, the balance, berserk, the final factors") {

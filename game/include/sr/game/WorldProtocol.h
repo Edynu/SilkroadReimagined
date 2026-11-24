@@ -1418,7 +1418,9 @@ enum class SkillUseStatus : std::uint8_t {
     // on or by one under job, free battle or murderer state (0x3039).
     DailyPkLimit = 22, TotalPkLimit = 23, YourLevelTooLow = 24, TargetLevelTooLow = 25, PkProhibited = 26, Duplicate = 27,
     // The target out of the caster's line of sight: the walk on the floor from one to the other is blocked (0x3010).
-    Obstacle = 28
+    Obstacle = 28,
+    // A fortress weapon's skill without a fitting fortress position (0x3047, UIIT_MSG_FORT_STRUCTURE_ACTION_ERROR_06).
+    FortressPosition = 29
 };
 // The action list's count (the original's B074 second byte): the commands the server
 // holds for the player, 0, 1 (the one running) or 2 (and one waiting). Two held: the client sends no attack and no

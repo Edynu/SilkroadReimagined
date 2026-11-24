@@ -211,6 +211,8 @@ bool Skills::Use(SkillCaster& caster, const proto::UseSkill& u, Clock::time_poin
     if (caster.state.transform.mode == 1) return refuse(proto::SkillUseStatus::Transformed);
     if (skill == nullptr || !caster.book.Knows(*skill)) return refuse(proto::SkillUseStatus::Unknown);
     if (!WeaponFits(caster.stats.weaponKind, *skill)) return refuse(proto::SkillUseStatus::Weapon);
+    // A fortress weapon's skill: a fitting fortress position at every cast (0x3047), not only when it was put on.
+    if (caster.stats.weaponKind == 16 && !host_.FortressWeaponAllowed(caster.entity)) return refuse(proto::SkillUseStatus::FortressPosition);
     // Its conditions on what is worn (a shield, a weapon, armour: 'reqi', 0x300D).
     if (!game::EquipmentFits(*skill, caster.state.worn)) return refuse(proto::SkillUseStatus::Weapon);
     SkillState& s = caster.state;
@@ -1736,15 +1738,30 @@ bool Skills::IsQuestTrap(const assets::SkillRow& skill) {
     return assets::FindSkillParam(skill, assets::SkillTag("trap")) && assets::FindSkillParam(skill, assets::SkillTag("qest"));
 }
 
-bool Skills::SetTrap(SkillCaster& caster, const assets::SkillRow& skill, Clock::time_point now) {
+std::uint16_t Skills::SetTrap(SkillCaster& caster, const assets::SkillRow& skill, Clock::time_point now) {
     // The item's skill cast at once (its preparing and casting 0: SKILL_QNO_CA_GORIA_6_01_01, _EU_GENERAL_1_01_01,
     // _EU_IVY_2_01_01), its object at the user's feet: 'efr' 3 1 20 (a radius of 20), 'dura' 300000 (5 minutes), 'lnks' 0 300
-    // (gone once its owner is 300 away). One of its kind stands at a time (a new one ends the old, Objects).
-    if (!IsQuestTrap(skill)) return false;
+    // (gone once its owner is 300 away). Refused, as the original's: a monster within 5 times its radius (0x3038), another
+    // skill object within its radius (0x3037), its user's own trap still standing (0x3037: no second one).
+    if (!IsQuestTrap(skill)) return 2;
+    const auto me = host_.Position(caster.entity);
+    if (!me) return 2;
+    const assets::SkillParam area = assets::FindSkillParam(skill, assets::SkillTag("efr"), 3);
+    const float radius = area ? float(std::max(1, area.Int(2))) : 20.0f;
+    if (!host_.MonstersNear(*me, radius * 5.0f).empty()) return 0x3038;
+    const proto::FlatPosition here = proto::ToFlat(*me);
+    for (const SkillObject& o : objects_) {
+        const proto::FlatPosition there = proto::ToFlat(o.at);
+        if (std::hypot(there.x - here.x, there.z - here.z) < double(radius)) return 0x3037;
+        if (o.owner == caster.entity && o.skill != nullptr && o.skill->group == skill.group) return 0x3037;
+    }
+    for (const PendingObject& p : pendingObjects_) {
+        if (p.owner == caster.entity && p.skill != nullptr && p.skill->group == skill.group) return 0x3037;
+    }
     host_.ToObservers(caster.entity, proto::EntitySwing{caster.entity, 0, skill.id});
     pendingObjects_.push_back({now, caster.entity, &skill});
     core::LogInfo("skills: {} sets {}", caster.entity, skill.codename);
-    return true;
+    return 0;
 }
 
 void Skills::CastObject(SkillCaster& caster, const assets::SkillRow& skill, Clock::time_point now) {
@@ -2369,6 +2386,13 @@ void Skills::LandHits(SkillCaster& caster, Clock::time_point now) {
         if (hit.companion != 0) spec.flatMin = spec.flatMax = 0;
         game::HitResult roll = statusOnly ? game::HitResult{}
                                           : game::RollHit(hit.companion != 0 ? companion : caster.stats, *them, spec, who, random_, imbued ? &force : nullptr);
+        // In a monster's shape (msch 1) its own hit: 5 x its level and up to 5 x its level more, never a critical (the
+        // block rolled first, as any hit's).
+        if (!statusOnly && hit.companion == 0 && caster.state.transform.mode == 1 && !roll.blocked && caster.stats.level > 0) {
+            const std::uint32_t five = std::uint32_t(caster.stats.level) * 5u;
+            roll.critical = false;
+            roll.damage = five + std::uniform_int_distribution<std::uint32_t>(0, five - 1)(random_);
+        }
         // A structure takes the weapon's own attack alone; only a player's hit counts.
         if (!statusOnly) {
             if (const std::optional<std::uint32_t> took = host_.StructureDamage(caster.entity, hit.target)) {

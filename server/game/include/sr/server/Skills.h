@@ -373,6 +373,12 @@ public:
         (void)murderer;
         return false;
     }
+    // A fortress weapon's skills: the worn weapon's Param5 mask shares a bit with the player's fortress position (in a
+    // guild), else 0x3047.
+    virtual bool FortressWeaponAllowed(std::uint32_t entity) const {
+        (void)entity;
+        return true;
+    }
     virtual bool IsPlayer(std::uint32_t entity) const {
         (void)entity;
         return false;
@@ -580,7 +586,9 @@ public:
     // A quest's trap set from the bag (a 3/3/13/1 item whose skill has 'trap' and 'qest': the
     // original's special consumable casts it): its object at the user's feet now (Objects), whose catch of a monster its 'qest' names is the
     // owner's quest event (SkillHost::QuestTrapped). False: no such skill.
-    bool SetTrap(SkillCaster& caster, const assets::SkillRow& skill, Clock::time_point now);
+    // A quest's trap set at the user's feet; the original's refusal code (0: set): a monster within 5 times its radius
+    // 0x3038, a skill object within its radius or the user's own trap standing 0x3037.
+    std::uint16_t SetTrap(SkillCaster& caster, const assets::SkillRow& skill, Clock::time_point now);
     static bool IsQuestTrap(const assets::SkillRow& skill);
     // What a plain attack swings: a monster shape's basic skill, else the weapon's.
     const assets::SkillRow* DefaultAttack(const SkillCaster& caster) const;

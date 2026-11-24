@@ -2209,6 +2209,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (it != players.end() && it->second.entity == entity) return true;
         return coses && coses->OwnerOf(entity) != 0;
     }
+    // A fortress weapon's skills: its Param5 mask and the player's fortress position share a bit (a guild member's).
+    bool FortressWeaponAllowed(std::uint32_t entity) const override {
+        const PlayerWorld* p = PlayerByEntity(entity);
+        if (p == nullptr) return true;
+        const game::ItemInstance* weapon = p->inventory.At(game::slot::kWeapon);
+        const assets::ItemRow* row = weapon != nullptr && config.rules->items ? config.rules->items->Find(weapon->refId) : nullptr;
+        if (row == nullptr) return true;
+        return (row->params[4] & (guilds ? guilds->PositionOf(p->selected) : 0)) != 0;
+    }
     // The player a target stands for: itself, or a COS's owner.
     std::uint32_t AsOwner(std::uint32_t entity) const {
         const std::uint32_t owner = coses ? coses->OwnerOf(entity) : 0u;
@@ -8786,7 +8795,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 if (const auto it = player.coolTimes.find(cool.group); cool.ms != 0 && it != player.coolTimes.end() && now < it->second) {
                     return RefuseItem(peer, player, *row, game::kCoolTimeRefused, "its group's wait");
                 }
-                skillUnit->SetTrap(caster, *skill, now);
+                if (const std::uint16_t code = skillUnit->SetTrap(caster, *skill, now); code != 0) {
+                    SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, code});
+                    return refuse("the trap's place");
+                }
                 TakeOne(peer, player, use.slot);
                 if (cool.ms != 0) {
                     player.coolTimes[cool.group] = now + std::chrono::milliseconds(cool.ms);

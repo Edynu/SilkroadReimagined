@@ -62,6 +62,10 @@ struct CombatStats {
     std::array<double, 2> finalFactor{};      // its physical / magical hits, times it (0: none; 0xB2, 0xB3)
     std::array<double, 2> finalTakenFactor{}; // the physical / magical hits it takes, times it (0: none; 0xB4, 0xB5)
     double ignoreDefenceChance = 0; // percent: a player's hit on a monster skips its defence (0xBC)
+    // A monster's by its rarity byte (MonsterCombatStats): its attack range's ends times `rangeFactor` (a party monster
+    // 1.2, an elite 1.5 more), its hits times `hitScale` after the target's share (a party monster 1.3; a giant, a titan,
+    // an elite 1.5, an event's strong one 1.8). Players 1.
+    double rangeFactor = 1, hitScale = 1;
     double classBonus = 0;          // percent added against a target of class 3 (0x103)
     int targetClass = 0;            // a monster's class (3: the class classBonus is against)
     bool berserk = false;           // in berserk: hits times 2 + berserkBonus
@@ -150,7 +154,7 @@ struct AttackSpec {
     // variance's roll, and the variance's point times a factor.
     int spreadBonus = 0;
     double pointFactor = 1.0;
-    int Lane() const;        // 0..3: physical melee, physical ranged, magical melee, magical ranged
+    int Lane() const;        // 0..3: physical melee, physical ranged, magical melee, magical ranged; -1 neither melee nor ranged
 };
 AttackSpec AttackOf(const assets::SkillRow& skill);
 

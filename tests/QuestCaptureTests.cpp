@@ -472,15 +472,9 @@ TEST_CASE("Game server: a trap set from the bag catches the monster that comes i
     config.files = &fs;
     config.characters = characters;
     config.skills = skills;
-    // The Huns' garrison (region 26991) with a Hun magic archer standing at the player's feet, within the trap's 20.
+    // The Huns' garrison (region 26991); its Hun magic archers put out by the developer's spawn (a still lab monster).
     const proto::WorldPosition place{26991, 1154.0f, 142.0f, 1506.0f, 0};
-    server::MonsterNest nest;
-    nest.refObjId = archer->refObjId;
-    nest.position = {26991, 1160.0f, 142.0f, 1506.0f, 0};
-    nest.radius = 1;
-    nest.maxCount = 1;
-    nest.aggressive = false;
-    config.monsterNests = {nest};
+    config.devCommands = true;
     server::GameServer game;
     REQUIRE_MESSAGE(game.Start(config, error), error);
     REQUIRE(server::CreateAccount(t.Db(), "Trapperacct", "secret1", error) == server::CreateAccountResult::Created);
@@ -546,21 +540,38 @@ TEST_CASE("Game server: a trap set from the bag catches the monster that comes i
         }
         return until();
     };
-    const auto archerHere = [&]() -> std::uint32_t {
-        for (const auto& [entity, a] : seen)
-            if (a.character.model == archer->refObjId && a.kind == proto::EntityKind::Monster && !gone.contains(entity)) return entity;
-        return 0;
+    // The navigation around the player in, then an archer 3 away: the trap refused (0x3038: a monster within 5 times its
+    // radius), kept.
+    const auto spawn = [&](std::uint32_t tag) {
+        proto::DevSpawned made;
+        for (int i = 0; i < 100 && made.entity == 0; ++i) {
+            c.Send(proto::DevSpawn{archer->codename, 3.0f, 0.0f, proto::LabBehaviour::Still, 0, tag});
+            REQUIRE(c.Expect(made, 5s));
+            if (made.entity == 0) pump([] { return false; }, 100ms);
+        }
+        return made.entity;
     };
-    REQUIRE(pump([&] { return archerHere() != 0; }, 20s));
-    const std::uint32_t target = archerHere();
-    // The trap set: one used up; the archer at its feet taken out of the world without dying, the caught Hun in the bag.
+    const std::uint32_t near = spawn(1);
+    REQUIRE(near != 0);
     proto::UseItem use;
     use.slot = slot;
     c.Send(use);
+    proto::ItemRefused tooNear;
+    REQUIRE(c.Expect(tooNear, 5s));
+    CHECK(tooNear.code == 0x3038);
+    // That archer gone, the trap set; an archer at its feet then: taken out of the world without dying, the caught Hun in
+    // the bag, one trap used up.
+    c.Send(proto::DevRemove{near});
+    pump([] { return false; }, 500ms); // (its removal: it may not have been seen yet, so no EntityGone)
+    c.Send(use);
+    pump([] { return false; }, 200ms);
+    const std::uint32_t target = spawn(2);
+    REQUIRE(target != 0);
     const auto holds = [&](std::uint32_t item) {
         return std::any_of(changed.begin(), changed.end(), [&](const proto::ItemRecord& i) { return i.item == item; });
     };
-    REQUIRE(pump([&] { return gone.contains(target) && holds(caught->refObjId); }, 10s));
+    // (Caught perhaps before the client saw it: then no EntityGone; seen, it is gone.)
+    REQUIRE(pump([&] { return (!seen.contains(target) || gone.contains(target)) && holds(caught->refObjId); }, 10s));
     // Its COOLTIME (60 s): a second trap at once is refused.
     c.Send(use);
     proto::ItemRefused refused;

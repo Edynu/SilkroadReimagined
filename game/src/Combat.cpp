@@ -155,12 +155,19 @@ CombatStats MonsterCombatStats(const assets::ObjectRow& row, std::uint8_t rarity
     s.critical = row.critical;
     s.bodyRadius = std::max(1.0f, row.bodyRadius * float(row.scalePercent) / 100.0f);
     s.targetClass = rarity & 0x0F; // 3: a unique, the one the attacker's 0x103 counts on
+    // Its range and its hits by its population (the high nibble: 1 a party monster) and its grade (the low nibble).
+    const int population = rarity >> 4, grade = rarity & 0x0F;
+    s.rangeFactor = (population == 1 ? 1.2 : 1.0) * (grade == 6 ? 1.5 : 1.0);
+    const double gradeScale = grade == 4 || grade == 5 || grade == 6 ? 1.5 : grade == 7 ? 1.8 : 1.0;
+    s.hitScale = std::clamp(population == 1 ? 1.3 : 1.0, 0.1, 10.0) * gradeScale;
     return s;
 }
 
 int AttackSpec::Lane() const {
     // The lane its stat slots go by: physical (bit 4) or magical (bit 8), melee (bit 1) or ranged
-    // (bit 2); a kind without the bits counts as melee.
+    // (bit 2); a kind with neither (kind 8: an imbue's force, a damage over time) has none: no lane's damage percent, no
+    // block bonus.
+    if ((kind & 3) == 0) return -1;
     const int ranged = (kind & 1) == 0 && (kind & 2) != 0 ? 1 : 0;
     return (magical ? 2 : 0) + ranged;
 }
@@ -267,16 +274,20 @@ namespace {
 
 // One part of a hit, the physical or the magical one by the attack's kind: the variance's point, the defences,
 // the skill's power and the factors; a whole number.
+// `takenLane`: the lane of the target's factor (an imbue's part: its own physical / magical with the main skill's melee /
+// ranged; -1 none).
 std::uint32_t FormulaPart(const CombatStats& attacker, const CombatStats& defender, const AttackSpec& attack, bool critical, bool ignoreDefence,
-                          bool attackerPlayer, std::mt19937& random) {
+                          bool attackerPlayer, std::mt19937& random, int takenLane) {
     const auto unit = [&] { return double(std::uniform_int_distribution<int>(0, 32767)(random)) / 32767.0; }; // rand() / 32767
     const int lane = attack.Lane();
     // The variance: the range (the skill's flat attack added, then 1 % a level of its mastery), the
     // point's centre from the hit rate over the parry rate and the level gap (10..90), moved by the
     // least of three rolls up or down.
+    // A monster's ends times its range factor, held to 0..999,999.
     const double scale = 1.0 + double(std::max(0, attack.mastery)) / 100.0;
-    const double low = ((attack.magical ? attacker.magAttackMin : attacker.phyAttackMin) + attack.flatMin) * scale;
-    const double high = std::max(low, ((attack.magical ? attacker.magAttackMax : attacker.phyAttackMax) + attack.flatMax) * scale);
+    const auto end = [&](double stat, int flat) { return Clamp((stat + double(flat)) * attacker.rangeFactor, 0.0, 999999.0) * scale; };
+    const double low = end(attack.magical ? attacker.magAttackMin : attacker.phyAttackMin, attack.flatMin);
+    const double high = std::max(low, end(attack.magical ? attacker.magAttackMax : attacker.phyAttackMax, attack.flatMax));
     const double advantage = LevelAdvantage(attacker.level, defender.level);
     const double centre = defender.evasion <= 0.0 ? 90.0 : Clamp((attacker.hitRate / defender.evasion * 0.5 + advantage) * 100.0, 10.0, 90.0);
     // A passive's hit rate adds to the roll before it is held to 0..100, a passive's attack percent
@@ -292,8 +303,8 @@ std::uint32_t FormulaPart(const CombatStats& attacker, const CombatStats& defend
     damage = damage * double(attack.power) / 100.0;
     // The buffs' and passives' factors: its lane's damage, a class bonus, what the target takes in it.
     const double classPart = defender.targetClass == 3 ? attacker.classBonus / 100.0 * damage : 0.0;
-    damage = damage * (1.0 + attacker.damagePercent[std::size_t(lane)] / 100.0) + classPart;
-    if (defender.damageTaken[std::size_t(lane)] != 0.0) damage *= defender.damageTaken[std::size_t(lane)];
+    damage = damage * (1.0 + (lane >= 0 ? attacker.damagePercent[std::size_t(lane)] : 0.0) / 100.0) + classPart;
+    if (takenLane >= 0 && defender.damageTaken[std::size_t(takenLane)] != 0.0) damage *= defender.damageTaken[std::size_t(takenLane)];
     // Berserk, a critical's double (magic never criticals), the level above the target, a player's balance.
     double times = attacker.berserk ? attacker.berserkBonus + 2.0 : 1.0;
     if (critical && !attack.magical) times *= 2.0;
@@ -352,8 +363,11 @@ HitResult RollHit(const CombatStats& attacker, const CombatStats& defender, cons
             hit.critical = roll(int(std::trunc(double(chance) / (1.0 + defender.criticalResist / 100.0))), 'C');
         }
         ignoreDefence = who.attackerPlayer && !who.defenderPlayer && roll(int(std::trunc(attacker.ignoreDefenceChance)), 'M');
+        // The block rate and its lane's bonus each truncated to a byte, summed as one, then over the attacker's ignore.
         const int lane = attack.Lane();
-        const double blockRate = (defender.block + defender.blockBonus[std::size_t(lane)]) / (1.0 + attacker.blockIgnore / 100.0);
+        const int bonus = lane >= 0 ? int(std::trunc(defender.blockBonus[std::size_t(lane)])) & 0xFF : 0;
+        const int rate = ((int(std::trunc(defender.block)) & 0xFF) + bonus) & 0xFF;
+        const double blockRate = double(rate) / (1.0 + attacker.blockIgnore / 100.0);
         if (roll(int(std::trunc(blockRate)), 'B')) {
             hit.blocked = true;
             return hit;
@@ -366,11 +380,14 @@ HitResult RollHit(const CombatStats& attacker, const CombatStats& defender, cons
         return std::int64_t(std::trunc(double(std::uint64_t(part) * std::uint64_t(attack.downPercent)) / 100.0));
     };
     // On a target an imbue's jump added, the physical parts are 0.
-    std::int64_t damage = attack.formula ? down(FormulaPart(attacker, defender, attack, hit.critical, ignoreDefence, who.attackerPlayer, random)) : 0;
+    std::int64_t damage = attack.formula ? down(FormulaPart(attacker, defender, attack, hit.critical, ignoreDefence, who.attackerPlayer, random, attack.Lane())) : 0;
     if (who.magicalOnly && !attack.magical) damage = 0;
     hit.magical = attack.formula && attack.magical && damage > 0;
     if (imbue != nullptr && attack.formula && attack.imbuePercent > 0) {
-        std::int64_t force = down(FormulaPart(attacker, defender, *imbue, hit.critical, ignoreDefence, who.attackerPlayer, random));
+        // The target's factor for the imbue's part: the imbue's physical / magical, the main skill's melee / ranged.
+        const int mainLane = attack.Lane();
+        const int imbueLane = mainLane < 0 ? -1 : (imbue->magical ? 2 : 0) + (mainLane & 1);
+        std::int64_t force = down(FormulaPart(attacker, defender, *imbue, hit.critical, ignoreDefence, who.attackerPlayer, random, imbueLane));
         if (who.magicalOnly && !imbue->magical) force = 0;
         hit.magical = hit.magical || (imbue->magical && force > 0);
         damage += std::int64_t(std::trunc(double(force) * double(attack.imbuePercent) / 100.0));
@@ -394,6 +411,8 @@ HitResult RollHit(const CombatStats& attacker, const CombatStats& defender, cons
         }
         damage = std::int64_t(std::trunc(double(damage) * double(share) / 100.0));
     }
+    // A monster's grade (its population's and its grade's scale).
+    if (attacker.hitScale != 1.0) damage = std::int64_t(std::trunc(double(damage) * attacker.hitScale));
     hit.damage = std::uint32_t(std::clamp<std::int64_t>(damage, 1, 16777215));
     return hit;
 }
