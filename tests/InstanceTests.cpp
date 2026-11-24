@@ -151,7 +151,7 @@ TEST_CASE("Forgotten World: the catalog, a hole's instance in its own layer, its
     CHECK(catalog->themes.size() == 4);
     CHECK(catalog->talismans.size() == 32);
     CHECK(catalog->sharedTriggers.size() == 7);
-    CHECK(catalog->reentrySeconds == 300);
+    CHECK(catalog->reentrySeconds == 300 * 60); // ENTER_WORLD_GROUP_COOL_TIME 300, in minutes (five hours)
     const server::GameWorldSpec* togui = catalog->World(63);
     REQUIRE(togui != nullptr);
     CHECK(togui->codename == "INS_GOD_TOGUI_35_50_LEVEL_1");
@@ -254,8 +254,8 @@ TEST_CASE("Forgotten World: the catalog, a hole's instance in its own layer, its
     REQUIRE(layer != 0);
     REQUIRE(pump([&] { return !rig.All<proto::InstanceState>().empty(); }));
     CHECK(rig.All<proto::InstanceState>().back().world == 63);
-    // The re-entry limit's timed job (TIMEDJOB_*_FORCLIENT).
-    CHECK(rig.All<proto::InstanceState>().back().jobSeconds == 300);
+    // The re-entry limit's timed job (TIMEDJOB_*_FORCLIENT, in minutes).
+    CHECK(rig.All<proto::InstanceState>().back().jobSeconds == 300 * 60);
     CHECK(rig.All<proto::InstanceState>().back().jobIcon == "icon\\item\\etc\\teleprot_hole.ddj");
     CHECK(rig.All<proto::InstanceState>().back().jobSubject == "UIIT_STT_PARTY_LOST_WOLRD_SUBJECT");
     CHECK(world.Where(me)->position.layer == layer);
