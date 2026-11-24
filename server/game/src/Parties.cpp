@@ -288,6 +288,10 @@ bool Parties::Leads(std::uint32_t entity) const {
     const Party* party = PartyAt(entity);
     return p && party != nullptr && party->leader == p->character;
 }
+bool Parties::Proposing(std::uint32_t entity) const {
+    if (proposals_.contains(entity)) return true;
+    return std::any_of(proposals_.begin(), proposals_.end(), [&](const auto& kv) { return kv.second.inviter == entity; });
+}
 std::uint8_t Parties::SettingsOf(std::uint32_t entity) const {
     const Party* party = PartyAt(entity);
     return party != nullptr ? party->settings : 0;

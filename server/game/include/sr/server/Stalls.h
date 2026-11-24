@@ -72,6 +72,7 @@ public:
         bool riding = false;
         bool murderer = false;
         bool jobSuit = false;
+        bool partyAsking = false; // a party invitation of its or to it waiting (the original's party state 1 / 3)
         int town = -1;         // the town it stands in (regioninfo.txt's area index; -1: none)
         std::uint32_t skin = 0; // its stall's decoration (an item mall booth's RefObjID; 0: the plain booth)
         game::proto::WorldPosition position;

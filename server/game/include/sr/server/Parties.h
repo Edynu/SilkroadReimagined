@@ -127,6 +127,8 @@ public:
     std::uint32_t PartyOf(std::uint32_t entity) const;
     // Whether it is its party's master.
     bool Leads(std::uint32_t entity) const;
+    // Whether an invitation it made or was made to it waits for its answer (the original's party state 1 / 3).
+    bool Proposing(std::uint32_t entity) const;
     // Its party's members as the parties know them, on every server (none: no party).
     struct MemberView {
         std::uint32_t character = 0;

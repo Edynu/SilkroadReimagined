@@ -205,7 +205,9 @@ void Stalls::OpenStall(std::uint32_t entity, std::string name) {
     const auto p = host_.StallPlayer(entity);
     if (!p) return;
     const auto refuse = [&](Code code) { Answer(entity, proto::StallOpen::kId, code); };
-    if (stalls_.contains(entity) || visiting_.contains(entity) || waiting_.contains(entity) || !p->alive || !p->free) return refuse(Code::Busy);
+    // The original's rule for opening and visiting (every world's alike): in no stall, alive, in no other dealing, no party
+    // invitation waiting (its party state neither 1 nor 3): else 0x3C16.
+    if (stalls_.contains(entity) || visiting_.contains(entity) || waiting_.contains(entity) || !p->alive || !p->free || p->partyAsking) return refuse(Code::Busy);
     if (p->riding) return refuse(Code::Riding);
     if (p->murderer) return refuse(Code::Murderer);
     if (p->jobSuit) return refuse(Code::JobSuit);
@@ -247,7 +249,7 @@ void Stalls::VisitStall(std::uint32_t entity, std::uint32_t owner) {
     const auto p = host_.StallPlayer(entity);
     const auto o = host_.StallPlayer(owner);
     if (!p || !o) return refuse(Code::Closed);
-    if (stalls_.contains(entity) || visiting_.contains(entity) || waiting_.contains(entity) || !p->alive || !p->free) return refuse(Code::Busy);
+    if (stalls_.contains(entity) || visiting_.contains(entity) || waiting_.contains(entity) || !p->alive || !p->free || p->partyAsking) return refuse(Code::Busy);
     // The original's reach: 100 between the two positions in 3D, across a region's border too; beyond it 4.
     const proto::FlatPosition a = proto::ToFlat(p->position), b = proto::ToFlat(o->position);
     const double dy = double(p->position.y) - double(o->position.y);

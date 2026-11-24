@@ -118,7 +118,7 @@ struct StallServer {
     // A character at (x, 1000) of `region` (Jangan's by default) with `items` in its bag (from place 13 on)
     // and `gold`, entered.
     Player Make(const std::string& name, float x, const std::vector<server::StoredItem>& items, std::uint64_t gold,
-                std::uint16_t region = assets::RegionId(168, 97)) {
+                std::uint16_t region = assets::RegionId(168, 97), int level = 0) {
         Player p;
         REQUIRE(server::CreateAccount(t.Db(), name + "acct", "secret1", error) == server::CreateAccountResult::Created);
         bool ok = false;
@@ -149,6 +149,7 @@ struct StallServer {
         here.x = x;
         here.z = 1000;
         REQUIRE(server::SavePlaces(t.Db(), {{p.character, here}}));
+        if (level > 0) REQUIRE(server::SaveProgress(t.Db(), {{p.character, std::uint8_t(level), 0, 0, 0, 40, 40, 0}}));
         const std::int64_t jid = t.Db().Query("SELECT userjid FROM _user WHERE charid = $1", {p.character}).Int(0, 0);
         REQUIRE(t.Db().Query("DELETE FROM sro_vt_account.sr_online_sessions WHERE jid = $1", {jid}).Ok());
         REQUIRE(server::GiveItems(t.Db(), config.id, name, items, gold, error) == server::GiveResult::Done);
@@ -212,11 +213,21 @@ TEST_CASE("Game server: a stall opened, items put up by the original's rules, op
     SKIP_WITHOUT_DATABASE(t);
     StallServer s(t);
     REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
-    auto o = s.Make("Owner", 1000, {Stored(kSword), Stored(kPotion, 30), Stored(kQuest), Stored(kGoods)}, 0);
+    auto o = s.Make("Owner", 1000, {Stored(kSword), Stored(kPotion, 30), Stored(kQuest), Stored(kGoods)}, 0, assets::RegionId(168, 97), 10);
     const std::uint8_t sword = PlaceOf(o.bag, kSword), potion = PlaceOf(o.bag, kPotion), quest = PlaceOf(o.bag, kQuest), goods = PlaceOf(o.bag, kGoods);
 
     o.client->Send(proto::StallOpen{"   "});
     CHECK(Refusal(o) == Code::BadName);
+    // A party invitation of its waiting: no stall (0x3C16, the original's rule); declined, it may.
+    auto g = s.Make("Guest", 1000, {}, 0);
+    for (bool seen = false; !seen;) seen = Next<proto::EntityAppeared>(o).entity == g.entity; // in its sight first
+    o.client->Send(proto::PartyInvite{g.entity, 0});
+    proto::PartyInvited invited;
+    REQUIRE(g.client->Expect(invited));
+    o.client->Send(proto::StallOpen{"Bargains"});
+    CHECK(Refusal(o) == Code::Busy);
+    g.client->Send(proto::PartyInviteAnswer{0});
+    for (int i = 0; i < 50; ++i) s.game.Poll(2ms);
     o.client->Send(proto::StallOpen{"Bargains"});
     const auto view = Next<proto::StallView>(o);
     CHECK(view.name == "Bargains");

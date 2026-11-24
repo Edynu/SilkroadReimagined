@@ -76,7 +76,12 @@ server::Parties::Handled Send(server::Parties& parties, std::uint32_t entity, co
 // Two players in a party: Alpha (1, the master) asked Beta (2) with `settings`.
 void Pair(Host& host, server::Parties& parties, std::uint8_t settings) {
     REQUIRE(Send(parties, 1, proto::PartyInvite{2, settings}) == server::Parties::Handled::Yes);
+    // The invitation waits: both sides proposing (the original's party state 1 / 3: no stall meanwhile).
+    CHECK(parties.Proposing(1));
+    CHECK(parties.Proposing(2));
     REQUIRE(Send(parties, 2, proto::PartyInviteAnswer{1}) == server::Parties::Handled::Yes);
+    CHECK_FALSE(parties.Proposing(1));
+    CHECK_FALSE(parties.Proposing(2));
     REQUIRE(parties.PartyOf(1) != 0);
     host.told.clear();
 }

@@ -5689,6 +5689,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         out.riding = p.riding;
         out.murderer = p.pvpState == std::uint8_t(game::PvpState::Murderer);
         out.jobSuit = ActivityOf(p).jobSuit;
+        out.partyAsking = parties && parties->Proposing(entity);
         return out;
     }
     void StallSend(std::uint64_t peerId, proto::MessageId id, const std::vector<std::byte>& payload) override { GuildSend(peerId, id, payload); }
