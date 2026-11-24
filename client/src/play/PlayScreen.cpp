@@ -2180,7 +2180,9 @@ void PlayScreen::DevTools(ScreenContext&) {
     if (ImGui::Begin("Teleport (developer)")) {
         ImGui::TextUnformatted("To a teleport point's arrival (the server needs --dev-commands).");
         const auto& points = tables_->teleports.Points();
+        // The outdoor ones by their region's x and y, a dungeon's by its region (the tomb's floors 0x8002..0x8007, ...).
         const auto label = [&](const assets::TeleportPoint& p) {
+            if ((p.region & 0x8000) != 0) return std::format("{} {} (dungeon 0x{:04X})", p.id, p.codename, p.region);
             return std::format("{} {} ({},{})", p.id, p.codename, p.region & 0xFF, p.region >> 8);
         };
         // Case-blind "contains" for the lists' filters.
@@ -2197,7 +2199,7 @@ void PlayScreen::DevTools(ScreenContext&) {
         if (!points.empty() && ImGui::BeginCombo("point", label(points[std::size_t(devPoint_)]).c_str())) {
             for (std::size_t i = 0; i < points.size(); ++i) {
                 const assets::TeleportPoint& p = points[i];
-                if (!p.HasArrival() || (p.region & 0x8000) != 0) continue;
+                if (!p.HasArrival()) continue;
                 const std::string text = label(p);
                 if (!matches(text, devFilter_)) continue;
                 if (ImGui::Selectable(text.c_str(), int(i) == devPoint_)) devPoint_ = int(i);
