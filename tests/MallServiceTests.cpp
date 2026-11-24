@@ -533,7 +533,12 @@ TEST_CASE("Mall services: a magic cube filled with its kind of elixir to its lim
     CHECK(moved.changed[0].item == kElixir);
     CHECK(Next<proto::CubeContents>(p).items.size() == 1);
     CHECK(Answer(p).code == 0);
-    for (int i = 0; i < 100; ++i) s.game.Poll(2ms);
+    // Its rows written (waited for, as above: 100 polls could return in under 0.2 s on a loaded machine).
+    const auto bagHolds = [&] {
+        return t.Db().Query("SELECT count(*) FROM _inventory v JOIN _items i ON i.id64 = v.itemid WHERE v.charid = $1 AND i.refitemid = $2", {p.character, std::int64_t(kElixir)})
+            .Int(0, 0);
+    };
+    for (int i = 0; i < 2500 && (t.Db().Query("SELECT count(*) FROM _inventoryforlinkedstorage").Int(0, 0) != 1 || bagHolds() != 2); ++i) s.game.Poll(2ms);
     CHECK(t.Db().Query("SELECT count(*) FROM _inventoryforlinkedstorage").Int(0, 0) == 1);
     CHECK(t.Db().Query("SELECT count(*) FROM _inventory v JOIN _items i ON i.id64 = v.itemid WHERE v.charid = $1 AND i.refitemid = $2", {p.character, std::int64_t(kElixir)})
               .Int(0, 0) == 2);
