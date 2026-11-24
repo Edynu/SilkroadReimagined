@@ -205,6 +205,11 @@ void Alchemy::Strengthen(std::uint32_t entity, const proto::AlchemyStrengthen& m
     const assets::ItemRow* materialRow = items->Find(material->refId);
     const assets::ItemRow* powderRow = powder != nullptr ? items->Find(powder->refId) : nullptr;
     if (targetRow == nullptr || materialRow == nullptr || (powder != nullptr && powderRow == nullptr)) return Refuse(entity, op, alchemy::code::kNothing, m.target);
+    // Every item put in that is a rental must be within its period (0x5410).
+    const std::int64_t unixNow = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    for (const game::ItemInstance* put : {item, material, powder}) {
+        if (put != nullptr && put->rentUntil != 0 && put->rentUntil <= unixNow) return Refuse(entity, op, alchemy::code::kNotMaterial, m.target);
+    }
     std::uint16_t code = 0;
     switch (alchemy::KindOf(*materialRow)) {
     case alchemy::Kind::Elixir: code = alchemy::CheckReinforce(*targetRow, *item, *materialRow, powderRow); break;

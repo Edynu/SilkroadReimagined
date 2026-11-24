@@ -15,8 +15,9 @@ bool IsProtection(std::string_view name) {
     return name == "MATTR_ATHANASIA" || name == "MATTR_LUCK" || name == "MATTR_SOLID" || name == "MATTR_ASTRAL" || name == "MATTR_APE";
 }
 // Options assimilation never re-rolls (3.2): the protections, the durability's and the honor items' Repair.
+// (NOT_REPARABLE is re-rolled: its value kind gives 0, written as 1.)
 bool NeverRerolled(std::string_view name) {
-    return IsProtection(name) || name == "MATTR_DEC_MAXDUR" || name == "MATTR_NOT_REPARABLE" || name == "MATTR_REPAIR";
+    return IsProtection(name) || name == "MATTR_DEC_MAXDUR" || name == "MATTR_REPAIR";
 }
 
 const assets::MagicOptionRow* RowOf(const Options& options, const ItemInstance::Option& o) { return FindOption(options, o.id); }
@@ -94,8 +95,9 @@ bool StoneRoll(const assets::ItemRow& stone, int bonus, std::mt19937& random, in
 
 // A stone's assimilation (3.2): when its rate beats rand() % 101, an APE charge stops it; else a white field (not
 // the one just set) or an option (a magic stone: the first; an attribute stone: the one picked) takes a new value.
+// `optionsBefore`: whether the item had options before the stone (a magic stone's option re-roll is only then).
 void Assimilate(const assets::ItemRow& target, ItemInstance& item, int rate, int setField, bool magicStone, const Options& options,
-                std::mt19937& random, StoneResult& r) {
+                std::mt19937& random, StoneResult& r, bool optionsBefore = true) {
     if (rate <= Below(random, 101)) return;
     if (UseCharge(item, options, "MATTR_APE")) {
         r.apeUsed = true;
@@ -113,14 +115,20 @@ void Assimilate(const assets::ItemRow& target, ItemInstance& item, int rate, int
         r.whiteField = pick;
         return;
     }
-    if (item.options.empty()) return;
+    if (item.options.empty() || (magicStone && !optionsBefore)) return;
+    // At its options' capacity the original changes nothing ('MagOptCount is Max!').
+    if (int(item.options.size()) >= OptionCapacity(target, item, options)) return;
     const int index = magicStone ? 0 : pick - white;
     if (index < 0 || index >= int(item.options.size())) return;
     const assets::MagicOptionRow* row = RowOf(options, item.options[std::size_t(index)]);
     if (row == nullptr || NeverRerolled(row->optionName)) return;
-    const std::vector<std::uint32_t> values = OptionValues(options, row->optionName, row->degree);
-    if (values.empty()) return;
-    item.options[std::size_t(index)].value = std::clamp<std::uint32_t>(values[std::size_t(Below(random, int(values.size())))], 1, 1700);
+    if (row->optionName == "MATTR_NOT_REPARABLE") {
+        item.options[std::size_t(index)].value = 1; // its value kind gives 0, held to 1
+    } else {
+        const std::vector<std::uint32_t> values = OptionValues(options, row->optionName, row->degree);
+        if (values.empty()) return;
+        item.options[std::size_t(index)].value = std::clamp<std::uint32_t>(values[std::size_t(Below(random, int(values.size())))], 1, 1700);
+    }
     r.assimilated = true;
     r.optionIndex = index;
 }
@@ -432,7 +440,8 @@ StoneResult ApplyMagicStone(const assets::ItemRow& target, ItemInstance& item, c
     r.option = stone.paramTexts[0];
     if (!StoneRoll(stone, bonus, random, r.chance)) return r;
     r.success = true;
-    Assimilate(target, item, stoneItem.plus, -1, true, options, random, r);
+    // The stone's option written first, then the assimilation over the item as it is now (the original's order).
+    const bool optionsBefore = !item.options.empty();
     const int at = OptionIndex(item, options, r.option);
     if (IsProtection(r.option) || r.option == "MATTR_REPAIR") {
         // A charge more, at most 6 (Repair 7).
@@ -461,6 +470,7 @@ StoneResult ApplyMagicStone(const assets::ItemRow& target, ItemInstance& item, c
     } else {
         r.code = code::kChargesFull;
     }
+    Assimilate(target, item, stoneItem.plus, -1, true, options, random, r, optionsBefore);
     return r;
 }
 
