@@ -72,6 +72,12 @@ bool LoadInstanceEntries(Database& db, std::int64_t character, std::vector<Insta
     return true;
 }
 
+bool ClearInstanceEntries(Database& db, std::string& error) {
+    const QueryResult r = db.Query("TRUNCATE TABLE _charinstanceworlddata");
+    if (!r.Ok()) error = r.Error();
+    return r.Ok();
+}
+
 bool SaveInstanceEntry(Database& db, std::int64_t character, const InstanceEntry& e, std::string& error) {
     // One transaction, as the original's _CharInstanceWorldDataUpdate: an active entry makes the character's others
     // inactive, then this world's row is written (at most one active entry a character).

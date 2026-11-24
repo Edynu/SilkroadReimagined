@@ -744,4 +744,7 @@ TEST_CASE("Forgotten World: an entry saved active leaves the character's others 
     REQUIRE_MESSAGE(server::SaveInstanceEntry(t.Db(), 1, second, error), error);
     CHECK(active(1).Int(0, 0) == 0);
     CHECK(t.Db().Query("SELECT count(*) FROM _charinstanceworlddata WHERE charid = 1").Int(0, 0) == 2);
+    // The shard's start empties them all (the original's _GameWorldInitialize).
+    REQUIRE_MESSAGE(server::ClearInstanceEntries(t.Db(), error), error);
+    CHECK(t.Db().Query("SELECT count(*) FROM _charinstanceworlddata").Int(0, 0) == 0);
 }

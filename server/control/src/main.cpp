@@ -20,6 +20,7 @@
 #include "sr/core/Log.h"
 #include "sr/server/Database.h"
 #include "sr/server/GatewayServer.h"
+#include "sr/server/InstanceStore.h"
 #include "sr/server/LoginServer.h"
 #include "sr/server/Program.h"
 #include "sr/server/ShardLayout.h"
@@ -136,6 +137,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // The shard starts: its characters' instance entries emptied, as the original's shard manager does at its start
+    // (_GameWorldInitialize): the instances lived in the game servers' memory, the day's counts begin again.
+    {
+        const std::string shard = c.GetString("shard-schema", server::kDefaultShardSchema);
+        auto db = server::Database::Connect(server::WithSearchPath(options.databaseUrl, shard + ", " + server::kAccountSchema), error);
+        if (!db || !server::ClearInstanceEntries(*db, error)) {
+            core::LogWarning("SroControl: the instance entries were not emptied: {}", error);
+            error.clear();
+        } else {
+            core::LogInfo("SroControl: the characters' instance entries emptied (the shard's start)");
+        }
+    }
     core::JobSystem jobs(c.GetInt("workers", core::JobSystem::kDefaultWorkers));
     server::GatewayConfig gatewayConfig;
     gatewayConfig.databaseUrl = options.databaseUrl;

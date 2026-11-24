@@ -46,5 +46,8 @@ bool AddCollectionBookEntry(Database& db, std::int64_t character, const BookEntr
 bool LoadInstanceEntries(Database& db, std::int64_t character, std::vector<InstanceEntry>& out, std::string& error);
 // Made or replaced (a row per character and world).
 bool SaveInstanceEntry(Database& db, std::int64_t character, const InstanceEntry& entry, std::string& error);
+// Every character's entries emptied: the shard's start (the original's shard manager runs _GameWorldInitialize, which
+// truncates _CharInstanceWorldData, when it starts): the day's counts and the free re-entries begin again.
+bool ClearInstanceEntries(Database& db, std::string& error);
 
 } // namespace sr::server
