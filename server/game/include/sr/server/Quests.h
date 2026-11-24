@@ -231,6 +231,8 @@ public:
         return false;
     }
     virtual void QuestWorldLeave(std::uint32_t player) { (void)player; }
+    // A quest's scene played on the player's client (proto::QuestScene: its script\q_script\NAME.txt).
+    virtual void QuestScene(std::uint32_t player, const std::string& name) { (void)player, (void)name; }
     // A player taken into a layer at `at` (a trial's start, _RefInstance_World_Start_Pos; false: not taken).
     virtual bool QuestWorldEnterAt(std::uint32_t player, std::uint32_t layer, const game::proto::WorldPosition& at) {
         (void)at;
@@ -418,8 +420,8 @@ private:
     struct TrialRun {
         std::uint32_t quest = 0, player = 0, layer = 0;
         const game::QuestDef::Trial* spec = nullptr;
-        enum class Phase : std::uint8_t { Waiting, Fighting, Ending } phase = Phase::Waiting;
-        Clock::time_point next;    // Waiting: the boss's coming; Ending: everyone out
+        enum class Phase : std::uint8_t { Waiting, Fighting, Scene, Ending } phase = Phase::Waiting;
+        Clock::time_point next;    // Waiting: the boss's coming; Scene: its end; Ending: everyone out
         Clock::time_point ends;    // Fighting: the time's end
         Clock::time_point nextAdd; // Fighting: the next add (before the first warning)
         std::size_t boss = SIZE_MAX;

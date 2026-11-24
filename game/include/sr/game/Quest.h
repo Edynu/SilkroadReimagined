@@ -475,6 +475,10 @@ struct QuestDef {
         };
         std::optional<Adds> adds;
         std::string take, give;
+        // A scene instead of a boss (the White Viper chain: SR_GameServer's CQNO_TQ_BAEKRYOUNG_10, 13..16): the client's
+        // script\q_script\NAME.txt played on entry; `sceneSeconds` later the quest's goals are met and the player goes out.
+        std::string scene;
+        std::uint32_t sceneSeconds = 0;
         bool operator==(const Trial&) const = default;
     };
     std::optional<Trial> trial;

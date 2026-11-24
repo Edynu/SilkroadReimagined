@@ -71,7 +71,8 @@ struct TrialHost : server::QuestHost {
     std::map<std::uint32_t, Player> others;
     std::map<std::uint32_t, std::uint32_t> layers;
     std::map<std::string, std::uint32_t> bag;
-    std::map<std::uint32_t, std::string> npcs{{7, "NPC_CH_GENARAL"}, {8, "NPC_CH_SHAMAN"}, {9, "NPC_EU_GENERAL"}};
+    std::map<std::uint32_t, std::string> npcs{{7, "NPC_CH_GENARAL"}, {8, "NPC_CH_SHAMAN"}, {9, "NPC_EU_GENERAL"}, {10, "NPC_CH_GENARAL_SP"}};
+    std::vector<std::pair<std::uint32_t, std::string>> scenes;
     std::vector<std::pair<std::uint32_t, std::string>> told;
     std::vector<std::pair<proto::MessageId, std::vector<std::byte>>> sent;
     bool transport = false, master = true, freePlace = true;
@@ -138,6 +139,7 @@ struct TrialHost : server::QuestHost {
         return true;
     }
     void QuestWorldLeave(std::uint32_t entity) override { layers[entity] = 0; }
+    void QuestScene(std::uint32_t entity, const std::string& name) override { scenes.push_back({entity, name}); }
     struct Way {
         proto::WorldPosition at;
         std::optional<proto::WorldPosition> to;
@@ -388,6 +390,57 @@ TEST_CASE("Quest trial: the general's row sends the player into its arena; the g
         quests.Tick(start + 20s);
         CHECK(host.layers[1] == 0);
         CHECK(quests.Trials().empty());
+    }
+}
+
+TEST_CASE("Quest trial: BAEKRYOUNG_10's secret door: alone into the White Viper's passage, ShinMoo's scene, its talk met after 39 s, out (a made-up host)") {
+    const auto coded = Coded();
+    TrialHost host;
+    host.who.position = {proto::WorldPosition{25000, 100.0f, 0.0f, 100.0f, 0}};
+    server::Quests quests(host, {});
+    quests.Load(Numbered(coded));
+    const game::QuestDef* q = quests.Find("QNO_TQ_BAEKRYOUNG_10");
+    REQUIRE(q != nullptr);
+    REQUIRE(q->trial);
+    CHECK(q->trial->scene == "qno_tq_baekryoung_10");
+    CHECK(q->trial->sceneSeconds == 39);
+    game::QuestDef again;
+    std::string error;
+    REQUIRE_MESSAGE(game::ParseQuest(game::WriteQuest(*q), again, error), error); // its line read back
+    CHECK(again.trial == q->trial);
+    quests.Enter(1, {Record(q->id, proto::QuestStatus::Achieving)});
+    // Under way: Leebaek's "I will open the secret door now" and the row.
+    REQUIRE(Ask(quests, proto::QuestTalk{10, q->id}));
+    CHECK(host.Last<proto::QuestSays>().moment == "trial");
+    REQUIRE(Ask(quests, proto::QuestHandIn{10, q->id, {}}));
+    REQUIRE(quests.Trials().size() == 1);
+    const std::uint32_t layer = quests.Trials()[0].second;
+    REQUIRE(host.enteredAt);
+    CHECK(host.enteredAt->region == 0x8003);
+    CHECK(host.enteredAt->x == 187.0f);
+    const auto start = std::chrono::steady_clock::now();
+
+    SUBCASE("the scene played; 39 s on its talk is met and the player out; Leebaek's done talk") {
+        quests.Tick(start);
+        REQUIRE(host.scenes.size() == 1);
+        CHECK(host.scenes[0] == std::pair<std::uint32_t, std::string>{1u, "qno_tq_baekryoung_10"});
+        quests.Tick(start + 38s);
+        CHECK(host.layers[1] == layer);
+        CHECK(quests.Record(1, q->id)->status == proto::QuestStatus::Achieving);
+        quests.Tick(start + 40s);
+        CHECK(quests.Record(1, q->id)->status == proto::QuestStatus::Achieved);
+        CHECK(host.layers[1] == 0);
+        CHECK(quests.Trials().empty());
+        REQUIRE(Ask(quests, proto::QuestTalk{10, q->id}));
+        CHECK(host.Last<proto::QuestSays>().moment == "done");
+    }
+    SUBCASE("left before its end: nothing met") {
+        quests.Tick(start);
+        host.layers[1] = 0; // a return scroll, out of the game
+        quests.Tick(start + 10s);
+        CHECK(quests.Trials().empty());
+        quests.Tick(start + 40s);
+        CHECK(quests.Record(1, q->id)->status == proto::QuestStatus::Achieving);
     }
 }
 

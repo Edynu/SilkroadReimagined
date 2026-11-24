@@ -180,7 +180,7 @@ std::string UseLine(const QuestDef::UseRule& u) {
 
 // trial WORLD at NPC row TEXT start REGION X Y Z [refuse TEXT] [no-job] after S boss MOB REGION X Y Z radius A B minutes M
 // [warn M TEXT]... [adds MOB REGION X Y Z radius A B every S] [pass-on-time] [passed TEXT] [lost TEXT] [berserk] [take ITEM]
-// [give ITEM] [failed TEXT] [out S]
+// [give ITEM] [failed TEXT] [out S]; or, instead of the boss's parts, scene NAME S
 std::string TrialLine(const QuestDef::Trial& t) {
     const auto place = [](const QuestDef::UseRule::Place& p) {
         return std::format("{} {} {} {}", static_cast<std::int16_t>(p.region), Number(p.x), Number(p.y), Number(p.z));
@@ -188,7 +188,8 @@ std::string TrialLine(const QuestDef::Trial& t) {
     std::string s = std::format("trial {} at {} row {} start {}", t.world, t.npc, Text(t.row), place(t.start));
     if (!t.refuse.Empty()) s += " refuse " + Text(t.refuse);
     if (t.noJob) s += " no-job";
-    s += std::format(" after {} boss {} {} radius {} {} minutes {}", t.after, t.boss, place(t.bossAt), Number(t.near), Number(t.far), t.minutes);
+    if (!t.scene.empty()) s += std::format(" scene {} {}", t.scene, t.sceneSeconds);
+    if (!t.boss.empty()) s += std::format(" after {} boss {} {} radius {} {} minutes {}", t.after, t.boss, place(t.bossAt), Number(t.near), Number(t.far), t.minutes);
     for (const auto& [minutes, text] : t.warnings) s += std::format(" warn {} {}", minutes, Text(text));
     if (t.adds) s += std::format(" adds {} {} radius {} {} every {}", t.adds->monster, place(t.adds->at), Number(t.adds->near), Number(t.adds->far), t.adds->every);
     if (t.passOnTime) s += " pass-on-time";
@@ -929,12 +930,14 @@ bool ParseTrial(Reader& r, QuestDef& q) {
         else if (what == "give") ok = r.Word(t.give, "the item given");
         else if (what == "failed") ok = r.Text(t.failed, "what is said when failed");
         else if (what == "out") ok = r.Integer(t.out, "the seconds before all go out");
+        else if (what == "scene") ok = r.Word(t.scene, "the scene's script") && r.Integer(t.sceneSeconds, "the scene's seconds");
         else ok = r.Fail(std::format("'{}' is no part of 'trial' (at, row, start, refuse, no-job, after, boss, minutes, warn, adds, pass-on-time, "
-                                     "passed, lost, berserk, take, give, failed, out)",
+                                     "passed, lost, berserk, take, give, failed, out, scene)",
                                      what));
         if (!ok) return false;
     }
-    if (t.npc.empty() || !boss) return r.Fail("a trial names its NPC ('at NPC') and its boss ('boss MOB REGION X Y Z radius A B')");
+    if (t.npc.empty() || boss == !t.scene.empty())
+        return r.Fail("a trial names its NPC ('at NPC') and either its boss ('boss MOB REGION X Y Z radius A B') or its scene ('scene NAME S')");
     if (t.near > t.far) return r.Fail("the boss's 'radius A B' takes A <= B");
     q.trial = std::move(t);
     return true;

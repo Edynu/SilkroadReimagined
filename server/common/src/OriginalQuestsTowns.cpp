@@ -240,6 +240,29 @@ talk NPC_CA_WAREHOUSE greeting @SN_NPC_CA_WAREHOUSE_QS
 talk NPC_CA_WAREHOUSE done-now @SN_TALK_QNO_CA_WAREHOUSE_4_07
 talk NPC_CA_WAREHOUSE offer-again @SN_TALK_QNO_CA_WAREHOUSE_4_02
 
+# QNO_TQ_BAEKRYOUNG_10 ("In Search of the White Viper"; SR_GameServer's own class). Under way, Leebaek opens the secret door
+# (_15 with the row _03): alone into INS_QNO_TQ_BAEKRYEONG_10 (the 5th floor by the Flame Master's place, its start
+# _RefInstance_World_Start_Pos 19), where the client plays its scene (qno_tq_baekryoung_10: ShinMoo, the Man of Flames,
+# defeats the player); 39 s on the talk with ShinMoo is met and the player goes out (leaving before undoes it; ShinMoo is
+# the scene's own, no NPC row). Back at Leebaek: _09, _11, _13 (the player's rows _10, _12 our Next), then the pay.
+quest QNO_TQ_BAEKRYOUNG_10
+start level 88-
+start after all QNO_TQ_BAEKRYOUNG_9
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP
+finish NPC_CH_GENARAL_SP
+goal talk NPC_CH_SINMU text @SN_CON_QNO_TQ_BAEKRYOUNG_10_01
+trial INS_QNO_TQ_BAEKRYEONG_10 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_10_03 start -32765 187 -30 -954 scene qno_tq_baekryoung_10 39
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_10_01
+talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_10_02
+talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_10_04
+talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_10_15
+talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_09
+talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_11
+talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_13
+
 quest QNO_TQ_BAEKRYOUNG_11
 start level 88-
 start after all QNO_TQ_BAEKRYOUNG_10

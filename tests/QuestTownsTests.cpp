@@ -113,13 +113,19 @@ TEST_CASE("Coded quests (towns): every NPC, monster, item and text they name is 
             for (const auto& s : g.sources) object(s.monster);
             if (!g.item.empty()) item(g.item);
             for (const auto& i : g.items) item(i.item);
-            if (!g.npc.empty()) object(g.npc);
+            // A scene's talk goal names the scene's own person (BAEKRYOUNG_10's NPC_CH_SINMU: no NPC row of its own).
+            const bool sceneTalk = q.trial && !q.trial->scene.empty() && g.kind == game::QuestGoalKind::Talk;
+            if (!g.npc.empty() && !sceneTalk) object(g.npc);
             text(g.talk);
             text(g.text);
         }
         for (const game::QuestTalk& t : q.talks) {
             object(t.npc);
             text(t.text);
+        }
+        if (q.trial && !q.trial->scene.empty()) {
+            CAPTURE(q.trial->scene);
+            CHECK(fs.Exists("script\\q_script\\" + q.trial->scene + ".txt")); // the client's scene script
         }
     }
 }

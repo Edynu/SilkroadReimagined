@@ -4943,6 +4943,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void QuestWorldLeave(std::uint32_t entity) override {
         if (instances) instances->ExitSiege(entity);
     }
+    void QuestScene(std::uint32_t entity, const std::string& name) override {
+        if (Peer* peer = peers->Find(world->PeerOf(entity))) SendMessage(*peer->connection, proto::QuestScene{name});
+    }
     // A quest's way out: the runtime teleport (INS_QUEST_TELEPORT) in the instance's layer, facing a random way, out to `to`
     // or back where its user came in.
     std::uint32_t QuestWayOut(const proto::WorldPosition& at, const std::optional<proto::WorldPosition>& to) override {

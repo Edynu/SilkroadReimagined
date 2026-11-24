@@ -2311,9 +2311,11 @@ void Quests::TrialPassed(std::uint32_t entity, const QuestDef& q) {
     if (p == nullptr) return;
     const auto it = p->records.find(q.id);
     if (it == p->records.end() || !UnderWay(it->second)) return;
-    // The quest's state 8: its goals met; ours its kill goals at their count.
+    // The quest's state 8: its goals met; ours its kill goals at their count (a scene's: its talks too, its NPC inside).
     for (std::size_t i = 0; i < q.goals.size() && i < it->second.progress.size(); ++i) {
-        if (q.goals[i].kind == QuestGoalKind::Kill) it->second.progress[i] = std::uint16_t(Need(q.goals[i]));
+        if (q.goals[i].kind == QuestGoalKind::Kill || (q.trial && !q.trial->scene.empty() && q.goals[i].kind == QuestGoalKind::Talk)) {
+            it->second.progress[i] = std::uint16_t(Need(q.goals[i]));
+        }
     }
     Evaluate(entity, q, it->second);
     Changed(entity, *p, q, it->second);
@@ -2346,6 +2348,14 @@ void Quests::TickTrials(Clock::time_point now) {
         if (who->position.layer != run.layer) continue; // on its way in
         switch (run.phase) {
         case TrialRun::Phase::Waiting: {
+            if (!t.scene.empty()) {
+                // A scene (CQNO_TQ_BAEKRYOUNG_10's update: step 0 the script played, step 1 until 39 s have passed, step 2
+                // the talk with its NPC done for everyone inside and the instance closed).
+                host_.QuestScene(run.player, t.scene);
+                run.phase = TrialRun::Phase::Scene;
+                run.next = now + std::chrono::seconds(t.sceneSeconds);
+                break;
+            }
             if (now < run.next) break;
             // Step 1 (Elapsed 10000 / 12000 ms): the boss at its place within its radius, the gauge, the soldiers from now on.
             const auto nest = host_.QuestSpawn(run.player, t.boss, Around(t.bossAt, game::QuestSpawnOffset(t.near, t.far, random_), run.layer));
@@ -2417,6 +2427,11 @@ void Quests::TickTrials(Clock::time_point now) {
             }
             break;
         }
+        case TrialRun::Phase::Scene:
+            if (now < run.next) break;
+            TrialPassed(run.player, *q);
+            close();
+            break;
         case TrialRun::Phase::Ending:
             if (now >= run.next) close();
             break;
