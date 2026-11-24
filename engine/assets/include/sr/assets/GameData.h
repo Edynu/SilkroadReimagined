@@ -390,7 +390,8 @@ struct SkillRow {
     std::uint32_t overlap = 0;   // col 18 (Action_Overlap) whole: four bytes, a buff's overlap groups (game::OverlapGroups)
     int autoAttack = 0;          // col 19 (Action_AutoAttackType): 1 the basic attack follows it on its target, else the fight ends
     int range = 0;               // col 21, Action_Range (in units, as positions; 0: the weapon's)
-    int aiType = 0;              // col 67 (AI_SkillType): 72 'H' a heal that makes threat
+    int aiType = 0;              // col 67 (AI_SkillType): 72 'H' a heal that makes threat, 68 'D' a death skill, 83 'S' on appearing
+    int aiChance = 0;            // col 66 (AI_AttackChance): a monster's weight for it (0: never)
     bool targetRequired = false; // col 22
     bool targetBuilding = false; // col 25: may be used on a fortress's structures (TargetType_Building)
     // Whom it may be cast on (cols 26..33, as the original's _RefSkill names them: TargetGroup_Self,

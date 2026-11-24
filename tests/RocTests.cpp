@@ -142,7 +142,8 @@ TEST_CASE("Roc: the Peak's play, from the gate to the end (game files)") {
     CHECK(world.Where(me)->position.region == 26045);
     CHECK(instances.LayerOf(me) == roc.Layer());
 
-    // The stones stand; one hit: its follower called by its summon (its group: one Devil Shaitan, rarity 8).
+    // The stones stand; one broken: its follower called by its death skill's summon (MSKILL_RM_SEALSTONE_*_ATTACK01 is a
+    // 'D' skill: its group one Wing Tribe Knight or Devil Shaitan, rarity 8).
     std::uint32_t stone = 0;
     REQUIRE(pump([&] {
         proto::WorldPosition arrival{26045, 1027.0f, -41.0f, 822.0f};
@@ -153,10 +154,17 @@ TEST_CASE("Roc: the Peak's play, from the gate to the end (game files)") {
         return stone != 0;
     }));
     const auto summonedBefore = monsters.Alive();
+    const proto::WorldPosition stoneAt = world.Where(stone)->position;
     monsters.Damage(stone, me, 1, server::WorldClock::now());
-    REQUIRE(pump([&] { return monsters.Alive() > summonedBefore; }, 1500));
+    CHECK(monsters.Alive() == summonedBefore); // a hit calls nobody
+    monsters.Damage(stone, me, monsters.Hp(stone), server::WorldClock::now());
+    REQUIRE(pump([&] { return monsters.Alive() >= summonedBefore; }, 1500));
     bool knight = false;
-    for (const std::uint32_t m : monsters.Near(world.Where(stone)->position, 200.0f)) {
+    for (int i = 0; i < 1500 && !knight; ++i) {
+        for (const std::uint32_t m : monsters.Near(stoneAt, 200.0f)) knight |= monsters.RefOf(m) == 24285;
+        if (!knight) pump([] { return false; }, 1);
+    }
+    for (const std::uint32_t m : monsters.Near(stoneAt, 200.0f)) {
         knight |= monsters.RefOf(m) == 24285;
     }
     CHECK(knight);

@@ -69,6 +69,14 @@ struct Monsters::State {
             int band = -1; // the health percent it is used at (-1: unnamed, spaced evenly)
         };
         std::vector<SummonSkill> summons;
+        // Its death skills ('D'): one drawn by their chances when it dies with a killer, cast on him (ours: a summon's
+        // monsters raised; another kind's effect not yet). `chance` its AI_AttackChance.
+        struct DeathSkill {
+            const assets::SkillRow* skill = nullptr;
+            SummonSkill summon;
+            int chance = 0;
+        };
+        std::vector<DeathSkill> deaths;
         // A unique's nest (MonsterNest::hiveMax): its hive, whether the hive's monster is here (in the world, or
         // waiting for the region to wake), and when it may hatch here.
         int hive = -1;
@@ -344,6 +352,8 @@ struct Monsters::State {
             for (std::uint32_t id : row->skills) {
                 const assets::SkillRow* skill = id != 0 ? skills->Find(id) : nullptr;
                 if (skill == nullptr) continue;
+                // An appearance skill ('S', on spawning: ours not cast yet) is never swung.
+                if (skill->aiType == 'S') continue;
                 Nest::SummonSkill summon;
                 assets::ForEachSkillParam(*skill, [&](std::uint32_t tag, std::span<const std::uint32_t> args) {
                     if (tag != assets::SkillTag("ssou")) return;
@@ -354,6 +364,11 @@ struct Monsters::State {
                                                  int(std::clamp<std::uint32_t>(most, 1, 50))});
                     }
                 });
+                // A death skill ('D'): kept for the death, never swung.
+                if (skill->aiType == 'D') {
+                    out.deaths.push_back({skill, std::move(summon), skill->aiChance});
+                    continue;
+                }
                 if (!summon.groups.empty()) {
                     // Its band from its name's end (_80 .. _00).
                     const std::string& code = skill->codename;
@@ -826,6 +841,66 @@ struct Monsters::State {
         if (m.nextSwing < now) m.nextSwing = now + Seconds(Uniform(0.2f, 0.6f));
     }
 
+    // A summon skill's monsters raised about `m` (added at the next update): each on a ring as far as its body and theirs
+    // and 30 more, at a random angle (ours: each its own angle, the original's one a group), or at its own spot (a god's
+    // loot body: the INS_DEFAULT row named after it, linked to the god).
+    void RaiseSummons(const Monster& m, const Nest& nest, const Nest::SummonSkill& skill) {
+        const auto place = world.Where(m.entity);
+        if (!place) return;
+        for (const Nest::Summon& group : skill.groups) {
+            const assets::ObjectRow* row = characters.Find(group.refObjId);
+            const float ring = float(m.stats.bodyRadius) + (row != nullptr ? row->bodyRadius : 0.0f) + 30.0f;
+            const int count = std::uniform_int_distribution<int>(group.fewest, group.most)(random);
+            const auto spot = row != nullptr ? summonPlaces.find(row->codename) : summonPlaces.end();
+            const bool lootBody = row != nullptr && row->codename == nest.row->codename + "_DROP";
+            for (int k = 0; k < count; ++k) {
+                const float angle = Uniform(0.0f, 2.0f * std::numbers::pi_v<float>);
+                const proto::FlatPosition c = proto::ToFlat(place->position);
+                proto::WorldPosition at = spot != summonPlaces.end()
+                                              ? spot->second
+                                              : proto::FromFlat({c.x + double(std::cos(angle) * ring), c.z + double(std::sin(angle) * ring)}, place->position.y);
+                at.layer = place->position.layer;
+                MonsterNest raised;
+                raised.refObjId = group.refObjId;
+                raised.rarity = group.rarity;
+                raised.position = at;
+                raised.spawnRadius = 0.0f;
+                raised.radius = 300.0f;
+                raised.maxCount = 1;
+                raised.aggressive = true;
+                raised.sight = 300.0f;
+                raised.respawn = false;
+                raised.temporary = true;
+                if (lootBody) raised.linkTo = m.entity;
+                summons.push_back(raised);
+            }
+        }
+    }
+    // Its attack for this swing: drawn by weight, each its AI_AttackChance (0: never) and half of how far the target stands
+    // inside its reach ((range + its body + the target's - distance) x 5 / 10, when positive); r = rand % (sum + 1) on the
+    // running sums. None weighed (ours): one at random.
+    const assets::SkillRow* PickAttack(const Nest& nest, const Monster& m, float distance) {
+        std::vector<int> weights;
+        int sum = 0;
+        for (const assets::SkillRow* s : nest.attacks) {
+            int w = 0;
+            if (s->aiChance > 0) {
+                const float inside = float(std::max(s->range, 10)) + m.stats.bodyRadius + kPlayerRadius - distance;
+                w = s->aiChance + (inside > 0.0f ? int(inside) * 5 / 10 : 0);
+            }
+            weights.push_back(w);
+            sum += w;
+        }
+        if (sum <= 0) return nest.attacks[std::size_t(std::uniform_int_distribution<int>(0, int(nest.attacks.size()) - 1)(random))];
+        const int r = std::uniform_int_distribution<int>(0, sum)(random);
+        int running = 0;
+        for (std::size_t i = 0; i < weights.size(); ++i) {
+            running += weights[i];
+            if (weights[i] > 0 && r <= running) return nest.attacks[i];
+        }
+        return nest.attacks.back();
+    }
+
     void GoHome(Monster& m, Clock::time_point now, Events& out) {
         m.mode = Mode::Home;
         m.target = 0;
@@ -883,8 +958,8 @@ struct Monsters::State {
         }
         // Feared by its target, or confused: it drops the fight where it stands.
         if (m.states.Idles(m.target)) return DropFight(m, now);
-        // The skill it uses next: one of its attacks at random; myopia shortens its reach.
-        const assets::SkillRow* skill = nest.attacks[std::size_t(std::uniform_int_distribution<int>(0, int(nest.attacks.size()) - 1)(random))];
+        // The skill it uses next: drawn by its attacks' weights (PickAttack); myopia shortens its reach.
+        const assets::SkillRow* skill = PickAttack(nest, m, distance);
         const float reach = (float(std::max(skill->range, 10)) + m.stats.bodyRadius + kPlayerRadius) * float(m.states.ReachPercent()) / 100.0f;
         // A swing begun is played out where it stands (as a player's, K10); then the chase goes on
         // (the user's report 2026-11-14: chasers broke off their swings to run, a stutter).
@@ -1040,37 +1115,7 @@ struct Monsters::State {
             const Nest::SummonSkill& skill = nest.summons[i];
             if (!onlySummons && std::uint64_t(after) * 100 > std::uint64_t(m.stats.maxHp) * std::uint64_t(skill.band)) continue;
             m.summoned |= 1u << i;
-            const auto place = world.Where(m.entity);
-            if (!place) continue;
-            for (const Nest::Summon& group : skill.groups) {
-                const assets::ObjectRow* row = characters.Find(group.refObjId);
-                const float ring = float(m.stats.bodyRadius) + (row != nullptr ? row->bodyRadius : 0.0f) + 30.0f;
-                const int count = std::uniform_int_distribution<int>(group.fewest, group.most)(random);
-                // Its own spot (a god's loot body: the INS_DEFAULT row named after it), else the ring.
-                const auto spot = row != nullptr ? summonPlaces.find(row->codename) : summonPlaces.end();
-                const bool lootBody = row != nullptr && row->codename == nest.row->codename + "_DROP";
-                for (int k = 0; k < count; ++k) {
-                    const float angle = Uniform(0.0f, 2.0f * std::numbers::pi_v<float>);
-                    const proto::FlatPosition c = proto::ToFlat(place->position);
-                    proto::WorldPosition at = spot != summonPlaces.end()
-                                                  ? spot->second
-                                                  : proto::FromFlat({c.x + double(std::cos(angle) * ring), c.z + double(std::sin(angle) * ring)}, place->position.y);
-                    at.layer = place->position.layer;
-                    MonsterNest raised;
-                    raised.refObjId = group.refObjId;
-                    raised.rarity = group.rarity;
-                    raised.position = at;
-                    raised.spawnRadius = 0.0f;
-                    raised.radius = 300.0f;
-                    raised.maxCount = 1;
-                    raised.aggressive = true;
-                    raised.sight = 300.0f;
-                    raised.respawn = false;
-                    raised.temporary = true;
-                    if (lootBody) raised.linkTo = m.entity;
-                    summons.push_back(raised);
-                }
-            }
+            RaiseSummons(m, nest, skill);
         }
         const std::uint64_t taken = std::min<std::uint64_t>(damage, m.hp);
         auto by = std::find_if(m.damageBy.begin(), m.damageBy.end(), [&](const auto& d) { return d.first == attacker; });
@@ -1081,6 +1126,18 @@ struct Monsters::State {
         world.SetHp(m.entity, m.hp);
         if (m.hp != 0) return result;
         result.killed = true;
+        // Killed by someone: one of its death skills drawn by the running sum of their chances against a roll of 0..100
+        // (a chance of 0 at once), cast on the killer: a summon's monsters come now (ours: another kind's effect not yet).
+        if (attacker != 0 && !nest.deaths.empty()) {
+            const double roll = double(std::uniform_int_distribution<int>(0, 32767)(random)) / 32767.0 * 100.0;
+            double running = 0.0;
+            for (const Nest::DeathSkill& d : nest.deaths) {
+                running += double(d.chance);
+                if (d.chance != 0 && roll >= running) continue;
+                if (!d.summon.groups.empty()) RaiseSummons(m, nest, d.summon);
+                break;
+            }
+        }
         result.damageBy = std::move(m.damageBy);
         m.damageBy.clear();
         m.mode = Mode::Dead;

@@ -707,6 +707,7 @@ bool DecodeSkillRows(std::string_view text, std::vector<SkillRow>& out, std::str
         row.cooldownGroup = static_cast<int>((row.overlap >> 24) & 0xFF);
         row.range = Int(c[21]);
         if (c.size() > 67) row.aiType = Int(c[67]);
+        if (c.size() > 66) row.aiChance = Int(c[66]);
         row.targetRequired = Int(c[22]) != 0;
         row.targetBuilding = Int(c[25]) != 0;
         row.targetSelf = Int(c[26]) != 0;
