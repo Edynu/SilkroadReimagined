@@ -365,9 +365,10 @@ TEST_CASE("Game server: a time ticket: one of a kind, told, kept over a relog, i
         if (Find(told, game::openmarket::kTicketCategory) != nullptr) break;
     }
     CHECK(Find(told, game::openmarket::kTicketCategory)->item == kMarket);
-    // Kept: `_timedjob` holds both in the original's categories.
-    for (int i = 0; i < 100; ++i) s.game.Poll(2ms);
-    CHECK(t.Db().Query("SELECT count(*) FROM _timedjob WHERE charid = $1 AND category IN (3, 9)", {p.character}).Int(0, 0) == 2);
+    // Kept: `_timedjob` holds both in the original's categories (their saves are the writer's: waited for).
+    const auto kept = [&] { return t.Db().Query("SELECT count(*) FROM _timedjob WHERE charid = $1 AND category IN (3, 9)", {p.character}).Int(0, 0); };
+    for (int i = 0; i < 2500 && kept() != 2; ++i) s.game.Poll(2ms);
+    CHECK(kept() == 2);
     auto again = s.Relog(p);
     told = Services(again);
     CHECK(Find(told, game::kTimedGoldSilver) != nullptr);
