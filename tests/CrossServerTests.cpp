@@ -2119,7 +2119,11 @@ TEST_CASE("A split world: the Academy: founded at 60 for 100,000 gold, an appren
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);
     SplitWorld split(t);
-    Pair pair(t, &split, [](server::GameServerConfig& c) { c.devCommands = true; });
+    constexpr std::uint32_t kKeeperRef = 2013; // NPC_CH_WAREHOUSE_M: a storage keeper (function 3)
+    Pair pair(t, &split, [](server::GameServerConfig& c) {
+        c.devCommands = true;
+        c.npcs.push_back({kKeeperRef, "NPC_CH_WAREHOUSE_M", {kEast, 1000.0f, 0.0f, 1005.0f}, 0.0f});
+    });
     const auto make = [&](const char* name, int level, std::uint64_t gold) {
         Player p = pair.a.Join(name, level, false);
         Stand(t, p, kEast);
@@ -2133,10 +2137,16 @@ TEST_CASE("A split world: the Academy: founded at 60 for 100,000 gold, an appren
     Player young = make("Young", 59, 250'000);
     const auto refusal = [&](Player& p) { return Until<proto::AcademyRefusal>(p, [](const proto::AcademyRefusal&) { return true; }); };
 
-    // Below level 60: refused (0x6809). Founded: the guardian alone, its grade 7; 100,000 gold paid.
-    young.c->Send(proto::AcademyFound{});
+    const auto keeperOf = [&](Player& p) {
+        return Until<proto::EntityAppeared>(p, [](const proto::EntityAppeared& e) { return e.character.model == kKeeperRef; }).entity;
+    };
+    // Below level 60: refused (0x6809). Asked at no storage keeper: 3. Founded at one: the guardian alone, its grade 7;
+    // 100,000 gold paid.
+    young.c->Send(proto::AcademyFound{keeperOf(young)});
     CHECK(refusal(young).code == game::academy::code::kLevel);
     guard.c->Send(proto::AcademyFound{});
+    CHECK(refusal(guard).code == game::academy::code::kInvalidTarget);
+    guard.c->Send(proto::AcademyFound{keeperOf(guard)});
     const auto founded = Until<proto::AcademyInfo>(guard, [](const proto::AcademyInfo& i) { return i.id != 0; });
     REQUIRE(founded.members.size() == 1);
     CHECK(founded.members[0].memberClass == 0);
@@ -2410,7 +2420,11 @@ TEST_CASE("A split world: the Academy's graduation, notice, ranking, honour buff
         skills->Add(std::move(row));
     }
     split.skills = skills;
-    Pair pair(t, &split, [](server::GameServerConfig& c) { c.devCommands = true; });
+    constexpr std::uint32_t kKeeperRef = 2013; // NPC_CH_WAREHOUSE_M: the founding asks at a storage keeper
+    Pair pair(t, &split, [](server::GameServerConfig& c) {
+        c.devCommands = true;
+        c.npcs.push_back({kKeeperRef, "NPC_CH_WAREHOUSE_M", {kEast, 1000.0f, 0.0f, 1005.0f}, 0.0f});
+    });
     const auto make = [&](const char* name, int level, std::uint64_t gold, bool west) {
         Player p = pair.a.Join(name, level, false);
         Stand(t, p, west ? kWest : kEast);
@@ -2427,7 +2441,7 @@ TEST_CASE("A split world: the Academy's graduation, notice, ranking, honour buff
     Player guard = make("Guard", 60, 250'000, false);
     Player kid = make("Kid", 20, 0, false);
     const auto refusal = [&](Player& p) { return Until<proto::AcademyRefusal>(p, [](const proto::AcademyRefusal&) { return true; }); };
-    guard.c->Send(proto::AcademyFound{});
+    guard.c->Send(proto::AcademyFound{Until<proto::EntityAppeared>(guard, [](const proto::EntityAppeared& e) { return e.character.model == kKeeperRef; }).entity});
     Until<proto::AcademyInfo>(guard, [](const proto::AcademyInfo& i) { return i.id != 0; });
     guard.c->Send(proto::AcademyInvite{kid.entity});
     Until<proto::AcademyAsk>(kid, [](const proto::AcademyAsk&) { return true; });
@@ -2437,6 +2451,13 @@ TEST_CASE("A split world: the Academy's graduation, notice, ranking, honour buff
     // The notice: the guardian's alone; the members told it changed.
     kid.c->Send(proto::AcademyNoticeWrite{"No", "way"});
     CHECK(refusal(kid).code == game::academy::code::kNotGuardian);
+    // Its lengths: 1..128 and 1..2048 bytes, else 0x6817 (the original's; the message itself carries no more).
+    guard.c->Send(proto::AcademyNoticeWrite{"", "Tonight"});
+    CHECK(refusal(guard).code == game::academy::code::kNoText);
+    guard.c->Send(proto::AcademyNoticeWrite{"Hunt", ""});
+    CHECK(refusal(guard).code == game::academy::code::kNoText);
+    guard.c->Send(proto::AcademyNoticeWrite{std::string(128, 'T'), std::string(2048, 'x')});
+    CHECK(Until<proto::AcademyInfo>(kid, [](const proto::AcademyInfo& i) { return i.noticeTitle.size() == 128; }).notice.size() == 2048);
     guard.c->Send(proto::AcademyNoticeWrite{"Hunt", "Tonight at eight"});
     CHECK(Until<proto::AcademyInfo>(kid, [](const proto::AcademyInfo& i) { return i.noticeTitle == "Hunt"; }).notice == "Tonight at eight");
     Until<proto::AcademyNews>(kid, [](const proto::AcademyNews& n) { return n.kind == proto::AcademyNewsKind::NoticeChanged; });

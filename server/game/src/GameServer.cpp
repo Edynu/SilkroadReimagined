@@ -1095,14 +1095,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // _UPDATE_GUILD_N_CHAR_GOLD), in the order the moves were made.
     void MoveStorageGold(Peer& peer, PlayerWorld& player, const proto::StorageGold& g) {
         game::Storage* storage = StorageFor(peer, player, g.guild != 0);
-        if (storage == nullptr || g.amount == 0) return;
+        if (storage == nullptr) return;
         if (g.guild == 0 && (player.storageKeeper == 0 || AtStorageKeeper(player, player.storageKeeper) != proto::GateStatus::Ok)) {
             return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1834}); // UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED
         }
         if (g.guild != 0 && !GuildChestStillHeld(peer, player)) return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1834});
+        // No amount: 0x1829; more than the side it comes from holds: 0x180F (the original's answers; a full receiving side, ours,
+        // stays silent: it cannot come about with 64-bit gold).
+        if (g.amount == 0) return SendMessage(*peer.connection, proto::ItemRefused{0, 0x1829}); // UIIT_MSG_STRGERR_SPECIFY_POSITIVE_NUMBER_ONLY
         std::uint64_t& from = g.deposit ? player.inventory.gold : storage->gold;
         std::uint64_t& to = g.deposit ? storage->gold : player.inventory.gold;
-        if (from < g.amount || to > UINT64_MAX - g.amount) return;
+        if (from < g.amount) return SendMessage(*peer.connection, proto::ItemRefused{0, 0x180F}); // UIIT_MSG_STRGERR_NOT_ENOUGH_GOLD
+        if (to > UINT64_MAX - g.amount) return;
         from -= g.amount;
         to += g.amount;
         if (g.guild == 0) LogGold(player, g.deposit ? logs::ItemOp::GoldToStorage : logs::ItemOp::GoldFromStorage, std::int64_t(g.amount));
@@ -6125,6 +6129,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const proto::FlatPosition a = proto::ToFlat(me->position), b = proto::ToFlat(there->position);
         return std::hypot(a.x - b.x, a.z - b.z) <= config.gateReach;
     }
+    bool AcademyKeeperNear(std::uint32_t entity, std::uint32_t npc) const override {
+        const PlayerWorld* player = PlayerByEntity(entity);
+        return player != nullptr && AtStorageKeeper(*player, npc) == proto::GateStatus::Ok;
+    }
     bool AcademyTextAllowed(std::string_view text) const override { return config.rules->names.ChatAllowed(text); }
     std::optional<proto::WorldPosition> AcademyPositionOf(std::uint32_t entity) const override {
         if (const auto place = world->Where(entity)) return place->position;
@@ -8918,6 +8926,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         PlayerWorld* player = PlayerByEntity(entered.entity);
         Peer* peer = player ? peers->Find(world->PeerOf(entered.entity)) : nullptr;
         if (player == nullptr || peer == nullptr) return;
+        // A rider, or one with a ride or a transport out, is turned back before the link is looked at (the original's notice
+        // 0x300C 0x0C04, UIIT_MSG_COS_CAN_NOT_ENTER_DUNGEON; the links' restriction 2 would refuse it anyway).
+        if (TransportOut(*player) || (coses && coses->MountOf(player->entity) != 0)) {
+            core::LogInfo("{}: {} walked into {}: refused (riding)", config.name, player->name, zone);
+            SendMessage(*peer->connection, proto::CosRefused{"UIIT_MSG_COS_CAN_NOT_ENTER_DUNGEON", {}});
+            return;
+        }
         const assets::TeleportPoint* from = config.teleports->PointNamed(row->second);
         const auto links = from ? config.teleports->LinksFrom(from->id) : std::vector<const assets::TeleportLink*>{};
         if (links.size() != 1) {

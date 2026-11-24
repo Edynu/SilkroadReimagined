@@ -66,6 +66,8 @@ public:
     virtual void AcademyHonorBuffs(std::uint64_t peer, std::uint8_t rank) { (void)peer, (void)rank; }
     // A storage keeper (the ranking's NPC) within reach of the player's entity.
     virtual bool AcademyNpcNear(std::uint32_t entity, std::uint32_t npc) const { (void)entity, (void)npc; return true; }
+    // A storage keeper (NPC function 3) within reach of the player: the academy's founding asks at one.
+    virtual bool AcademyKeeperNear(std::uint32_t entity, std::uint32_t npc) const { (void)entity, (void)npc; return true; }
     // The shard's forbidden words (the notice, the matching's subject).
     virtual bool AcademyTextAllowed(std::string_view text) const { (void)text; return true; }
     // Where a player's entity stands (the members' marks on the world map); nothing when unknown.

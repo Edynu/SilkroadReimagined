@@ -845,8 +845,9 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
         close();
         if (context_.hud != nullptr) {
             HudContext* c = &context_;
-            context_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {context_.Text("UIIT_MSG_TC_TRAININGCAMP_OPEN")}, [c](bool yes) {
-                if (yes && c->academyRequest) c->academyRequest(proto::AcademyFound::kId, proto::Encode(proto::AcademyFound{}));
+            const std::uint32_t keeper = npc_;
+            context_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {context_.Text("UIIT_MSG_TC_TRAININGCAMP_OPEN")}, [c, keeper](bool yes) {
+                if (yes && c->academyRequest) c->academyRequest(proto::AcademyFound::kId, proto::Encode(proto::AcademyFound{keeper}));
             });
         }
         break;

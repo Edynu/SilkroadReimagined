@@ -803,6 +803,13 @@ TEST_CASE("Game server: the storage: an item keeps its id both ways, a split is 
     p.client->Send(proto::StorageGold{false, 1000, 0});
     CHECK(Next<proto::StorageGoldChanged>(p).gold == 2000);
     CHECK(settle([&] { return gold() == std::pair<std::int64_t, std::int64_t>{8000, 2000}; }));
+    // The refusals answered: no amount 0x1829, more than the side holds 0x180F (out of the storage and into it).
+    p.client->Send(proto::StorageGold{true, 0, 0});
+    CHECK(Next<proto::ItemRefused>(p).code == 0x1829);
+    p.client->Send(proto::StorageGold{false, 2001, 0});
+    CHECK(Next<proto::ItemRefused>(p).code == 0x180F);
+    p.client->Send(proto::StorageGold{true, 8001, 0});
+    CHECK(Next<proto::ItemRefused>(p).code == 0x180F);
     // One transaction: a storage that cannot be written leaves the character's gold as it was.
     server::ExchangeSaveSide bag;
     bag.character = p.character;

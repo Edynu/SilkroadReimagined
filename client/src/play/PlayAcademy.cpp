@@ -2,6 +2,7 @@
 // game::AcademyView (the Academy page reads it), their system lines, an invitation's yes/no box
 // (UIIT_STT_TC_JOIN_REQUEST) and the test steps (of --guild) that drive the requests.
 
+#include <cmath>
 #include <cstdlib>
 
 #include "gui/Hud.h"
@@ -66,7 +67,23 @@ bool PlayScreen::AcademyScriptStep(const std::string& verb, const std::string& a
     if (verb == "academy") {
         hud_.OpenPage(hud::kPageAcademy);
     } else if (verb == "academy-found") {
-        send(proto::AcademyFound{});
+        // Asked at the nearest storage keeper in sight (as its row does).
+        std::uint32_t keeper = 0;
+        double nearest = 1e18;
+        if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
+            const proto::FlatPosition me = proto::ToFlat(self->position);
+            for (const auto& [id, e] : view_.Entities()) {
+                if (id == view_.Self() || e.kind != proto::EntityKind::Character) continue;
+                const assets::ObjectRow* row = tables_ && tables_->Usable() ? tables_->characters.Find(e.look.model) : nullptr;
+                if (row == nullptr || row->codename.find("_WAREHOUSE") == std::string::npos) continue;
+                const proto::FlatPosition p = proto::ToFlat(e.position);
+                if (const double d = std::hypot(p.x - me.x, p.z - me.z); d < nearest) {
+                    nearest = d;
+                    keeper = id;
+                }
+            }
+        }
+        send(proto::AcademyFound{keeper});
     } else if (verb == "academy-invite") {
         for (const auto& [id, e] : view_.Entities()) {
             if (e.kind == proto::EntityKind::Character && e.look.name == arg && id != view_.Self()) {

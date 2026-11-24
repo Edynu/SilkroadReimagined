@@ -21,9 +21,12 @@ namespace sr::game::proto {
 constexpr std::size_t kStallSlots = 10;                 // a stall's places (0..9)
 constexpr std::size_t kStallPeople = 8;                 // the member limit, its owner among them (0x3C18)
 constexpr float kStallReach = 100.0f;                   // a visitor's walk-up range
-constexpr std::uint64_t kStallMostPrice = 1000000000;   // a price's range 1..10^9 (0x3C08)
-constexpr std::size_t kStallNameLength = 64;            // ours: the name and the greeting's bytes
-constexpr std::size_t kStallGreetingLength = 256;
+// A price's range (0x3C08 outside it): the original's up to 9,999,999,999, the add's and the reprice's; its 0 passes the
+// server, ours refuses it (a slip in the box would give the item away).
+constexpr std::uint64_t kStallMostPrice = 9999999999ull;
+constexpr std::size_t kStallNameLength = 64;            // the name's bytes, 1..64 (0x3C09; the original's)
+constexpr std::size_t kStallGreetingMost = 64;          // the greeting's bytes (0x3C0A beyond; the original's)
+constexpr std::size_t kStallGreetingLength = 256;       // ours: the greeting's room in a message
 constexpr std::size_t kNetworkPageRows = 15;            // the window's rows a page
 constexpr double kNetworkSearchSeconds = 3.0;           // ours: a new search at most this often (the client: 10 s)
 constexpr std::uint32_t kStallVendorState = 80;         // the owner's clip: animation state 80 (*_vendor01.ban)
@@ -37,13 +40,16 @@ enum class StallCode : std::uint16_t {
     TooFar = 4,              // a visit beyond the original's reach (no text)
     PetSummoned = 0x18B6,    // a pet's summoning item while its pet is out
     Self = 5,                // the owner buying from its own stall (quiet)
-    NotBagItem = 0x3C06,     // not an item of the bag (or one that may not be sold: bound, rented, trade goods)
-    Occupied = 0x3C07,       // the slot holds an item already, or the bag's item is up in another slot
-    BadPrice = 0x3C08,       // a price outside 1..10^9
+    NotBagItem = 0x3C06,     // not an item of the bag (a place below 13, or nothing there)
+    Occupied = 0x3C07,       // the count is not the item's whole stack (the original's; ours always puts the whole stack)
+    BadPrice = 0x3C08,       // a price outside 1..kStallMostPrice
+    BadNameLength = 0x3C09,  // a name empty or longer than kStallNameLength bytes
+    GreetingTooLong = 0x3C0A,// a greeting longer than kStallGreetingMost bytes
     NothingToSell = 0x3C0C,  // opening for business with nothing registered
     Closed = 0x3C0E,         // the stall is closed (or gone)
     NotVisitor = 0x3C0F,     // not a visitor of that stall
-    SlotEmpty = 0x3C10,      // nothing in that slot (any more)
+    SlotEmpty = 0x3C10,      // nothing in that slot (any more), or a slot of 10 or more
+    AlreadyUp = 0x3C13,      // the bag's item is up in a slot already
     NotEnoughGold = 0x3C11,
     BagFull = 0x3C12,
     HostLeft = 0x3C15,       // its owner left the world, died or went away
@@ -52,10 +58,13 @@ enum class StallCode : std::uint16_t {
     Full = 0x3C18,           // the member limit (8)
     OwnerOnly = 0x3C2A,      // the owner may not (visit its own) / only the owner may (close it)
     Modifying = 0x3C2B,      // the stall is being modified (a change only while modifying; a buy while it is)
+    NotTradeable = 0x3C2D,   // an item that may not be traded (CanTrade 0) or trade goods (by transport only)
     NotOpen = 0x3C2E,        // buying while the stall is not open for business
+    NoFreeSlot = 0x3C30,     // the asked slot taken and no other free
     Riding = 0x3C34,
     BadName = 0x3C38,
     Murderer = 0x3C39,
+    PetItem = 0x3C3A,        // a summoned pet's item
     JobSuit = 0x3C3B,
     NetworkFailed = 0x3C41,  // the network: the item is in no network group / the search failed
     TooSoon = 0x3C46,        // the network: a new search within kNetworkSearchSeconds (the client's "scan failed")

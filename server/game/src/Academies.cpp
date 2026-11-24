@@ -590,7 +590,7 @@ struct Academies::State {
 
     // --- The requests --------------------------------------------------------------------------------------------
 
-    void Found(const AcademyActor& a) {
+    void Found(const AcademyActor& a, std::uint32_t npc) {
         Online* o = Find(a.character);
         if (o == nullptr || !o->loaded) return Refuse(a.peer, proto::AcademyFound::kId, code::kFailed);
         if (a.dead) return Refuse(a.peer, proto::AcademyFound::kId, code::kDead);
@@ -598,6 +598,8 @@ struct Academies::State {
         if (a.gold < academy::kFoundGold) return Refuse(a.peer, proto::AcademyFound::kId, code::kGold);
         if (o->academy != 0) return Refuse(a.peer, proto::AcademyFound::kId, code::kOtherAcademy);
         if (const std::int64_t left = WaitLeft(*o, academy::kWaitFound)) return Refuse(a.peer, proto::AcademyFound::kId, code::kFoundWait, left);
+        // Then the NPC it was asked at: a storage keeper within reach (the original's, after the founder's checks), else 3.
+        if (!host.AcademyKeeperNear(a.entity, npc)) return Refuse(a.peer, proto::AcademyFound::kId, code::kInvalidTarget);
         // The academy's rows and the 100,000 in one transaction (the original charges once _TRAINING_CAMP_CREATE has stood).
         ++writes;
         auto made = std::make_shared<std::uint32_t>(0);
@@ -868,10 +870,18 @@ struct Academies::State {
         Online* o = Find(a.character);
         if (o == nullptr) return;
         const proto::MessageId req = proto::AcademyNoticeWrite::kId;
-        if (const std::uint16_t c = GuardianCheck(a, *o)) return Refuse(a.peer, req, c);
-        if (title.size() > academy::kNoticeTitleMax || text.size() > academy::kNoticeTextMax) return Refuse(a.peer, req, code::kFailed);
-        // The forbidden words (on both).
-        if (!host.AcademyTextAllowed(title) || !host.AcademyTextAllowed(text)) return Refuse(a.peer, req, code::kFailed);
+        // The original's order: the guardian; the forbidden words (on both: the request dropped, no answer); alive; the
+        // lengths, 1..128 and 1..2048 bytes (0x6817).
+        if (o->academy == 0 || !academies.contains(o->academy)) return Refuse(a.peer, req, code::kNotGuardian);
+        if (const AcademyMemberRow* me = Member(academies.at(o->academy), a.character);
+            me == nullptr || me->memberClass != std::uint8_t(academy::Class::Guardian)) {
+            return Refuse(a.peer, req, code::kNotGuardian);
+        }
+        if (!host.AcademyTextAllowed(title) || !host.AcademyTextAllowed(text)) return;
+        if (a.dead) return Refuse(a.peer, req, code::kDead);
+        if (title.empty() || text.empty() || title.size() > academy::kNoticeTitleMax || text.size() > academy::kNoticeTextMax) {
+            return Refuse(a.peer, req, code::kNoText);
+        }
         const std::uint32_t id = o->academy;
         const std::uint64_t peer = a.peer;
         ++writes;
@@ -1449,7 +1459,12 @@ void Academies::LevelChanged(std::int64_t character, int level, int maxLevel) {
 bool Academies::Handle(const AcademyActor& actor, proto::MessageId id, std::span<const std::byte> payload, Clock::time_point now) {
     State& s = *s_;
     switch (id) {
-    case proto::AcademyFound::kId: s.Found(actor); return true;
+    case proto::AcademyFound::kId: {
+        proto::AcademyFound m;
+        if (!proto::Decode(payload, m)) return false;
+        s.Found(actor, m.npc);
+        return true;
+    }
     case proto::AcademyDisband::kId: s.Disband(actor); return true;
     case proto::AcademyInvite::kId: {
         proto::AcademyInvite m;

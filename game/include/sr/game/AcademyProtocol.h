@@ -20,8 +20,11 @@ namespace sr::game::proto {
 // Found an academy (0x7470: level 60, 100,000 gold; the storage keeper's row).
 struct AcademyFound {
     static constexpr MessageId kId = 0x1420;
+    std::uint32_t npc = 0; // the storage keeper whose row asked it (the original's 0x7470 carries it)
     template <typename V>
-    void Visit(V&) {}
+    void Visit(V& v) {
+        v("npc", npc);
+    }
 };
 // The guardian disbands it (0x7471).
 struct AcademyDisband {

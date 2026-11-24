@@ -145,11 +145,25 @@ proto::ItemRecord RecordOf(const game::ItemInstance& i, std::uint8_t slot) {
 }
 
 // A name or a line: printable, no control characters, not empty after trimming.
-bool PlainText(std::string& text, std::size_t most) {
+void Trim(std::string& text) {
     while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.pop_back();
     while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.erase(text.begin());
-    if (text.empty() || text.size() > most) return false;
+}
+
+bool Printable(const std::string& text) {
     return std::none_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20; });
+}
+
+bool PlainText(std::string& text, std::size_t most) {
+    Trim(text);
+    return !text.empty() && text.size() <= most && Printable(text);
+}
+
+// A stall's name: 1..64 bytes (0x3C09, the original's), of printable characters (0x3C38, ours).
+Code NameCheck(std::string& name) {
+    Trim(name);
+    if (name.empty() || name.size() > proto::kStallNameLength) return Code::BadNameLength;
+    return Printable(name) ? Code::Ok : Code::BadName;
 }
 
 } // namespace
@@ -211,7 +225,7 @@ void Stalls::OpenStall(std::uint32_t entity, std::string name) {
     if (p->riding) return refuse(Code::Riding);
     if (p->murderer) return refuse(Code::Murderer);
     if (p->jobSuit) return refuse(Code::JobSuit);
-    if (!PlainText(name, proto::kStallNameLength)) return refuse(Code::BadName);
+    if (const Code why = NameCheck(name); why != Code::Ok) return refuse(why);
     Stall& s = stalls_[entity];
     s.owner = entity;
     s.character = p->character;
@@ -300,11 +314,12 @@ bool Stalls::Holding(std::uint32_t entity) const { return stalls_.contains(entit
 Code Stalls::Sellable(const game::ItemInstance& item) const {
     const assets::ItemTable* items = host_.StallItems();
     const assets::ItemRow* row = items != nullptr ? items->Find(item.refId) : nullptr;
-    if (row == nullptr || !row->canTrade) return Code::NotBagItem;
+    if (row == nullptr) return Code::NotBagItem;
+    // The original's order: a running period (0x3C55), then not tradeable or trade goods (0x3C2D; goods go by transport only).
     if (item.rentUntil != 0 && item.rentUntil > UnixSeconds()) return Code::Rented;
     if (item.bound) return Code::Rented; // bound to its character (ours: the beta quests' weapons)
-    // Trade goods (TID 3/3/8) go by transport only, as in the exchange.
-    if (row->typeId[0] == 3 && row->typeId[1] == 3 && row->typeId[2] == 8) return Code::NotBagItem;
+    if (!row->canTrade) return Code::NotTradeable;
+    if (row->typeId[0] == 3 && row->typeId[1] == 3 && row->typeId[2] == 8) return Code::NotTradeable;
     return Code::Ok;
 }
 
@@ -314,27 +329,34 @@ void Stalls::Put(std::uint32_t entity, const proto::StallPut& put) {
     if (s == nullptr) return refuse(Code::OwnerOnly);
     if (s->open) return refuse(Code::Modifying); // a change only while modifying
     if (put.slot >= proto::kStallSlots) return refuse(Code::SlotEmpty);
-    if (put.price < 1 || put.price > proto::kStallMostPrice) return refuse(Code::BadPrice);
     const auto p = host_.StallPlayer(entity);
     if (!p) return;
-    std::optional<Slot>& slot = s->slots[put.slot];
+    std::uint8_t at = put.slot;
     if (put.place == 0) { // the price of what is there
-        if (!slot) return refuse(Code::SlotEmpty);
-        slot->price = put.price;
+        if (!s->slots[at]) return refuse(Code::SlotEmpty);
+        if (put.price < 1 || put.price > proto::kStallMostPrice) return refuse(Code::BadPrice);
+        s->slots[at]->price = put.price;
     } else {
+        // The original's order: a taken slot gives way to the first free one (none: 0x3C30); the bag's place and its item
+        // (0x3C06); the item up already (0x3C13); a summoned pet's (0x3C3A); a running period, not tradeable (Sellable); the price.
+        if (s->slots[at]) {
+            const auto free = std::find_if(s->slots.begin(), s->slots.end(), [](const std::optional<Slot>& o) { return !o; });
+            if (free == s->slots.end()) return refuse(Code::NoFreeSlot);
+            at = std::uint8_t(free - s->slots.begin());
+        }
         if (put.place < 13 || put.place >= p->inventory->size) return refuse(Code::NotBagItem);
         const game::ItemInstance* item = p->inventory->At(put.place);
         if (item == nullptr) return refuse(Code::NotBagItem);
-        if (const Code why = Sellable(*item); why != Code::Ok) return refuse(why);
-        if (host_.StallPetOut(entity, put.place)) return refuse(Code::PetSummoned);
-        if (slot) return refuse(Code::Occupied);
         if (std::any_of(s->slots.begin(), s->slots.end(), [&](const std::optional<Slot>& o) { return o && o->place == put.place; })) {
-            return refuse(Code::Occupied);
+            return refuse(Code::AlreadyUp);
         }
-        slot = Slot{put.place, *item, put.price, 0};
+        if (host_.StallPetOut(entity, put.place)) return refuse(Code::PetItem);
+        if (const Code why = Sellable(*item); why != Code::Ok) return refuse(why);
+        if (put.price < 1 || put.price > proto::kStallMostPrice) return refuse(Code::BadPrice);
+        s->slots[at] = Slot{put.place, *item, put.price, 0};
     }
-    slot->revision = ++s->revisions;
-    for (const std::uint32_t who : People(*s)) Send(who, proto::StallSlotChanged{1, ItemOf(*s, put.slot, who == s->owner)});
+    s->slots[at]->revision = ++s->revisions;
+    for (const std::uint32_t who : People(*s)) Send(who, proto::StallSlotChanged{1, ItemOf(*s, at, who == s->owner)});
 }
 
 void Stalls::Take(std::uint32_t entity, std::uint8_t index) {
@@ -376,15 +398,16 @@ void Stalls::SetText(std::uint32_t entity, bool greeting, std::string text) {
     const proto::MessageId id = proto::StallSetText::kId;
     if (s == nullptr) return Answer(entity, id, Code::OwnerOnly);
     if (greeting) {
-        // The greeting may be empty and changes at any time (0x70BA 6).
+        // The greeting may be empty and changes at any time (0x70BA 6); up to 64 bytes (0x3C0A, the original's).
         while (!text.empty() && (text.back() == ' ' || text.back() == '\n')) text.pop_back();
-        if (text.size() > proto::kStallGreetingLength || std::any_of(text.begin(), text.end(), [](char c) { return c != '\n' && static_cast<unsigned char>(c) < 0x20; })) {
+        if (text.size() > proto::kStallGreetingMost) return Answer(entity, id, Code::GreetingTooLong);
+        if (std::any_of(text.begin(), text.end(), [](char c) { return c != '\n' && static_cast<unsigned char>(c) < 0x20; })) {
             return Answer(entity, id, Code::BadName);
         }
         s->greeting = std::move(text);
     } else {
         if (s->open) return Answer(entity, id, Code::Modifying); // 0x70BA 7: only while modifying
-        if (!PlainText(text, proto::kStallNameLength)) return Answer(entity, id, Code::BadName);
+        if (const Code why = NameCheck(text); why != Code::Ok) return Answer(entity, id, why);
         s->name = std::move(text);
         host_.StallShow(proto::EntityStall{entity, s->name, s->skin});
     }

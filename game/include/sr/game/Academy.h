@@ -41,7 +41,8 @@ inline constexpr std::uint16_t kInvalidTarget = 3, kDead = 0x6807, kLevel = 0x68
                                kFoundWait = 0x681C, kDisbandWait = 0x681D, kRejoinWait = 0x681E, kRecruitWait = 0x681F,
                                kBanWait = 0x6820, kLeaveWait = 0x6821, kForcedLevel = 0x6822, kJobChange = 0x6823,
                                kNotPosition = 0x6824, kApprenticesFull = 0x6828, kBusy = 0x6806, kWrongTarget = 5,
-                               kNoInformation = 0x6826, kBanWhileListed = 0x6829, kJoinKind = 0x682A, kNoGuild = 0x6817;
+                               kNoInformation = 0x6826, kBanWhileListed = 0x6829, kJoinKind = 0x682A, kNoGuild = 0x6817,
+                               kNoText = 0x6817; // UIIT_MSG_GUILD_COMMON_NOTEXIST: a notice's title or text empty or too long
 } // namespace code
 
 // A character's class in an academy by the highest level it reached (_TrainingCamp_FnAddMember).
@@ -88,8 +89,8 @@ inline constexpr const char* kHonorBuffs[4] = {"SKILL_TC_CROWN_BUFF_01", "SKILL_
 enum class MatchKind : std::uint8_t { Apprentices = 1, Assistants = 2 };
 inline constexpr int kMatchRows = 12;  // the window's slots (ifmentormatch.txt 70..81)
 inline constexpr int kRankingRows = 10; // the ranking window's slots (ifapprenticeshiphonorranking.txt 30..39)
-// The notice's lengths (ours: the guild notice's).
-inline constexpr std::size_t kNoticeTitleMax = 64, kNoticeTextMax = 1024, kMatchTitleMax = 60;
+// The notice's lengths in bytes, each at least 1 (the original's server: _TrainingCamp's CommentTitle and Comment columns).
+inline constexpr std::size_t kNoticeTitleMax = 128, kNoticeTextMax = 2048, kMatchTitleMax = 60;
 
 // --- The experience buffs ---
 

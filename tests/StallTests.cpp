@@ -217,7 +217,7 @@ TEST_CASE("Game server: a stall opened, items put up by the original's rules, op
     const std::uint8_t sword = PlaceOf(o.bag, kSword), potion = PlaceOf(o.bag, kPotion), quest = PlaceOf(o.bag, kQuest), goods = PlaceOf(o.bag, kGoods);
 
     o.client->Send(proto::StallOpen{"   "});
-    CHECK(Refusal(o) == Code::BadName);
+    CHECK(Refusal(o) == Code::BadNameLength); // 1..64 bytes (0x3C09)
     // A party invitation of its waiting: no stall (0x3C16, the original's rule); declined, it may.
     auto g = s.Make("Guest", 1000, {}, 0);
     for (bool seen = false; !seen;) seen = Next<proto::EntityAppeared>(o).entity == g.entity; // in its sight first
@@ -238,12 +238,13 @@ TEST_CASE("Game server: a stall opened, items put up by the original's rules, op
     CHECK(Refusal(o) == Code::BadPrice);
     o.client->Send(proto::StallPut{0, sword, proto::kStallMostPrice + 1});
     CHECK(Refusal(o) == Code::BadPrice);
+    CHECK(proto::kStallMostPrice == 9999999999ull); // the original's most
     o.client->Send(proto::StallPut{0, 5, 100}); // a worn place
     CHECK(Refusal(o) == Code::NotBagItem);
     o.client->Send(proto::StallPut{0, quest, 100}); // CanTrade 0
-    CHECK(Refusal(o) == Code::NotBagItem);
+    CHECK(Refusal(o) == Code::NotTradeable);
     o.client->Send(proto::StallPut{0, goods, 100}); // trade goods
-    CHECK(Refusal(o) == Code::NotBagItem);
+    CHECK(Refusal(o) == Code::NotTradeable);
     o.client->Send(proto::StallPut{proto::kStallSlots, sword, 100});
     CHECK(Refusal(o) == Code::SlotEmpty);
     o.client->Send(proto::StallSetOpen{1, 1});
@@ -257,11 +258,11 @@ TEST_CASE("Game server: a stall opened, items put up by the original's rules, op
     CHECK(changed.item.item.slot == sword); // the owner sees where it lies in its bag
     CHECK(changed.item.price == 5000);
     o.client->Send(proto::StallPut{1, sword, 10});
-    CHECK(Refusal(o) == Code::Occupied); // already up in slot 0
-    o.client->Send(proto::StallPut{0, potion, 10});
-    CHECK(Refusal(o) == Code::Occupied); // slot 0 holds the sword
-    o.client->Send(proto::StallPut{1, potion, 300});
-    CHECK(Next<proto::StallSlotChanged>(o).item.item.quantity == 30);
+    CHECK(Refusal(o) == Code::AlreadyUp); // already up in slot 0 (0x3C13)
+    o.client->Send(proto::StallPut{0, potion, 300}); // slot 0 holds the sword: the first free one takes it
+    const auto moved = Next<proto::StallSlotChanged>(o);
+    CHECK(moved.item.slot == 1);
+    CHECK(moved.item.item.quantity == 30);
     o.client->Send(proto::StallPut{1, 0, 400}); // the price alone
     CHECK(Next<proto::StallSlotChanged>(o).item.price == 400);
     o.client->Send(proto::StallTake{1});
@@ -277,6 +278,8 @@ TEST_CASE("Game server: a stall opened, items put up by the original's rules, op
     CHECK(Refusal(o) == Code::Modifying); // changes only while modifying
     o.client->Send(proto::StallSetText{0, "Renamed"});
     CHECK(Refusal(o) == Code::Modifying);
+    o.client->Send(proto::StallSetText{1, std::string(65, 'w')}); // the greeting's 64 bytes (0x3C0A)
+    CHECK(Refusal(o) == Code::GreetingTooLong);
     o.client->Send(proto::StallSetText{1, "Welcome!"}); // the greeting at any time
     CHECK(Next<proto::StallStateChanged>(o).greeting == "Welcome!");
 
