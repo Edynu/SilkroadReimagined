@@ -405,11 +405,11 @@ bool MagicOptGroupRecords(Database& db, std::vector<assets::MagicOptGroupRow>& o
 
 bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::string& error) {
     QueryResult r = db.Query(
-        "SELECT o.codename128, n.nregiondbid, n.flocalposx, n.flocalposz, n.nradius, n.ngenerateradius, "
-        "       CASE WHEN c.dwtacticsid IS NULL THEN 0 ELSE n.nchampiongenpercentage END, "
+        "SELECT o.codename128, n.nregiondbid, n.flocalposx, n.flocalposz, n.nradius, n.ngenerateradius, n.nchampiongenpercentage, "
         "       n.dwdelaytimemin, n.dwdelaytimemax, n.dwmaxtotalcount, t.btaggresstype, t.nsightrange, "
         "       n.dwnestid, n.dwhiveid, coalesce(h.dwoverwritemaxtotalcount, 0), coalesce(h.gameworldid, 1) BETWEEN 51 AND 59, "
-        "       t.tracedata, t.bttraceboundary, coalesce(c.nsightrange, 0) "
+        "       t.tracedata, t.bttraceboundary, coalesce(c.nsightrange, 0), coalesce(h.btkeepmonstercounttype, 0), "
+        "       coalesce(h.fmonstercountperpc, 0), coalesce(h.dwspawnspeedincreaserate, 0), coalesce(h.dwmaxincreaserate, 0) "
         "FROM tab_refnest n JOIN tab_reftactics t ON t.dwtacticsid = n.dwtacticsid JOIN _refobjcommon o ON o.id = t.dwobjid "
         "LEFT JOIN tab_reftactics c ON c.dwtacticsid = t.dwchampiontacticsid AND t.dwchampiontacticsid <> 0 "
         "LEFT JOIN tab_refhive h ON h.dwhiveid = n.dwhiveid "
@@ -424,6 +424,10 @@ bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::s
     // dungeon regions of their own): each instance raises them in its layer (InstanceData.cpp). Their points (the client's
     // npcpos) are listed as "!" lines: no monster of the shared world stands there.
     std::set<std::tuple<std::string, int, long long, long long>> instanceOnly;
+    // A crowded hunting ground's players it is made for: round(its nests' dwMaxTotalCount / fMonsterCountPerPC), over
+    // every nest of its hive (the original's sum over the nests it made).
+    std::map<std::int64_t, std::int64_t> hiveTotals;
+    for (int i = 0; i < r.Rows(); ++i) hiveTotals[r.Int(i, 13)] += r.Int(i, 9);
     for (int i = 0; i < r.Rows(); ++i) {
         const std::tuple<std::string, int, long long, long long> key{r.Text(i, 0), int(std::uint16_t(r.Int(i, 1))), std::llround(float(r.Double(i, 2))),
                                                                      std::llround(float(r.Double(i, 3)))};
@@ -432,12 +436,15 @@ bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::s
             continue;
         }
         if (rows.contains(key)) continue;
-        rows[key] = std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.Int(i, 4), r.Int(i, 5), r.Int(i, 6), r.Int(i, 7),
-                                r.Int(i, 8), r.Int(i, 9), r.Int(i, 10) == 0 ? 1 : 0, r.Int(i, 11), r.Int(i, 12), r.Int(i, 13), r.Int(i, 14), r.Int(i, 16),
-                                r.Int(i, 17), r.Int(i, 18));
+        const double perPlayer = r.Double(i, 20);
+        const int madeFor = r.Int(i, 19) == 1 && perPlayer > 0.0 ? int(std::nearbyint(double(hiveTotals[r.Int(i, 13)]) / perPlayer)) : 0;
+        rows[key] = std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.Int(i, 4), r.Int(i, 5), r.Int(i, 6),
+                                r.Int(i, 7), r.Int(i, 8), r.Int(i, 9), r.Int(i, 10) == 0 ? 1 : 0, r.Int(i, 11), r.Int(i, 12), r.Int(i, 13), r.Int(i, 14),
+                                r.Int(i, 16), r.Int(i, 17), r.Int(i, 18), madeFor, madeFor > 0 ? r.Int(i, 21) : 0, madeFor > 0 ? r.Int(i, 22) : 0);
     }
     out = "# codename\tregion\tx\tz\tradius\tspawnRadius\tchampion%\tdelayMin\tdelayMax\tmaxCount\taggressive\tsight\tnest\thive\thiveMax\ttrace\tboundary"
-          "\tchampionSight (from the database's original tables; champion% 0 where the tactics has no champion row)\n";
+          "\tchampionSight\tcrowdPlayers\tcrowdStep\tcrowdMax (from the database's original tables; championSight 0: the tactics "
+          "names no champion row, so no champion nor giant; crowdPlayers 0: not a crowded hunting ground)\n";
     for (const auto& [key, values] : rows) {
         out += std::format("{}\t{}\t{}\t{}\t{}\n", std::get<0>(key), std::get<1>(key), std::get<2>(key), std::get<3>(key), values);
         ++counts.records;

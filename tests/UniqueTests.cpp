@@ -407,3 +407,101 @@ TEST_CASE("Party monsters: a nest an exp-shared party's kill marked hatches one 
     }
     CHECK(party);
 }
+
+TEST_CASE("Crowded hunting grounds: every 30 s the players in its nests' regions, their two minutes' average, cut its nests' delays") {
+    const char* gameDir = std::getenv("SR_GAME_DIR");
+    if (gameDir == nullptr) {
+        MESSAGE("SR_GAME_DIR not set: skipped");
+        return;
+    }
+    std::string error;
+    assets::FileSystem fs;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, gameDir, error), error);
+    assets::CharacterTable characters;
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    const assets::ObjectRow* tiger = characters.Find(std::string_view("MOB_CH_TIGER"));
+    REQUIRE(tiger != nullptr);
+
+    // A hive made for one player (its step 30 %, its most 80 %) of one nest of one, 10 s between hatchings.
+    const std::uint16_t region = assets::RegionId(168, 97);
+    server::MonsterNest n;
+    n.refObjId = tiger->refObjId;
+    n.position = {region, 1000.0f, 0.0f, 1300.0f};
+    n.spawnRadius = 5;
+    n.radius = 50;
+    n.delayMin = n.delayMax = 10;
+    n.maxCount = 1;
+    n.hive = 900;
+    n.crowdPlayers = 1;
+    n.crowdStep = 30;
+    n.crowdMax = 80;
+    core::JobSystem jobs(2);
+    server::WorldConfig config;
+    server::World world(config, jobs, &fs);
+    server::Monsters monsters(world, characters, nullptr, {n}, 5);
+    std::vector<server::WorldMessage> out;
+    std::vector<server::Monsters::Player> none;
+    const auto pump = [&](const std::function<bool()>& until, int rounds = 2000) {
+        for (int i = 0; i < rounds; ++i) {
+            const auto now = server::WorldClock::now();
+            world.Update(now, out);
+            server::Monsters::Events events;
+            monsters.Update(now, none, events);
+            out.clear();
+            if (until()) return true;
+            std::this_thread::sleep_for(2ms);
+        }
+        return false;
+    };
+    const auto alive = [&] {
+        for (const std::uint32_t e : monsters.Near({region, 1000, 0, 1300}, 100)) {
+            if (monsters.Hp(e) > 0) return e;
+        }
+        return 0u;
+    };
+    server::WorldPlayer player;
+    player.peer = 1;
+    player.character = 77;
+    player.position = {region, 1000, 0, 1300};
+    player.dropOnGround = true;
+    const std::uint32_t me = world.Enter(player);
+    REQUIRE(pump([&] { return alive() != 0; }));
+    const auto start = server::WorldClock::now(); // its first sample is due 30 s after its first update, before this
+
+    // The clock moved on by hand: a sample every 30 s from the first update.
+    std::vector<server::Monsters::Player> three(3);
+    for (std::size_t i = 0; i < three.size(); ++i) {
+        three[i].entity = 9000 + std::uint32_t(i);
+        three[i].position = {region, 900.0f + 10.0f * float(i), 0.0f, 1300.0f};
+    }
+    const auto at = [&](double seconds, const std::vector<server::Monsters::Player>& players) {
+        server::Monsters::Events events;
+        monsters.Update(start + std::chrono::milliseconds(std::int64_t(seconds * 1000.0)), players, events);
+    };
+    CHECK(monsters.CrowdRate(900) == 0);
+    at(30.5, three);
+    CHECK(monsters.CrowdRate(900) == 0); // one sample: no average yet
+    at(61, three);
+    CHECK(monsters.CrowdRate(900) == 30); // (3 + 0) / 2 = 1 player: 1 step
+    at(91.5, three);
+    at(122, three);
+    CHECK(monsters.CrowdRate(900) == 80); // 3 players: 90 %, held to 80
+
+    // Killed now: back after 10 s less 80 %, 2 s.
+    const std::uint32_t victim = alive();
+    REQUIRE(victim != 0);
+    const auto killedAt = start + std::chrono::milliseconds(123'000);
+    CHECK(monsters.Damage(victim, me, 2'000'000'000, killedAt).killed);
+    at(124.5, three);
+    CHECK(alive() == 0);
+    at(125.5, three);
+    CHECK(alive() != 0);
+
+    // Nobody for two minutes: the rate falls back.
+    at(152.5, none);
+    at(183, none);
+    CHECK(monsters.CrowdRate(900) == 30); // (3 + 0) / 2
+    at(213.5, none);
+    at(244, none);
+    CHECK(monsters.CrowdRate(900) == 0);
+}

@@ -53,6 +53,8 @@ struct Monsters::State {
         int left = 0;       // a nest that does not refill: the monsters it has still to spawn
         int bodies = 0;     // its monsters standing or lying (a temporary nest goes with its last)
         bool partyNext = false; // a party's kill marked it: its next hatchings may give a party monster
+        int crowdHive = -1;      // its crowded hunting ground (State::crowds)
+        Clock::time_point refillFrom; // when its refill's delay began (a crowd's new rate rolls it again from there)
         bool removed = false;
         // Its monsters' summons (their skills 'ssou': groups of four, the monster, its rarity, the fewest and the most
         // raised). A monster that only summons (a seal stone, a
@@ -112,6 +114,80 @@ struct Monsters::State {
     };
     std::vector<CapHive> capHives;
     std::vector<int> capFills; // the capped hives a wake brought nests of (filled at its end)
+    // The crowded hunting grounds (MonsterNest::crowdPlayers): every 30 s the players in its nests' regions summed (a
+    // player counted for each of its nests there, as the original's per nest), two samples' half-sum kept in turn in a
+    // ring of two, their average the players; the rate round(players / made-for) x step, within 0 and its most, set on
+    // its nests when it changes.
+    struct Crowd {
+        std::uint32_t hive = 0;
+        std::vector<std::size_t> nests;
+        int madeFor = 1, step = 0, most = 0;
+        int sum = 0, samples = 0, slot = 0;
+        std::array<int, 2> ring{};
+        int players = 0;
+        int rate = 0;
+    };
+    std::vector<Crowd> crowds;
+    Clock::time_point nextCrowd{};
+    void GroupCrowds() {
+        std::map<std::uint32_t, std::size_t> byHive;
+        for (std::size_t n = 0; n < nests.size(); ++n) {
+            const MonsterNest& spec = nests[n].spec;
+            if (spec.crowdPlayers <= 0 || spec.hive == 0) continue;
+            auto [it, fresh] = byHive.try_emplace(spec.hive, crowds.size());
+            if (fresh) crowds.push_back({spec.hive, {}, spec.crowdPlayers, spec.crowdStep, spec.crowdMax});
+            crowds[it->second].nests.push_back(n);
+            nests[n].crowdHive = int(it->second);
+        }
+        if (!crowds.empty()) {
+            std::size_t over = 0;
+            for (const Crowd& c : crowds) over += c.nests.size();
+            core::LogInfo("monsters: {} crowded hunting grounds over {} nests", crowds.size(), over);
+        }
+    }
+    // A sample of every crowd (Update's every 30 s): its players and its rate; a nest whose rate changed rolls its
+    // refill's delay again from its start.
+    void SampleCrowds(const std::vector<Monsters::Player>& players, Clock::time_point now) {
+        if (crowds.empty()) return;
+        std::unordered_map<std::uint16_t, int> perRegion;
+        for (const Monsters::Player& p : players) ++perRegion[p.position.region];
+        for (Crowd& c : crowds) {
+            int count = 0;
+            for (const std::size_t n : c.nests) {
+                if (const auto it = perRegion.find(nests[n].spec.position.region); it != perRegion.end()) count += it->second;
+            }
+            ++c.samples;
+            c.sum += count;
+            if (c.samples > 1) {
+                c.ring[std::size_t(c.slot)] = c.sum >> 1;
+                c.slot ^= 1;
+                c.sum = 0;
+                c.players = (c.ring[0] + c.ring[1]) >> 1;
+                c.samples = 0;
+            }
+            const int rate = std::clamp(int(std::nearbyint(double(c.players) / double(std::max(1, c.madeFor)))) * c.step, 0, std::max(0, c.most));
+            if (rate == c.rate) continue;
+            c.rate = rate;
+            for (const std::size_t n : c.nests) {
+                Nest& nest = nests[n];
+                if (nest.active && nest.spec.respawn) nest.nextRefill = nest.refillFrom + Seconds(Delay(nest));
+            }
+        }
+    }
+    // A nest's delay before its next hatch, in seconds: rolled within its least and most, less its crowd's cut (the
+    // original's in whole milliseconds).
+    float Delay(const Nest& nest) {
+        const float roll = Uniform(nest.spec.delayMin, nest.spec.delayMax);
+        if (nest.crowdHive < 0) return roll;
+        const double ms = std::trunc(double(roll) * 1000.0);
+        const double cut = std::nearbyint(ms * double(crowds[std::size_t(nest.crowdHive)].rate) / 100.0);
+        return float((ms - cut) / 1000.0);
+    }
+    // Its refill's delay begun now.
+    void RollRefill(Nest& nest, Clock::time_point now) {
+        nest.refillFrom = now;
+        nest.nextRefill = now + Seconds(Delay(nest));
+    }
     enum class Mode : std::uint8_t { Idle, Chase, Home, Dead };
     struct Monster {
         std::uint32_t entity = 0;
@@ -324,7 +400,7 @@ struct Monsters::State {
                 if (loaded) {
                     ++activeNests;
                     Fill(n, now);
-                    nest.nextRefill = now + Seconds(Uniform(nest.spec.delayMin, nest.spec.delayMax));
+                    RollRefill(nest, now);
                 } else {
                     --activeNests;
                     if (!nest.spec.respawn) nest.left += int(nest.alive.size()); // they come back with the navigation
@@ -606,7 +682,7 @@ struct Monsters::State {
         if (pick >= count - 1) pick = count - 1;
         const std::size_t next = hive.nests[std::size_t(pick)];
         hive.next = next;
-        nests[next].due = now + Seconds(Uniform(nests[next].spec.delayMin, nests[next].spec.delayMax));
+        nests[next].due = now + Seconds(Delay(nests[next])); // a crowded hunting ground's cut too
     }
     // A hive's monster killed: the next hatches at one of its nests picked at
     // random (rand() % (count + 1), the last when it falls past it, as the original), after that nest's delay.
@@ -1248,7 +1324,7 @@ struct Monsters::State {
         } else if (home.capHive >= 0) {
             CappedDeath(home, now);
         } else if (int(home.alive.size()) + 1 >= home.spec.maxCount) {
-            home.nextRefill = now + Seconds(Uniform(home.spec.delayMin, home.spec.delayMax));
+            RollRefill(home, now);
         }
         return result;
     }
@@ -1364,6 +1440,14 @@ Monsters::Monsters(World& world, const assets::CharacterTable& characters, const
         s_->nests.push_back(std::move(nest));
     }
     s_->GroupHives();
+    s_->GroupCrowds();
+}
+
+int Monsters::CrowdRate(std::uint32_t hive) const {
+    for (const State::Crowd& c : s_->crowds) {
+        if (c.hive == hive) return c.rate;
+    }
+    return 0;
 }
 
 void Monsters::SetTowns(std::function<bool(std::uint16_t)> town) { s_->town = std::move(town); }
@@ -1450,6 +1534,12 @@ void Monsters::Update(Clock::time_point now, const std::vector<Player>& players,
     SR_ZONE("monsters");
     // Summons raised by last update's hits.
     for (std::vector<MonsterNest> raised = std::exchange(s.summons, {}); const MonsterNest& spec : raised) AddNest(spec);
+    // The crowded hunting grounds' players, every 30 s.
+    if (s.nextCrowd == Clock::time_point{}) s.nextCrowd = now + std::chrono::seconds(30);
+    if (now >= s.nextCrowd) {
+        s.nextCrowd = now + std::chrono::seconds(30);
+        s.SampleCrowds(players, now);
+    }
     if (now >= s.nextWake) {
         s.nextWake = now + std::chrono::seconds(1);
         s.Wake(now);
@@ -1468,7 +1558,7 @@ void Monsters::Update(Clock::time_point now, const std::vector<Player>& players,
                 continue;
             }
             s.Spawn(n, now);
-            nest.nextRefill = now + s.Seconds(s.Uniform(nest.spec.delayMin, nest.spec.delayMax));
+            s.RollRefill(nest, now);
         }
     }
     if (now < s.nextThink) return;

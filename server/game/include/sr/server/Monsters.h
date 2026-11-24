@@ -66,9 +66,14 @@ struct MonsterNest {
     game::proto::WorldPosition position;
     float radius = 0;      // how far it may be led away (the leash)
     float spawnRadius = 0; // where its monsters come up and wander, around the point
-    int championPercent = 0; // 0 where its tactics names no champion row (Tab_RefTactics.dwChampionTacticsID)
+    int championPercent = 0; // 0 where its tactics names no champion row (Tab_RefTactics.dwChampionTacticsID: none hatch)
     float championSight = 0; // that champion row's sight (0: its own), a champion's or a giant's from it
     bool partyMonsters = true; // a party's kill may make its next one a party monster (an instance world's PARTYMONSTER_SPAWN)
+    // A crowded hunting ground's hive (Tab_RefHive btKeepMonsterCountType 1, by `hive`): the players it is made for
+    // (round(its nests' dwMaxTotalCount / fMonsterCountPerPC); 0: not one), its step (dwSpawnSpeedIncreaseRate) and its
+    // most (dwMaxIncreaseRate), in percent of a nest's delay cut.
+    int crowdPlayers = 0;
+    int crowdStep = 0, crowdMax = 0;
     float delayMin = 1, delayMax = 1; // seconds before a gap refills
     int maxCount = 1;
     bool aggressive = false; // attacks players it sees
@@ -284,6 +289,9 @@ public:
     // A monster killed by an exp-shared party of two or more near it: its nest's next hatchings make a party monster
     // at 50 % until one comes (not a quest's monster, TID4 4; nor where the nest allows none).
     void PartyKilled(std::uint32_t entity);
+    // A crowded hunting ground's delay cut now, in percent (Monsters' every 30 s: the players in its nests' regions, the
+    // average of two minutes, over the players it is made for, times its step, held to its most); 0 for another hive.
+    int CrowdRate(std::uint32_t hive) const;
     // The states it is in, with their time left (EntityStates).
     std::vector<game::proto::StateRecord> StatesOf(std::uint32_t entity, Clock::time_point now) const;
     // A living monster's health now (0: none, or dead).

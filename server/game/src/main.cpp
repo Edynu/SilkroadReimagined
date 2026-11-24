@@ -813,9 +813,15 @@ int main(int argc, char** argv) {
                     // Then its tactics' trace and boundary (records made before them: 500 and 1).
                     int trace = 500, boundary = 1;
                     if (!(row >> trace >> boundary)) trace = 500, boundary = 1;
-                    // Then the champion row's sight (0: its own).
+                    // Then the champion row's sight (0: its tactics names none, so no champion nor giant; records made
+                    // before it: the nest's share as it is).
                     float championSight = 0;
-                    if (!(row >> championSight)) championSight = 0;
+                    if (!(row >> championSight)) championSight = -1;
+                    if (championSight == 0) champion = 0;
+                    championSight = std::max(0.0f, championSight);
+                    // Then the crowded hunting ground's players, step and most (0: not one).
+                    int crowdPlayers = 0, crowdStep = 0, crowdMax = 0;
+                    if (!(row >> crowdPlayers >> crowdStep >> crowdMax)) crowdPlayers = crowdStep = crowdMax = 0;
                     server::MonsterNest& n = policies[{code, region, x, z}];
                     n.radius = radius;
                     n.spawnRadius = spawnRadius;
@@ -831,6 +837,9 @@ int main(int argc, char** argv) {
                     n.trace = float(trace);
                     n.traceBoundary = boundary;
                     n.championSight = championSight;
+                    n.crowdPlayers = crowdPlayers;
+                    n.crowdStep = crowdStep;
+                    n.crowdMax = crowdMax;
                 }
             }
             std::size_t matched = 0, instanceOwn = 0;
