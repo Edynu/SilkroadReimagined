@@ -709,9 +709,10 @@ TEST_CASE("Fortress war over the wire: apply at the official, the war, the tower
     // Hostile()): the Keepers' master is hit, the Raiders' own member is not.
     a.c->Send(proto::DevStrike{e.entity, 1});
     a.c->Send(proto::DevStrike{b.entity, 1});
+    // (Its own hit: the structures' pulses, U14-04, may strike the war's fighters meanwhile.)
     proto::EntityDamaged hurt;
     do REQUIRE(b.c->Expect(hurt));
-    while (hurt.target != b.entity && hurt.target != e.entity);
+    while ((hurt.target != b.entity && hurt.target != e.entity) || hurt.attacker != a.entity);
     CHECK(hurt.target == b.entity);
     CHECK(hurt.attacker == a.entity);
     // Not in the war: may not hit its structures.
