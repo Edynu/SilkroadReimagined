@@ -677,6 +677,80 @@ TEST_CASE("a monster's swing begun lands though its target ran out of reach, and
     CHECK(f.Moving());
 }
 
+TEST_CASE("a skill that costs its caster HP ('pmhp' kind 0): the Qin tomb's bomb stone ghost's blast lands, then the ghost dies by it (game files; U1-02)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    assets::FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, dir, error), error);
+    assets::CharacterTable all;
+    REQUIRE_MESSAGE(all.Load(fs, error), error);
+    assets::SkillTable skills;
+    REQUIRE_MESSAGE(skills.Load(fs, error), error);
+    const assets::ObjectRow* ghost = all.Find("MOB_TQ_BOMBSTONEGHOST");
+    const assets::SkillRow* blast = skills.Find("MSKILL_TQ_BOMBSTONEGHOST_ATTACK05");
+    REQUIRE(ghost != nullptr);
+    REQUIRE(blast != nullptr);
+    const assets::SkillParam cost = assets::FindSkillParam(*blast, assets::SkillTag("pmhp"));
+    REQUIRE(cost);
+    CHECK(cost[0] == 5000); // no recovery for 5 s
+    CHECK(cost[2] == 100);  // 100 % of its HP
+    CHECK(cost[3] == 0);    // kind 0: a hit on itself
+    // The ghost with its blast alone, in an aggressive nest 40 from the player.
+    assets::ObjectRow row = *ghost;
+    row.skills = {};
+    row.skills[0] = blast->id;
+    assets::CharacterTable characters;
+    characters.Add(row);
+    MonsterField f(fs);
+    server::WorldPlayer p;
+    p.peer = 1;
+    p.position = {assets::RegionId(79, 105), 335, 140, 1460};
+    p.dropOnGround = true;
+    f.player = f.world.Enter(p);
+    server::MonsterNest nest;
+    nest.refObjId = row.refObjId;
+    nest.position = {assets::RegionId(79, 105), 375, 140, 1460};
+    nest.radius = 300;
+    nest.aggressive = true;
+    nest.sight = 150;
+    f.monsters = std::make_unique<server::Monsters>(f.world, characters, &skills, std::vector{nest}, 1);
+    f.playerStats.level = 1;
+    f.playerStats.maxHp = 1'000'000;
+    for (int i = 0; i < 400 && f.monsters->Alive() == 0; ++i) {
+        f.Step(0.1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5)); // the navigation loads on the jobs
+    }
+    REQUIRE(f.monsters->Alive() == 1);
+    f.monster = f.monsters->Near(f.world.Where(f.player)->position, 400).at(0);
+    // Its blast swung at the player: the hits land first, then its cost kills it (a plain hit, no attacker, no share).
+    bool swung = false;
+    for (int i = 0; i < 300 && !swung; ++i) {
+        f.events = {};
+        f.Step(0.05);
+        for (const auto& s : f.events.swings) swung = swung || (s.target == f.player && s.skill == blast->id);
+    }
+    REQUIRE(swung);
+    std::size_t landed = 0;
+    const server::Monsters::Tick* own = nullptr;
+    f.ticks.clear();
+    for (int i = 0; i * 50 < std::max(500, blast->durationMs) + 500 && own == nullptr; ++i) {
+        f.Step(0.05);
+        for (const auto& h : f.events.hits) landed += h.target == f.player;
+        for (const auto& t : f.ticks) {
+            if (t.monster == f.monster && t.self) own = &t;
+        }
+    }
+    CHECK(landed > 0);
+    REQUIRE(own != nullptr);
+    CHECK(own->damaged.killed);
+    CHECK(own->damaged.killer == 0);
+    CHECK(f.monsters->CorpseOf(f.monster).has_value()); // lying dead
+}
+
 TEST_CASE("a chaser runs after a running player without stopping at each think (game files; the user's clip 2026-11-14)") {
     const auto dir = GameDir();
     if (dir.empty()) {

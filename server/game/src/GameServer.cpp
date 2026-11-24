@@ -6292,8 +6292,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // The states' ticks (burn, poison, bleed: K3), their kills shared as a hit's; the states that ended.
         for (const Monsters::Tick& t : ticks) {
             // A time bomb's burst: a skill's strike of its own (its S_RETURN on the holder; B0BC form 4).
-            const bool burst = t.tick.kind == game::StateKind::TimeBomb;
-            std::uint8_t flags = burst ? proto::kDamageBurst : proto::kDamageState;
+            const bool burst = t.tick.kind == game::StateKind::TimeBomb && !t.self;
+            // Its own skill's HP cost (a bomb monster's end): a plain hit with no attacker.
+            std::uint8_t flags = t.self ? std::uint8_t(0) : burst ? proto::kDamageBurst : proto::kDamageState;
             if (t.damaged.killed) flags |= proto::kDamageKilled;
             Broadcast(t.monster, proto::EntityDamaged{t.monster, t.tick.source, t.tick.hp, t.damaged.hp, flags, burst ? t.tick.skill : 0u});
             if (t.damaged.killed) Killed(t.monster, t.damaged);

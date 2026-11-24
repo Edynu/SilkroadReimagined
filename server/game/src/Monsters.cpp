@@ -237,6 +237,16 @@ struct Monsters::State {
         std::uint32_t summoned = 0; // its nest's summon skills used (a bit each)
         std::uint32_t body = 0;     // a god's linked loot body (its _DROP summon)
         Clock::time_point nextRecovery; // its natural recovery's next tick
+        // A swing of a skill that costs its caster HP (the original's 'pmhp' of kind 0, a deferred instruction on the
+        // caster: the bomb monsters' end): at the swing's end a hit on itself of its HP x `percent` % + `flat`, no
+        // attacker; no natural recovery for `stop` from then.
+        struct SelfCost {
+            Clock::time_point at;
+            std::uint32_t flat = 0, percent = 0;
+            std::chrono::milliseconds stop{};
+        };
+        std::optional<SelfCost> selfCost;
+        Clock::time_point recoveryStopUntil;
         Clock::time_point lastStrike;   // its last swing (a chaser that has not struck for 5 s walks to a far target)
         // Its conditional skills' state: a health one used (once), an interval one's last time (none: not looked at yet).
         std::vector<bool> conditionalUsed;
@@ -1233,6 +1243,9 @@ struct Monsters::State {
             // It lands on its target wherever it ran meanwhile (a player's swing does the same, K10), only not on one gone beyond the chase's limit (a teleport, a gate).
             m.pending.push_back({now + std::chrono::milliseconds(int(float(duration) * at)), m.target, attack, kGiveUpDistance, skill});
         }
+        if (const assets::SkillParam cost = assets::FindSkillParam(*skill, assets::SkillTag("pmhp")); cost && cost[3] == 0) {
+            m.selfCost = Monster::SelfCost{m.swingEnds, cost[1], cost[2], std::chrono::milliseconds(cost[0])};
+        }
         // Frostbite and slow stretch the time between its swings.
         const int wait = std::max(duration, skill->cooldownMs) * m.states.AttackTimePercent() / 100;
         m.waitMs = wait + std::uniform_int_distribution<int>(0, 500)(random);
@@ -1334,10 +1347,13 @@ struct Monsters::State {
             m.summoned |= 1u << i;
             RaiseSummons(m, nest, skill);
         }
-        const std::uint64_t taken = std::min<std::uint64_t>(damage, m.hp);
-        auto by = std::find_if(m.damageBy.begin(), m.damageBy.end(), [&](const auto& d) { return d.first == attacker; });
-        if (by == m.damageBy.end()) by = m.damageBy.insert(m.damageBy.end(), {attacker, 0});
-        by->second += taken;
+        // Its damage by attacker (the experience's shares); a hit with no attacker (its own skill's cost) counts for none.
+        if (attacker != 0) {
+            const std::uint64_t taken = std::min<std::uint64_t>(damage, m.hp);
+            auto by = std::find_if(m.damageBy.begin(), m.damageBy.end(), [&](const auto& d) { return d.first == attacker; });
+            if (by == m.damageBy.end()) by = m.damageBy.insert(m.damageBy.end(), {attacker, 0});
+            by->second += taken;
+        }
         m.hp = damage >= m.hp ? 0 : m.hp - damage;
         result.hp = m.hp;
         world.SetHp(m.entity, m.hp);
@@ -1446,6 +1462,19 @@ struct Monsters::State {
             if (ticks != nullptr) ticks->push_back({m.entity, {game::StateKind::TimeBomb, bomb->source, damage, 0, bomb->skill}, std::move(d)});
             if (!killed) Attacked(m, bomb->source, damage, std::int64_t(damage), 0, now);
         }
+    }
+
+    // Its own skill's HP cost, once that swing's hits have landed (SelfCost).
+    void PaySelfCost(Monster& m, Clock::time_point now, std::vector<Tick>* ticks) {
+        if (!m.selfCost || now < m.selfCost->at) return;
+        const Monster::SelfCost cost = *m.selfCost;
+        m.selfCost.reset();
+        m.recoveryStopUntil = now + cost.stop;
+        const std::uint64_t damage = std::uint64_t(m.hp) * cost.percent / 100 + cost.flat;
+        if (damage == 0) return;
+        const std::uint32_t hp = std::uint32_t(std::min<std::uint64_t>(damage, UINT32_MAX));
+        Damaged d = Hurt(m, 0, hp, now);
+        if (ticks != nullptr) ticks->push_back({m.entity, {game::StateKind::Burn, 0, hp, 0, 0}, std::move(d), true});
     }
 
     void LandHits(Monster& m, Clock::time_point now, Events& out) {
@@ -1674,12 +1703,17 @@ void Monsters::Update(Clock::time_point now, const std::vector<Player>& players,
             continue;
         }
         s.LandHits(m, now, out);
+        s.PaySelfCost(m, now, ticks);
+        if (m.mode == State::Mode::Dead) {
+            ++it;
+            continue;
+        }
         // Its natural recovery: every 4 s, alive and standing (not walking or running), its row's MaxContain, no more than
-        // it lacks, cut by its recovery cut (panic); not a structure's nor a lab monster's.
+        // it lacks, cut by its recovery cut (panic); not a structure's nor a lab monster's, nor one whose skill stopped it.
         if (now >= m.nextRecovery) {
             m.nextRecovery = now + kRecoveryTick;
             const auto& nest = s.nests[m.nest];
-            if (m.hp > 0 && m.hp < m.stats.maxHp && nest.row != nullptr && nest.row->maxContain > 0 && !nest.spec.fixed &&
+            if (m.hp > 0 && m.hp < m.stats.maxHp && nest.row != nullptr && nest.row->maxContain > 0 && !nest.spec.fixed && now >= m.recoveryStopUntil &&
                 nest.spec.lab == proto::LabBehaviour::Normal && !s.world.Moving(m.entity)) {
                 const std::uint32_t gain = game::RecoveryCut(m.states, std::min(nest.row->maxContain, m.stats.maxHp - m.hp), true);
                 if (gain > 0) {

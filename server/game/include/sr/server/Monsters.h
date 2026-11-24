@@ -206,6 +206,7 @@ public:
         std::uint32_t monster = 0;
         game::StateTick tick;
         Damaged damaged;
+        bool self = false; // not a state's: the HP its own skill cost it (a plain hit, no attacker)
     };
     // A hit's states and motion for Damage (rolled by the skills: game::RollStates, game::RollKnock).
     struct Affliction {
