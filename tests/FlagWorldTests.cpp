@@ -263,6 +263,75 @@ TEST_CASE("The events' messages (0x1360-0x13BF) and the event relation in the at
     CHECK_FALSE(game::KillIsMurder(p));
 }
 
+TEST_CASE("The Battle Arena's flag maps: every pole its own, several flags at once, a placed flag stolen, carriers' drops") {
+    using K = game::ArenaFlags::Event::Kind;
+    game::ArenaFlags f;
+    f.Reset({0, 0, 0, 1, 1, 1, 2, 2, 2}); // the 16 map: 3 white, 3 red (team 0's), 3 blue (team 1's)
+    REQUIRE(f.Poles() == 9);
+    for (int i = 0; i < 9; ++i) CHECK(f.OnPole(i) == (i < 3)); // the white ones show a flag
+    constexpr std::uint32_t kRed = 11, kBlue = 22, kRed2 = 33;
+    std::vector<game::ArenaFlags::Event> ev;
+    std::int64_t t = 1'000;
+    // Two takes at once on two white poles; the same pole busy for a third.
+    CHECK(f.SelectPole(0, kRed, 0, t, ev) == game::FlagCode::Done);
+    CHECK(f.SelectPole(0, kBlue, 1, t, ev) == game::FlagCode::TakeBusy);
+    CHECK(f.SelectPole(1, kBlue, 1, t, ev) == game::FlagCode::Done);
+    CHECK_FALSE(f.SelectPole(3, kRed2, 0, t, ev).has_value()); // his own team's empty pole, not carrying: nothing
+    ev.clear();
+    f.Tick(t + game::flag::kActionMs, ev);
+    REQUIRE(ev.size() == 2);
+    CHECK(ev[0].kind == K::Carrier);
+    CHECK(ev[0].pole == 0);
+    CHECK(f.Carrying(kRed));
+    CHECK(f.Carrying(kBlue));
+    CHECK_FALSE(f.OnPole(0));
+    CHECK_FALSE(f.OnPole(1));
+    // A carrier at a pole showing a flag: nothing (the server's "you have a flag"); at the other team's pole: nothing.
+    CHECK_FALSE(f.SelectPole(2, kRed, 0, t, ev).has_value());
+    CHECK_FALSE(f.SelectPole(6, kRed, 0, t, ev).has_value());
+    // Placed on their own poles: 1000 each.
+    t += game::flag::kActionMs;
+    CHECK(f.SelectPole(3, kRed, 0, t, ev) == game::FlagCode::Done);
+    CHECK(f.SelectPole(6, kBlue, 1, t, ev) == game::FlagCode::Done);
+    ev.clear();
+    f.Tick(t + game::flag::kActionMs, ev);
+    REQUIRE(ev.size() == 2);
+    CHECK(ev[0].kind == K::Placed);
+    CHECK(f.FlagsOn(0) == 1);
+    CHECK(f.FlagsOn(1) == 1);
+    CHECK(f.Carriers().empty());
+    // The red flag stolen from its pole by the blue player.
+    t += game::flag::kActionMs;
+    CHECK_FALSE(f.SelectPole(6, kBlue, 1, t, ev).has_value()); // his own team's flag: nothing
+    CHECK(f.SelectPole(3, kBlue, 1, t, ev) == game::FlagCode::Done);
+    ev.clear();
+    f.Tick(t + game::flag::kActionMs, ev);
+    CHECK(f.FlagsOn(0) == 0);
+    CHECK(f.Carrying(kBlue));
+    // His 60 s: it drops; another picks it up at once; his death drops it again.
+    t += game::flag::kActionMs;
+    ev.clear();
+    f.Tick(t + game::flag::kCarryMs, ev);
+    REQUIRE(ev.size() == 1);
+    CHECK(ev[0].kind == K::Dropped);
+    const std::uint32_t dropped = ev[0].flag;
+    CHECK(f.Dropped(dropped));
+    CHECK_FALSE(f.Carrying(kBlue));
+    ev.clear();
+    CHECK(f.PickUp(dropped, kRed2, 0, t, ev));
+    CHECK(ev[0].kind == K::Carrier);
+    CHECK(ev[0].flag == dropped);
+    CHECK_FALSE(f.PickUp(dropped, kRed, 0, t, ev)); // gone
+    ev.clear();
+    f.Gone(kRed2, ev);
+    REQUIRE(ev.size() == 1);
+    CHECK(ev[0].kind == K::Dropped);
+    CHECK(ev[0].flag != dropped);
+    CHECK(game::PoleTeam(1) == 0);
+    CHECK(game::PoleTeam(2) == 1);
+    CHECK(game::PoleTeam(0) == 2);
+}
+
 TEST_CASE("The Battle Arena's rules: the manager's checks in order, coins by mode, the winner, the matches") {
     using game::ArenaCode;
     using M = game::arena::Mode;

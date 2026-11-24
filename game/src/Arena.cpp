@@ -160,4 +160,102 @@ ArenaPlan PlanArena(arena::Mode mode, std::vector<ArenaUnit> units, int minPlaye
     return plan;
 }
 
+// --- The flag kind's play ---------------------------------------------------------------------------------------------
+
+void ArenaFlags::Reset(const std::vector<int>& colours) {
+    poles_.clear();
+    for (const int c : colours) poles_.push_back({c, c == 0, {}});
+    carriers_.clear();
+    dropped_.clear();
+    nextFlag_ = 1;
+}
+
+std::optional<FlagCode> ArenaFlags::SelectPole(int pole, std::uint32_t actor, std::uint8_t team, std::int64_t now, std::vector<Event>& out) {
+    if (pole < 0 || std::size_t(pole) >= poles_.size() || actor == 0 || team > 1) return std::nullopt;
+    for (const Pole& p : poles_) {
+        if (p.action.actor == actor) return std::nullopt; // one action at a time for him
+    }
+    Pole& p = poles_[std::size_t(pole)];
+    const std::uint8_t owner = PoleTeam(p.colour);
+    if (!Carrying(actor)) {
+        // A take: a pole showing a flag that is not his team's (a white one, or the other team's).
+        if (!p.flapped || owner == team) return std::nullopt;
+        if (p.action.actor != 0) return FlagCode::TakeBusy;
+        p.action = {actor, team, false, now + flag::kActionMs};
+    } else {
+        // A place: the carrier, at an empty pole of his team.
+        if (p.flapped || owner != team) return std::nullopt;
+        if (p.action.actor != 0) return FlagCode::PlaceBusy;
+        p.action = {actor, team, true, now + flag::kActionMs};
+    }
+    out.push_back({Event::Kind::Started, actor, team, pole, 0});
+    return FlagCode::Done;
+}
+
+bool ArenaFlags::PickUp(std::uint32_t flag, std::uint32_t actor, std::uint8_t team, std::int64_t now, std::vector<Event>& out) {
+    if (actor == 0 || !dropped_.contains(flag) || Carrying(actor)) return false;
+    dropped_.erase(flag);
+    carriers_[actor] = {team, now};
+    out.push_back({Event::Kind::Carrier, actor, team, -1, flag});
+    return true;
+}
+
+void ArenaFlags::Drop(std::uint32_t actor, std::vector<Event>& out) {
+    const auto it = carriers_.find(actor);
+    if (it == carriers_.end()) return;
+    const std::uint8_t team = it->second.team;
+    carriers_.erase(it);
+    for (Pole& p : poles_) {
+        if (p.action.actor == actor) p.action = {}; // his action on a pole, if any
+    }
+    const std::uint32_t flag = nextFlag_++;
+    dropped_.insert(flag);
+    out.push_back({Event::Kind::Dropped, actor, team, -1, flag});
+}
+
+void ArenaFlags::Gone(std::uint32_t actor, std::vector<Event>& out) {
+    if (actor == 0) return;
+    for (Pole& p : poles_) {
+        if (p.action.actor == actor) p.action = {};
+    }
+    Drop(actor, out);
+}
+
+void ArenaFlags::Tick(std::int64_t now, std::vector<Event>& out) {
+    for (std::size_t i = 0; i < poles_.size(); ++i) {
+        Pole& p = poles_[i];
+        if (p.action.actor == 0 || now < p.action.until) continue;
+        const Action done = p.action;
+        p.action = {};
+        if (!done.place) {
+            if (!p.flapped || Carrying(done.actor)) continue;
+            p.flapped = false;
+            carriers_[done.actor] = {done.team, now};
+            out.push_back({Event::Kind::Carrier, done.actor, done.team, int(i), 0});
+        } else {
+            if (!Carrying(done.actor) || p.flapped) continue;
+            p.flapped = true;
+            carriers_.erase(done.actor);
+            out.push_back({Event::Kind::Placed, done.actor, done.team, int(i), 0});
+        }
+    }
+    std::vector<std::uint32_t> late;
+    for (const auto& [actor, c] : carriers_) {
+        if (now >= c.since + flag::kCarryMs) late.push_back(actor);
+    }
+    for (const std::uint32_t actor : late) Drop(actor, out);
+}
+
+std::vector<std::uint32_t> ArenaFlags::Carriers() const {
+    std::vector<std::uint32_t> out;
+    for (const auto& [actor, c] : carriers_) out.push_back(actor);
+    return out;
+}
+
+std::uint32_t ArenaFlags::FlagsOn(std::uint8_t team) const {
+    std::uint32_t n = 0;
+    for (const Pole& p : poles_) n += p.flapped && PoleTeam(p.colour) == team ? 1u : 0u;
+    return n;
+}
+
 } // namespace sr::game

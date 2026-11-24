@@ -6,7 +6,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <vector>
 
@@ -36,7 +38,7 @@ inline constexpr std::string_view kCoin = "ITEM_ETC_ARENA_COIN";
 inline constexpr std::string_view kCarrierSkill = "SKILL_BATTLE_ARENA_FLAG_GET_01";
 inline constexpr std::string_view kManager = "NPC_BATTLE_ARENA_MANAGER";
 inline constexpr std::string_view kDroppedFlag = "NPC_BATTLE_ARENA_FLAGWAR_FLAG";
-// The arena's poles by FlagMatch's index (0 white, 1 red: team 0's, 2 blue: team 1's) and their flagged twins.
+// The arena's poles by colour (0 white: nobody's, 1 red: team 0's, 2 blue: team 1's) and their flagged twins.
 inline constexpr std::string_view kPoleCodenames[3] = {"NPC_BATTLE_ARENA_FLAGWAR_FLAGPOLE_WHITE", "NPC_BATTLE_ARENA_FLAGWAR_FLAGPOLE_RED",
                                                        "NPC_BATTLE_ARENA_FLAGWAR_FLAGPOLE_BLUE"};
 inline constexpr std::string_view kFlapCodenames[3] = {"NPC_BATTLE_ARENA_FLAGWAR_FLAP_FLAGPOLE_WHITE", "NPC_BATTLE_ARENA_FLAGWAR_FLAP_FLAGPOLE_RED",
@@ -140,5 +142,68 @@ struct ArenaPlan {
 // next trader or hunter is 50 or below; the rest cancelled; a coin's team for the traders' side; the group by the
 // first pair's higher level.
 ArenaPlan PlanArena(arena::Mode mode, std::vector<ArenaUnit> units, int minPlayers = 0, const std::function<int()>& coin = {});
+
+// --- The flag kind's play ---------------------------------------------------------------------------------------------
+
+// The flag maps' play (the original's, its arena flag code from the poles' registration to the scores): every pole of the
+// map is a team's (0 red, 1 blue) or nobody's (2 white) and shows a flag or stands empty; at the start the white ones
+// show one. A player not carrying takes the flag of a pole not his team's (a white one, or the other team's: a placed
+// flag may be stolen), the carrier places it on an empty pole of his team; each takes 5 s, one action on a pole at a
+// time. A carrier keeps his flag 60 s, then it drops where he stands (his death, his leaving too); anyone not carrying
+// picks a dropped one up at once. The maps of 16 and 32 have 3 and 9 poles of each colour: several flags in play.
+class ArenaFlags {
+public:
+    struct Event {
+        enum class Kind : std::uint8_t { Started, Carrier, Placed, Dropped } kind = Kind::Started;
+        std::uint32_t actor = 0;
+        std::uint8_t team = 0;
+        int pole = -1;          // the pole acted on (Started), swapped (Carrier from a pole, Placed)
+        std::uint32_t flag = 0; // Dropped: the new dropped flag; Carrier: the dropped flag picked up (0: from a pole)
+    };
+    // A map's poles by colour (arena::kPoleCodenames' index: 0 white, 1 red, 2 blue).
+    void Reset(const std::vector<int>& colours);
+    // A pole selected in reach: a take or a place begun (Done, a Started event), the pole busy (TakeBusy, PlaceBusy), or
+    // nothing to do there (none; a carrier at a pole showing a flag: the caller's "you have a flag").
+    std::optional<FlagCode> SelectPole(int pole, std::uint32_t actor, std::uint8_t team, std::int64_t now, std::vector<Event>& out);
+    // A dropped flag selected: he carries it (false: not one, or he carries one already).
+    bool PickUp(std::uint32_t flag, std::uint32_t actor, std::uint8_t team, std::int64_t now, std::vector<Event>& out);
+    // His death or leaving: his action ended, his flag dropped.
+    void Gone(std::uint32_t actor, std::vector<Event>& out);
+    // The actions done after their 5 s, the carriers' 60 s.
+    void Tick(std::int64_t now, std::vector<Event>& out);
+
+    std::size_t Poles() const { return poles_.size(); }
+    int ColourOf(int pole) const { return poles_[std::size_t(pole)].colour; }
+    bool OnPole(int pole) const { return poles_[std::size_t(pole)].flapped; }
+    bool Carrying(std::uint32_t actor) const { return carriers_.contains(actor); }
+    std::vector<std::uint32_t> Carriers() const;
+    bool Dropped(std::uint32_t flag) const { return dropped_.contains(flag); }
+    // The flags on a team's poles (its 1000 points each).
+    std::uint32_t FlagsOn(std::uint8_t team) const;
+
+private:
+    struct Action {
+        std::uint32_t actor = 0; // 0: free
+        std::uint8_t team = 0;
+        bool place = false;      // else a take
+        std::int64_t until = 0;
+    };
+    struct Pole {
+        int colour = 0;
+        bool flapped = false;
+        Action action;
+    };
+    struct Carried {
+        std::uint8_t team = 0;
+        std::int64_t since = 0;
+    };
+    void Drop(std::uint32_t actor, std::vector<Event>& out);
+    std::vector<Pole> poles_;
+    std::map<std::uint32_t, Carried> carriers_;
+    std::set<std::uint32_t> dropped_;
+    std::uint32_t nextFlag_ = 1;
+};
+// A pole's team by its colour: red 0, blue 1, white none (2).
+inline std::uint8_t PoleTeam(int colour) { return colour == 1 ? 0 : colour == 2 ? 1 : 2; }
 
 } // namespace sr::game

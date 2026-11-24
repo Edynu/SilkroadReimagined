@@ -6,9 +6,9 @@
 //   16..23), or the developer's switches (on every server through the bus); each tells its own players its lines and
 //   takes their registrations at the manager into the shard's queue (sr_event_entries, event 2).
 // - The server owning the arena's maps (ARENA_*; the host) forms the matches before the play (game::PlanArena, ours),
-//   each a layer of its world (score 8 / 16 / 32, flag 8), the players taken in at their team's gate (A team 0, B team
+//   each a layer of its world (score and flag, 8 / 16 / 32), the players taken in at their team's gate (A team 0, B team
 //   1), those of the other server coming over. Score: the group's monsters of `_RefGameWorldNPC` (1 / 3 / 8 / 60 points,
-//   their respawns), 6 a player's kill; flag: the poles (game::FlagMatch), 1000 a flag on a team's pole, 1 a kill. The
+//   their respawns), 6 a player's kill; flag: every pole of the map (game::ArenaFlags), 1000 a flag on a team's pole, 1 a kill. The
 //   two teams are the original's relation 0x40 (foes from the move in, no records, no PK, KillRelation::Team); a death
 //   rises at its gate 10 s later. At the end each participant still in its world gets its result, Arena Coins by mode
 //   (lost in a full bag, as the original's) and skill experience (the level's GUST_Mob_Exp x the map's factor); home at
@@ -46,8 +46,7 @@ struct ArenaWorldSpec {
     std::vector<Spawn> spawns; // score: its monsters by group; flag: its poles
 };
 
-// The arena worlds from the database's original tables (score 8 / 16 / 32 and flag 8; the flag maps of several poles are
-// not built); `characters` names the spawns' rows.
+// The arena worlds from the database's original tables (score and flag, 8 / 16 / 32); `characters` names the spawns' rows.
 bool LoadArenaWorlds(Database& db, const assets::CharacterTable* characters, std::vector<ArenaWorldSpec>& out, std::string& error);
 
 class ArenaHost {

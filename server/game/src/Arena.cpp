@@ -67,7 +67,7 @@ int PoleIndex(std::string_view codename) {
 bool LoadArenaWorlds(Database& db, const assets::CharacterTable* characters, std::vector<ArenaWorldSpec>& out, std::string& error) {
     const QueryResult worlds = db.Query(
         "SELECT w.id, w.worldcodename128, 0, w.configgroupcodename128 FROM _refgame_world w "
-        "WHERE w.worldcodename128 LIKE 'INS_ARENA_SCORE_%' OR w.worldcodename128 = 'INS_ARENA_FLAG_8' ORDER BY w.id");
+        "WHERE w.worldcodename128 LIKE 'INS_ARENA_SCORE_%' OR w.worldcodename128 LIKE 'INS_ARENA_FLAG_%' ORDER BY w.id");
     if (!worlds.Ok()) {
         error = worlds.Error();
         return false;
@@ -151,10 +151,10 @@ struct Arenas::State {
         int group = 0;
         std::vector<Member> members;
         std::uint32_t scores[2] = {}, kills[2] = {};
-        game::FlagMatch flag;
-        std::uint32_t poles[3] = {};
-        proto::WorldPosition poleAt[3];
-        std::uint32_t dropped = 0;
+        game::ArenaFlags flags;                       // flag: the play (every pole of the map)
+        std::vector<std::uint32_t> poles;             // their NPCs, by the play's index
+        std::vector<proto::WorldPosition> poleAt;
+        std::map<std::uint32_t, std::uint32_t> dropped; // a dropped flag's id -> its NPC
         std::unordered_map<std::size_t, std::uint32_t> nestPoints;
         std::unordered_map<std::uint32_t, Clock::time_point> revivals;
         bool playing = false, ended = false, scoreDirty = false;
@@ -592,14 +592,18 @@ struct Arenas::State {
         m.mode = mode;
         m.group = group;
         if (spec.kind == ar::kFlag) {
-            m.flag.Reset();
+            // Every pole of the map's spawn list (the original's: 1 / 3 / 9 of each colour on the 8 / 16 / 32 maps).
+            std::vector<int> colours;
             for (const ArenaWorldSpec::Spawn& s : spec.spawns) {
-                const int pole = PoleIndex(s.codename);
-                if (pole < 0 || m.poles[pole] != 0) continue;
-                m.poleAt[pole] = s.at;
-                m.poleAt[pole].layer = layer;
-                m.poles[pole] = world.AddNpc(Model(m.flag.OnPole(pole) ? ar::kFlapCodenames[pole] : ar::kPoleCodenames[pole]), m.poleAt[pole], 0.0f);
+                const int colour = PoleIndex(s.codename);
+                if (colour < 0) continue;
+                colours.push_back(colour);
+                proto::WorldPosition at = s.at;
+                at.layer = layer;
+                m.poleAt.push_back(at);
             }
+            m.flags.Reset(colours);
+            for (std::size_t i = 0; i < colours.size(); ++i) m.poles.push_back(world.AddNpc(Model(PoleModel(m, int(i))), m.poleAt[i], 0.0f));
         } else if (monsters != nullptr) {
             // The group's monsters (ours: group 0, the lowest levels, takes group 1's).
             const int wanted = std::max(1, group);
@@ -627,7 +631,7 @@ struct Arenas::State {
             for (const auto& [nest, points] : m.nestPoints) monsters->RemoveNest(nest);
         for (const std::uint32_t pole : m.poles)
             if (pole != 0) world.Leave(pole);
-        if (m.dropped != 0) world.Leave(m.dropped);
+        for (const auto& [flag, npc] : m.dropped) world.Leave(npc);
     }
 
     proto::WorldPosition GateOf(const Match& m, std::uint8_t team) {
@@ -668,8 +672,8 @@ struct Arenas::State {
         Match* m = MatchOf(entity);
         if (m == nullptr) return;
         Member* member = m->ByEntity(entity);
-        std::vector<game::FlagMatch::Event> events;
-        m->flag.Gone(entity, events);
+        std::vector<game::ArenaFlags::Event> events;
+        m->flags.Gone(entity, events);
         Apply(*m, events);
         m->revivals.erase(entity);
         inside.erase(entity);
@@ -697,8 +701,8 @@ struct Arenas::State {
 
     void Totals(Match& m) {
         if (KindOf(m) == ar::kFlag) {
-            m.scores[0] = ar::kFlagPoints * (m.flag.OnPole(1) ? 1u : 0u) + m.kills[0];
-            m.scores[1] = ar::kFlagPoints * (m.flag.OnPole(2) ? 1u : 0u) + m.kills[1];
+            m.scores[0] = ar::kFlagPoints * m.flags.FlagsOn(0) + m.kills[0];
+            m.scores[1] = ar::kFlagPoints * m.flags.FlagsOn(1) + m.kills[1];
         }
     }
     proto::ArenaScores ScoresMessage(Match& m) {
@@ -725,8 +729,8 @@ struct Arenas::State {
 
     void Step(Match& m, Clock::time_point now) {
         if (m.ended) return;
-        std::vector<game::FlagMatch::Event> events;
-        if (KindOf(m) == ar::kFlag) m.flag.Tick(Ms(now), events);
+        std::vector<game::ArenaFlags::Event> events;
+        if (KindOf(m) == ar::kFlag) m.flags.Tick(Ms(now), events);
         Apply(m, events);
         if (m.playing && now >= m.nextClock) {
             m.nextClock = now + std::chrono::milliseconds(ar::kClockMs);
@@ -755,14 +759,19 @@ struct Arenas::State {
         m.scoreDirty = true;
     }
 
+    // A pole's model: its colour's, its flagged twin while it shows a flag.
+    static std::string_view PoleModel(const Match& m, int pole) {
+        const int colour = m.flags.ColourOf(pole);
+        return m.flags.OnPole(pole) ? ar::kFlapCodenames[colour] : ar::kPoleCodenames[colour];
+    }
     void SwapPole(Match& m, int pole) {
-        if (m.poles[pole] != 0) world.Leave(m.poles[pole]);
-        m.poles[pole] = world.AddNpc(Model(m.flag.OnPole(pole) ? ar::kFlapCodenames[pole] : ar::kPoleCodenames[pole]), m.poleAt[pole], 0.0f);
+        if (m.poles[std::size_t(pole)] != 0) world.Leave(m.poles[std::size_t(pole)]);
+        m.poles[std::size_t(pole)] = world.AddNpc(Model(PoleModel(m, pole)), m.poleAt[std::size_t(pole)], 0.0f);
     }
 
-    void Apply(Match& m, const std::vector<game::FlagMatch::Event>& events) {
-        using K = game::FlagMatch::Event::Kind;
-        for (const game::FlagMatch::Event& e : events) {
+    void Apply(Match& m, const std::vector<game::ArenaFlags::Event>& events) {
+        using K = game::ArenaFlags::Event::Kind;
+        for (const game::ArenaFlags::Event& e : events) {
             const Member* actor = m.ByEntity(e.actor);
             const std::string name = actor != nullptr ? actor->name : std::string();
             switch (e.kind) {
@@ -777,6 +786,10 @@ struct Arenas::State {
             }
             case K::Carrier:
                 if (e.pole >= 0) SwapPole(m, e.pole);
+                if (const auto it = m.dropped.find(e.flag); e.flag != 0 && it != m.dropped.end()) { // a dropped flag picked up
+                    world.Leave(it->second);
+                    m.dropped.erase(it);
+                }
                 arena.ArenaBuff(e.actor, true);
                 ForInside(m, [&](Member& x) {
                     if (x.team == e.team) Tell(x.entity, ArenaCode::OurCarrier, 0, e.team, name);
@@ -793,10 +806,9 @@ struct Arenas::State {
             case K::Dropped: {
                 arena.ArenaBuff(e.actor, false);
                 const auto where = world.Where(e.actor);
-                proto::WorldPosition at = where ? where->position : m.poleAt[0];
+                proto::WorldPosition at = where ? where->position : m.spec->gates[0];
                 at.layer = m.layer;
-                if (m.dropped != 0) world.Leave(m.dropped);
-                m.dropped = world.AddNpc(Model(ar::kDroppedFlag), at, 0.0f);
+                m.dropped[e.flag] = world.AddNpc(Model(ar::kDroppedFlag), at, 0.0f);
                 ForInside(m, [&](Member& x) { Tell(x.entity, ArenaCode::Dropped); });
                 break;
             }
@@ -808,42 +820,42 @@ struct Arenas::State {
         Match* m = MatchOf(entity);
         if (m == nullptr || target == 0 || KindOf(*m) != ar::kFlag) return false;
         int pole = -1;
-        for (int i = 0; i < 3; ++i)
-            if (m->poles[i] == target) pole = i;
-        if (pole < 0 && target != m->dropped) return false;
+        for (std::size_t i = 0; i < m->poles.size(); ++i)
+            if (m->poles[i] == target) pole = int(i);
+        std::uint32_t flag = 0;
+        for (const auto& [id, npc] : m->dropped)
+            if (npc == target) flag = id;
+        if (pole < 0 && flag == 0) return false;
         Member* member = m->ByEntity(entity);
         const auto p = host.FlagPlayer(entity);
         if (member == nullptr || !p || p->dead || m->ended) return true;
-        std::vector<game::FlagMatch::Event> events;
+        std::vector<game::ArenaFlags::Event> events;
         const std::int64_t now = Ms(Clock::now());
         if (pole >= 0) {
-            if (m->flag.Carrier() == entity && m->flag.OnPole(pole)) {
+            if (m->flags.Carrying(entity) && m->flags.OnPole(pole)) {
                 Tell(entity, ArenaCode::HasFlag);
                 return true;
             }
-            if (Distance(p->at, m->poleAt[pole]) > game::flag::kReach) {
-                host.FlagWalkTo(entity, m->poleAt[pole]);
+            if (Distance(p->at, m->poleAt[std::size_t(pole)]) > game::flag::kReach) {
+                host.FlagWalkTo(entity, m->poleAt[std::size_t(pole)]);
                 return true;
             }
-            const auto code = m->flag.SelectPole(pole, entity, member->team, now, events);
+            const auto code = m->flags.SelectPole(pole, entity, member->team, now, events);
             if (code == game::FlagCode::TakeBusy) Tell(entity, ArenaCode::TakeBusy);
             if (code == game::FlagCode::PlaceBusy) Tell(entity, ArenaCode::PlaceBusy);
             Apply(*m, events);
             return true;
         }
-        if (m->flag.Carrier() == entity) {
+        if (m->flags.Carrying(entity)) {
             Tell(entity, ArenaCode::HasFlag);
             return true;
         }
-        const auto there = world.Where(m->dropped);
+        const auto there = world.Where(target);
         if (!there || !host.FlagWayClear(p->at, there->position)) {
             Tell(entity, ArenaCode::FlagBlocked);
             return true;
         }
-        if (m->flag.PickUp(entity, member->team, now, events)) {
-            world.Leave(m->dropped);
-            m->dropped = 0;
-        }
+        m->flags.PickUp(flag, entity, member->team, now, events); // its NPC taken away by the Carrier event
         Apply(*m, events);
         return true;
     }
@@ -853,7 +865,7 @@ struct Arenas::State {
             if (m.ended) continue;
             Totals(m);
             m.ended = true;
-            if (const std::uint32_t carrier = m.flag.Carrier()) arena.ArenaBuff(carrier, false);
+            for (const std::uint32_t carrier : m.flags.Carriers()) arena.ArenaBuff(carrier, false);
             const std::optional<std::uint8_t> winner = ar::WinnerOf(m.scores[0], m.scores[1]);
             ForInside(m, [&](Member& x) {
                 host.FlagDeed(x.character, "event-matches"); // a match played (the beta quests' degree 8)
@@ -938,8 +950,8 @@ void Arenas::Leave(std::uint32_t entity) {
     }
     State::Match* m = s.MatchOf(entity);
     if (m == nullptr) return;
-    std::vector<game::FlagMatch::Event> events;
-    m->flag.Gone(entity, events);
+    std::vector<game::ArenaFlags::Event> events;
+    m->flags.Gone(entity, events);
     s.Apply(*m, events);
     m->revivals.erase(entity);
     if (State::Member* member = m->ByEntity(entity)) member->entity = 0;
@@ -1000,8 +1012,8 @@ void Arenas::Died(std::uint32_t victim, std::uint32_t killer) {
     State& s = *s_;
     State::Match* m = s.MatchOf(victim);
     if (m == nullptr) return;
-    std::vector<game::FlagMatch::Event> events;
-    m->flag.Gone(victim, events);
+    std::vector<game::ArenaFlags::Event> events;
+    m->flags.Gone(victim, events);
     s.Apply(*m, events);
     m->revivals[victim] = Clock::now() + std::chrono::milliseconds(ar::kReviveMs);
     s.Tell(victim, ArenaCode::Revival, 10);
