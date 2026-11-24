@@ -374,6 +374,33 @@ talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_13_05
 talk NPC_CH_MOONSHADOW done @SN_TALK_QNO_TQ_BAEKRYEONG_16_19
 talk NPC_CH_MOONSHADOW bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_16_20
 
+# QNO_TQ_BAEKRYOUNG_17 ("The Blood of the White Viper"; SR_GameServer's own class). WalYoung's: a party sharing both; its
+# master asked (_24) with the row _23 (a member _26, a transport out _28, no party _25), the members holding the quest into
+# the White Viper's passage: three stages, the original's worlds INS_QNO_TQ_BAEKRYEONG_17_1..3 (ours one instance, its
+# party moved): ShinMoo (_07; slain _08, the time's end _09), the Black Snake (_10, _11, _12), the White Snake (_13, _14,
+# _15), each 50 s after the one before died (_29), 30 minutes from the first battle (_21, _19, _20). The White Snake slain:
+# a way out where she lay; her kill fills the Small Empty Bottle given at the start. WalYoung: _06.
+quest QNO_TQ_BAEKRYOUNG_17
+start level 90-
+start after all QNO_TQ_BAEKRYOUNG_16
+start party
+repeat 1
+giver NPC_CH_MOONSHADOW
+npc NPC_CH_MOONSHADOW
+finish NPC_CH_MOONSHADOW
+start-item ITEM_QNO_TQ_BAEKRYEONG_17_01 1
+goal kill 1 MOB_QT_TQ_WHITESNAKE text @SN_CON_QNO_TQ_BAEKRYOUNG_17_01
+on talk NPC_CH_MOONSHADOW row @SN_TALK_QNO_TQ_BAEKRYEONG_17_23 ask @SN_TALK_QNO_TQ_BAEKRYEONG_17_24 start -32765 1334 -49 -209 instance INS_QNO_TQ_BAEKRYEONG_17_1 after 30 minutes 30 master @SN_TALK_QNO_TQ_BAEKRYEONG_17_26 transport @SN_TALK_QNO_TQ_BAEKRYEONG_17_28 begun @SN_TALK_QNO_TQ_BAEKRYEONG_17_21 warn 10 @SN_TALK_QNO_TQ_BAEKRYEONG_17_19 warn 5 @SN_TALK_QNO_TQ_BAEKRYEONG_17_20 general MOB_QT_TQ_FLAMEMASTER says @SN_TALK_QNO_TQ_BAEKRYEONG_17_07 dies @SN_TALK_QNO_TQ_BAEKRYEONG_17_08 last @SN_TALK_QNO_TQ_BAEKRYEONG_17_09 general MOB_QT_TQ_BLACKSNAKE moves-to -32766 7211 140 -1 says @SN_TALK_QNO_TQ_BAEKRYEONG_17_10 dies @SN_TALK_QNO_TQ_BAEKRYEONG_17_11 last @SN_TALK_QNO_TQ_BAEKRYEONG_17_12 general MOB_QT_TQ_WHITESNAKE moves-to -32766 5 140 7189 says @SN_TALK_QNO_TQ_BAEKRYEONG_17_13 dies @SN_TALK_QNO_TQ_BAEKRYEONG_17_14 last @SN_TALK_QNO_TQ_BAEKRYEONG_17_15 next 50 moving @SN_TALK_QNO_TQ_BAEKRYEONG_17_29 way-out
+on kill MOB_QT_TQ_WHITESNAKE need ITEM_QNO_TQ_BAEKRYEONG_17_01 take ITEM_QNO_TQ_BAEKRYEONG_17_01 give ITEM_QNO_TQ_BAEKRYEONG_17_02
+talk NPC_CH_MOONSHADOW greeting @SN_NPC_CH_MOONSHADOW_QS
+talk NPC_CH_MOONSHADOW offer @SN_TALK_QNO_TQ_BAEKRYEONG_17_01
+talk NPC_CH_MOONSHADOW accepted @SN_TALK_QNO_TQ_BAEKRYEONG_17_02
+talk NPC_CH_MOONSHADOW denied @SN_TALK_QNO_TQ_BAEKRYEONG_17_03
+talk NPC_CH_MOONSHADOW bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_17_05
+talk NPC_CH_MOONSHADOW done @SN_TALK_QNO_TQ_BAEKRYEONG_17_06
+talk NPC_CH_MOONSHADOW not-party @SN_TALK_QNO_TQ_BAEKRYEONG_17_25
+talk NPC_CH_MOONSHADOW middle @SN_TALK_QNO_TQ_BAEKRYEONG_17_26
+
 quest QNO_TQ_BAEKRYOUNG_11
 start level 88-
 start after all QNO_TQ_BAEKRYOUNG_10

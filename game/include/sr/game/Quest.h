@@ -416,10 +416,14 @@ struct QuestDef {
             struct General {
                 std::string monster;
                 QuestText says, dies, last;
+                // Its stage (BAEKRYOUNG_17's three worlds: the Flame Master's, the Black Snake's, the White Snake's): everyone
+                // inside moved there before it comes (`next` seconds after the one before died, `moving` said then).
+                std::optional<UseRule::Place> movesTo;
                 bool operator==(const General&) const = default;
             };
             std::vector<General> generals;
             std::uint32_t next = 10;
+            QuestText moving;
             // Where each comes about the master (or the first one inside): the quest service's banded spawn, its radius drawn
             // in `firstNear`..`firstFar` for the first, `near`..`far` for the next ones (20..100; GENERALORDER_4's first
             // 190..200, the next 90..100: the original's rand / 32767 x 10 + 190, + 90).

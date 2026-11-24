@@ -2089,6 +2089,14 @@ void Quests::TickWorlds(Clock::time_point now) {
         switch (w.phase) {
         case QuestWorld::Phase::Waiting: {
             if (now < w.next) break;
+            // A general's stage: everyone inside moved there first, it comes 3 s on (BAEKRYOUNG_17's worlds in turn).
+            if (!spec.generals.empty() && spec.generals[w.general].movesTo && !w.moved) {
+                const QuestDef::UseRule::Place& p = *spec.generals[w.general].movesTo;
+                for (const std::uint32_t m : w.inside) host_.QuestMoveInside(m, proto::WorldPosition{p.region, p.x, p.y, p.z, w.layer});
+                w.moved = true;
+                w.next = now + std::chrono::seconds(3);
+                break;
+            }
             // Its unique (or the general whose turn it is) 20..100 from the master (or the first one inside), in the instance's
             // layer (ORNAMENT_4's).
             const std::uint32_t by = w.inside.contains(w.master) ? w.master : *w.inside.begin();
@@ -2110,6 +2118,7 @@ void Quests::TickWorlds(Clock::time_point now) {
             if (!nest) break; // its ground not in yet: the next second
             w.unique = *nest;
             w.uniqueAt = at;
+            w.moved = false;
             // The opening: 2 s on its first line, each next 5 s on, the battle begun 5 s after the last (IVY_3's tick
             // EVENT_TIMER 2000, 5000 between Ivy's _11, the player's _12, Ivy's _13, the
             // begin; EASTEU_21's _14 then _21 alike; a general's line,
@@ -2128,6 +2137,7 @@ void Quests::TickWorlds(Clock::time_point now) {
                 if (chain && w.general + 1 < spec.generals.size()) {
                     all(spec.generals[w.general].dies);
                     ++w.general;
+                    if (spec.generals[w.general].movesTo) all(spec.moving); // "You will be teleported ... in 50 seconds." 
                     w.phase = QuestWorld::Phase::Waiting;
                     w.next = now + std::chrono::seconds(spec.next);
                     break;

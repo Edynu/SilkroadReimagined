@@ -4943,6 +4943,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void QuestWorldLeave(std::uint32_t entity) override {
         if (instances) instances->ExitSiege(entity);
     }
+    void QuestMoveInside(std::uint32_t entity, const proto::WorldPosition& to) override { InstanceTeleport(entity, to); }
     void QuestScene(std::uint32_t entity, const std::string& name) override {
         if (Peer* peer = peers->Find(world->PeerOf(entity))) SendMessage(*peer->connection, proto::QuestScene{name});
     }

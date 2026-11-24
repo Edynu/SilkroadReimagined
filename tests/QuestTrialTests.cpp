@@ -147,6 +147,11 @@ struct TrialHost : server::QuestHost {
         return std::uint32_t(900 + coses.size());
     }
     void QuestCosRemove(std::uint32_t cos) override { removed.insert(cos); }
+    std::vector<proto::WorldPosition> moves;
+    void QuestMoveInside(std::uint32_t, const proto::WorldPosition& to) override {
+        moves.push_back(to);
+        who.position = to;
+    }
     struct Way {
         proto::WorldPosition at;
         std::optional<proto::WorldPosition> to;
@@ -576,6 +581,54 @@ TEST_CASE("Quest trial: BAEKRYOUNG_15's scene, paid inside, 16 begun; 16's escor
     CHECK(host.layers[1] == 0);
     REQUIRE(Ask(quests, proto::QuestTalk{12, q16->id}));
     CHECK(host.Last<proto::QuestSays>().moment == "done");
+}
+
+TEST_CASE("Quest talk rule: BAEKRYOUNG_17's three stages: ShinMoo, the Black Snake, the White Snake, the party moved between them; the way out (a made-up host)") {
+    const auto coded = Coded();
+    TrialHost host;
+    host.npcs[12] = "NPC_CH_MOONSHADOW";
+    host.who.position = {25000, 100.0f, 0.0f, 100.0f, 0};
+    server::Quests quests(host, {});
+    quests.Load(Numbered(coded));
+    const game::QuestDef* q = quests.Find("QNO_TQ_BAEKRYOUNG_17");
+    REQUIRE(q != nullptr);
+    game::QuestDef again;
+    std::string error;
+    REQUIRE_MESSAGE(game::ParseQuest(game::WriteQuest(*q), again, error), error);
+    CHECK(again.onUse == q->onUse);
+    quests.Enter(1, {Record(q->id, proto::QuestStatus::Achieving)});
+    host.who.sharedParty = true;
+    host.party = {1};
+    REQUIRE(Ask(quests, proto::QuestTalk{12, q->id}));
+    CHECK(host.Last<proto::QuestSays>().text == "SN_TALK_QNO_TQ_BAEKRYEONG_17_24");
+    REQUIRE(Ask(quests, proto::QuestHandIn{12, q->id, {0}}));
+    REQUIRE(quests.Worlds().size() == 1);
+    CHECK(host.enteredAt->region == 0x8003);
+    host.who.position = *host.enteredAt;
+    host.who.position.layer = 0;
+    auto at = std::chrono::steady_clock::now() + 31s;
+    const char* uniques[] = {"MOB_QT_TQ_FLAMEMASTER", "MOB_QT_TQ_BLACKSNAKE", "MOB_QT_TQ_WHITESNAKE"};
+    const char* says[] = {"SN_TALK_QNO_TQ_BAEKRYEONG_17_07", "SN_TALK_QNO_TQ_BAEKRYEONG_17_10", "SN_TALK_QNO_TQ_BAEKRYEONG_17_13"};
+    for (int g = 0; g < 3; ++g) {
+        CAPTURE(g);
+        for (int i = 0; i < 60 && host.Count(uniques[g]) == 0; ++i, at += 1s) quests.Tick(at);
+        REQUIRE(host.Count(uniques[g]) == 1);
+        for (int i = 0; i < 3; ++i, at += 1s) quests.Tick(at);
+        CHECK(host.Told(1, says[g]));
+        host.raised.back().standing = false;
+        quests.Tick(at);
+        at += 1s;
+        if (g < 2) {
+            CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_17_29"));
+            REQUIRE(host.moves.size() == std::size_t(g)); // moved 50 s on
+            for (int i = 0; i < 51; ++i, at += 1s) quests.Tick(at);
+            REQUIRE(host.moves.size() == std::size_t(g + 1));
+            CHECK(host.moves.back().region == 0x8002);
+        }
+    }
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_17_14"));
+    REQUIRE(host.ways.size() == 1);
+    CHECK_FALSE(host.ways[0].to.has_value());
 }
 
 TEST_CASE("Quest trial: the ritual's ghost counts only in berserk; in berserk the charm becomes the piece, else failed; out 10 s on (a made-up host)") {

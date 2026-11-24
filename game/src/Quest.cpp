@@ -163,11 +163,13 @@ std::string UseLine(const QuestDef::UseRule& u) {
         if (!w.over.Empty()) s += " over " + Text(w.over);
         for (const QuestDef::UseRule::World::General& g : w.generals) {
             s += " general " + g.monster;
+            if (g.movesTo) s += std::format(" moves-to {} {} {} {}", static_cast<std::int16_t>(g.movesTo->region), Number(g.movesTo->x), Number(g.movesTo->y), Number(g.movesTo->z));
             if (!g.says.Empty()) s += " says " + Text(g.says);
             if (!g.dies.Empty()) s += " dies " + Text(g.dies);
             if (!g.last.Empty()) s += " last " + Text(g.last);
         }
         if (!w.generals.empty()) s += std::format(" next {}", w.next);
+        if (!w.moving.Empty()) s += " moving " + Text(w.moving);
         if (w.near != 20 || w.far != 100) s += std::format(" near {} {}", Number(w.near), Number(w.far));
         if (w.firstNear != w.near || w.firstFar != w.far) s += std::format(" first-near {} {}", Number(w.firstNear), Number(w.firstFar));
         if (w.wayOut) {
@@ -840,7 +842,8 @@ bool ParseUse(Reader& r, QuestDef& q, bool talk) {
         } else if (what == "instance") {
             u.instance = QuestDef::UseRule::World{};
             ok = r.Word(u.instance->world, "the instance world");
-        } else if (u.instance && (what == "general" || what == "says" || what == "dies" || what == "last" || what == "next")) {
+        } else if (u.instance && (what == "general" || what == "says" || what == "dies" || what == "last" || what == "next" || what == "moves-to" ||
+                                  what == "moving")) {
             // The uniques in turn (World::generals): `general MOB [says TEXT] [dies TEXT] [last TEXT]`, `next S`.
             auto& generals = u.instance->generals;
             if (what == "general") {
@@ -848,8 +851,16 @@ bool ParseUse(Reader& r, QuestDef& q, bool talk) {
                 ok = r.Word(generals.back().monster, "the general");
             } else if (what == "next") {
                 ok = r.Integer(u.instance->next, "the seconds before the next one");
+            } else if (what == "moving") {
+                ok = r.Text(u.instance->moving, "what is said before the move");
             } else if (generals.empty()) {
                 ok = r.Fail(std::format("'{}' belongs to a 'general'", what));
+            } else if (what == "moves-to") {
+                QuestDef::UseRule::Place p;
+                int region = 0;
+                ok = r.Integer(region, "the stage's region") && r.Real(p.x, "x") && r.Real(p.y, "y") && r.Real(p.z, "z");
+                p.region = static_cast<std::uint16_t>(region);
+                if (ok) generals.back().movesTo = p;
             } else {
                 ok = r.Text(what == "says" ? generals.back().says : what == "dies" ? generals.back().dies : generals.back().last, "what is said");
             }

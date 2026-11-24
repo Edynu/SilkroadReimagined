@@ -231,6 +231,8 @@ public:
         return false;
     }
     virtual void QuestWorldLeave(std::uint32_t player) { (void)player; }
+    // Moved within its instance's layer to a place (a stage of the generals in turn, World::General::movesTo).
+    virtual void QuestMoveInside(std::uint32_t player, const game::proto::WorldPosition& to) { (void)player, (void)to; }
     // A quest's scene played on the player's client (proto::QuestScene: its script\q_script\NAME.txt).
     virtual void QuestScene(std::uint32_t player, const std::string& name) { (void)player, (void)name; }
     // A player taken into a layer at `at` (a trial's start, _RefInstance_World_Start_Pos; false: not taken).
@@ -399,6 +401,7 @@ private:
         enum class Phase : std::uint8_t { Waiting, Opening, Fighting, Done, Ending } phase = Phase::Waiting;
         std::size_t line = 0;    // Opening: the `comes` lines said so far
         std::size_t general = 0; // the generals' turn (World::generals)
+        bool moved = false;      // Waiting: everyone moved to its general's stage (World::General::movesTo)
         game::proto::WorldPosition uniqueAt; // where the unique (the general) came
         std::optional<Clock::time_point> ends; // the time's end, from the (first) battle's begin
         Clock::time_point next; // Waiting: the unique's coming; Fighting: the time's end; Ending: everyone out
