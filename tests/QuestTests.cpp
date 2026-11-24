@@ -599,6 +599,38 @@ TEST_CASE("Quests: the premium's purification seeds: offered with the premium, d
     CHECK(host.Last<proto::NpcQuests>().rows.empty());
 }
 
+TEST_CASE("Quests: a reward by country gives the player's country's items only; a pick of the other's refused (a made-up host)") {
+    RulesHost host;
+    host.npcs = {{kGiver, "NPC_GIVER"}};
+    host.near = {kGiver};
+    server::Quests quests(host, {1.0, 1.0});
+    std::vector<game::QuestDef> defs;
+    defs.push_back(Parse("quest QNO_T_RINGS\nid 20050\nstart level 1-\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 1 MOB_WOLF\n"
+                         "reward item ITEM_CH_RING_T 1\nreward item ITEM_EU_RING_T 1\nreward item ITEM_ETC_T 1\nreward by-country\n"));
+    defs.push_back(Parse("quest QNO_T_PICK\nid 20051\nstart level 1-\ngiver NPC_GIVER\nfinish NPC_GIVER\ngoal kill 1 MOB_WOLF\n"
+                         "reward item ITEM_CH_RING_T 1\nreward item ITEM_EU_RING_T 1\nreward choose 1\nreward by-country\n"));
+    quests.Load(defs);
+    quests.Enter(1, {});
+    const std::uint32_t me = 1;
+    // A China player (the host's): the China ring and the item of both countries, not the Europe one.
+    Ask(quests, proto::QuestAccept{kGiver, 20050});
+    quests.Killed(9000, "MOB_WOLF", 0, me);
+    Ask(quests, proto::QuestHandIn{kGiver, 20050, {}});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    CHECK(host.bag["ITEM_CH_RING_T"] == 1);
+    CHECK(host.bag["ITEM_ETC_T"] == 1);
+    CHECK(host.bag["ITEM_EU_RING_T"] == 0);
+    // A choice: the Europe ring refused, the China one given.
+    Ask(quests, proto::QuestAccept{kGiver, 20051});
+    quests.Killed(9000, "MOB_WOLF", 0, me);
+    Ask(quests, proto::QuestHandIn{kGiver, 20051, {1}});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::BadChoice);
+    CHECK(host.bag["ITEM_EU_RING_T"] == 0);
+    Ask(quests, proto::QuestHandIn{kGiver, 20051, {0}});
+    CHECK(host.Last<proto::QuestAnswer>().code == proto::QuestCode::Ok);
+    CHECK(host.bag["ITEM_CH_RING_T"] == 2);
+}
+
 TEST_CASE("Quests: offered, counted, handed in and rewarded by their rules (a made-up host)") {
     RulesHost host;
     host.npcs = {{kGiver, "NPC_GIVER"}, {kFinisher, "NPC_FINISHER"}, {kFar, "NPC_GIVER"}};

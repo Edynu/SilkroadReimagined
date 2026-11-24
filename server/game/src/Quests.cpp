@@ -857,15 +857,31 @@ bool Quests::RewardFits(std::uint32_t entity, const QuestDef& q) const {
 }
 
 void Quests::Pay(std::uint32_t entity, PlayerQuests& p, const QuestDef& q, QuestRecord& r, std::uint32_t npc, std::span<const std::uint8_t> choices) {
-    // The reward's items: all of them, or the ones chosen.
+    // A reward by country (_RefQuestReward.IsCheckCountry, 17 rows): only the player's country's items, a China item's
+    // codename ITEM_CH_, a Europe one's ITEM_EU_, the others for both (ours: where the original filters them is not
+    // traced; BAEKRYOUNG_17 lists both countries' rings).
+    const auto who = host_.QuestPlayer(entity);
+    const auto forCountry = [&](const std::string& item) {
+        if (!q.reward.byCountry || !who) return true;
+        const bool europe = who->race == "europe";
+        if (item.starts_with("ITEM_CH_")) return !europe;
+        if (item.starts_with("ITEM_EU_")) return europe;
+        return true;
+    };
+    // The reward's items: all of them (by country), or the ones chosen (none of the other country's).
     std::vector<QuestGoal::Items> given;
     if (q.reward.choose != 0) {
         std::set<std::uint8_t> picked(choices.begin(), choices.end());
         if (picked.size() != q.reward.choose || picked.size() != choices.size() || *picked.rbegin() >= q.reward.items.size())
             return Answer(entity, q.id, proto::QuestCode::BadChoice);
-        for (std::uint8_t i : picked) given.push_back({q.reward.items[i].item, q.reward.items[i].count});
+        for (std::uint8_t i : picked) {
+            if (!forCountry(q.reward.items[i].item)) return Answer(entity, q.id, proto::QuestCode::BadChoice);
+            given.push_back({q.reward.items[i].item, q.reward.items[i].count});
+        }
     } else {
-        for (const auto& i : q.reward.items) given.push_back({i.item, i.count});
+        for (const auto& i : q.reward.items) {
+            if (forCountry(i.item)) given.push_back({i.item, i.count});
+        }
     }
     // What is needed besides the goals (items, gold): short of it, the finisher says so.
     if (const auto who = host_.QuestPlayer(entity); !who || !NeedsHeld(entity, *who, q)) {
