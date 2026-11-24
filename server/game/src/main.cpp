@@ -810,6 +810,9 @@ int main(int argc, char** argv) {
                     std::uint32_t nestId = 0, hive = 0;
                     int hiveMax = 0;
                     if (!(row >> nestId >> hive >> hiveMax)) nestId = hive = 0, hiveMax = 0;
+                    // Then its tactics' trace and boundary (records made before them: 500 and 1).
+                    int trace = 500, boundary = 1;
+                    if (!(row >> trace >> boundary)) trace = 500, boundary = 1;
                     server::MonsterNest& n = policies[{code, region, x, z}];
                     n.radius = radius;
                     n.spawnRadius = spawnRadius;
@@ -822,6 +825,8 @@ int main(int argc, char** argv) {
                     n.nestId = nestId;
                     n.hive = hive;
                     n.hiveMax = hiveMax;
+                    n.trace = float(trace);
+                    n.traceBoundary = boundary;
                 }
             }
             std::size_t matched = 0, instanceOwn = 0;

@@ -49,6 +49,7 @@ struct ObjectRow {
     float phyDefence = 0, magDefence = 0, phyParry = 0, magParry = 0, evasion = 0, block = 0, hitRate = 0, critical = 0;
     int country = 0; // col 14: 0 China, 1 Europe, 3 either
     int scalePercent = 100;      // col 48: the body's size in percent
+    std::uint32_t maxContain = 0; // col 40 (MaxContain): a monster's HP back each 4 s while it stands (its natural recovery)
     int materialKind = 0;        // col 93: the .bsr material set it wears (champions wear set 2)
     float walkSpeed = 0, runSpeed = 0; // cols 46, 47
     std::string iconPath;        // col 54, relative to the icon folder (a COS's status icon)

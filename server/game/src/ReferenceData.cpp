@@ -407,7 +407,8 @@ bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::s
     QueryResult r = db.Query(
         "SELECT o.codename128, n.nregiondbid, n.flocalposx, n.flocalposz, n.nradius, n.ngenerateradius, n.nchampiongenpercentage, "
         "       n.dwdelaytimemin, n.dwdelaytimemax, n.dwmaxtotalcount, t.btaggresstype, t.nsightrange, "
-        "       n.dwnestid, n.dwhiveid, coalesce(h.dwoverwritemaxtotalcount, 0), coalesce(h.gameworldid, 1) BETWEEN 51 AND 59 "
+        "       n.dwnestid, n.dwhiveid, coalesce(h.dwoverwritemaxtotalcount, 0), coalesce(h.gameworldid, 1) BETWEEN 51 AND 59, "
+        "       t.tracedata, t.bttraceboundary "
         "FROM tab_refnest n JOIN tab_reftactics t ON t.dwtacticsid = n.dwtacticsid JOIN _refobjcommon o ON o.id = t.dwobjid "
         "LEFT JOIN tab_refhive h ON h.dwhiveid = n.dwhiveid "
         "WHERE o.typeid1 = 1 AND o.typeid2 = 2 AND o.typeid3 = 1 ORDER BY n.dwnestid");
@@ -429,10 +430,10 @@ bool NestRecords(Database& db, std::string& out, ReferenceCounts& counts, std::s
             continue;
         }
         if (rows.contains(key)) continue;
-        rows[key] = std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.Int(i, 4), r.Int(i, 5), r.Int(i, 6), r.Int(i, 7), r.Int(i, 8),
-                                r.Int(i, 9), r.Int(i, 10) == 0 ? 1 : 0, r.Int(i, 11), r.Int(i, 12), r.Int(i, 13), r.Int(i, 14));
+        rows[key] = std::format("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.Int(i, 4), r.Int(i, 5), r.Int(i, 6), r.Int(i, 7), r.Int(i, 8),
+                                r.Int(i, 9), r.Int(i, 10) == 0 ? 1 : 0, r.Int(i, 11), r.Int(i, 12), r.Int(i, 13), r.Int(i, 14), r.Int(i, 16), r.Int(i, 17));
     }
-    out = "# codename\tregion\tx\tz\tradius\tspawnRadius\tchampion%\tdelayMin\tdelayMax\tmaxCount\taggressive\tsight\tnest\thive\thiveMax "
+    out = "# codename\tregion\tx\tz\tradius\tspawnRadius\tchampion%\tdelayMin\tdelayMax\tmaxCount\taggressive\tsight\tnest\thive\thiveMax\ttrace\tboundary "
           "(from the database's original tables)\n";
     for (const auto& [key, values] : rows) {
         out += std::format("{}\t{}\t{}\t{}\t{}\n", std::get<0>(key), std::get<1>(key), std::get<2>(key), std::get<3>(key), values);

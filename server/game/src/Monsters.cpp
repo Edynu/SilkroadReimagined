@@ -24,8 +24,8 @@ namespace proto = game::proto;
 namespace {
 
 constexpr float kPlayerRadius = 5.0f;            // a player's body in reaches (ours)
-constexpr float kGiveUpDistance = 500.0f;        // from its target (TraceData 500 in every tactics row)
-constexpr float kMinLeash = 300.0f;              // from home, for nests with a small radius (ours)
+constexpr float kGiveUpDistance = 500.0f;        // from its target (TraceData's most common: a pending hit's reach, the bandits')
+constexpr auto kRecoveryTick = std::chrono::seconds(4); // a monster's natural recovery, every 4 s while it stands
 constexpr double kChaseLeg = 300.0;              // a chase's longest leg toward where its target runs (ours)
 constexpr auto kCorpse = std::chrono::seconds(5); // a killed monster lies this long (ours)
 
@@ -111,6 +111,8 @@ struct Monsters::State {
         Clock::time_point nextLook; // an idle one's next look around for a player
         std::uint32_t summoned = 0; // its nest's summon skills used (a bit each)
         std::uint32_t body = 0;     // a god's linked loot body (its _DROP summon)
+        Clock::time_point nextRecovery; // its natural recovery's next tick
+        Clock::time_point lastStrike;   // its last swing (a chaser that has not struck for 5 s walks to a far target)
         struct PendingHit {
             Clock::time_point at;
             std::uint32_t target = 0;
@@ -820,6 +822,7 @@ struct Monsters::State {
         m.target = target;
         m.aim = {};
         m.nextThink = now;
+        m.lastStrike = now; // (ours: a fresh chase runs; the 5 s count from its start)
         if (m.nextSwing < now) m.nextSwing = now + Seconds(Uniform(0.2f, 0.6f));
     }
 
@@ -829,11 +832,7 @@ struct Monsters::State {
         Forget(m);
         m.pending.clear(), m.swingEnds = {};
         m.damageBy.clear();
-        if (m.hp < m.stats.maxHp) {
-            m.hp = m.stats.maxHp;
-            world.SetHp(m.entity, m.hp);
-            out.healed.push_back(m.entity);
-        }
+        (void)out; // its health comes back by its natural recovery, not at once (the original's AI never sets it)
         if (!Static(nests[m.nest])) world.MoveTo(m.entity, nests[m.nest].spec.position);
         m.nextThink = now + Seconds(0.5f);
     }
@@ -867,10 +866,21 @@ struct Monsters::State {
         }
         const proto::WorldPosition& there = who->second->position;
         const float distance = Distance(place->position, there);
-        // Led beyond the trace (500) or its leash it goes home, a bandit too: an ordinary monster whose home is where its
-        // wave put it (as the original's, whose bandits home as any monster). It still leaves 20 s after its last hit.
-        const float leash = std::max(nest.spec.radius * 1.5f, kMinLeash);
-        if (distance > kGiveUpDistance || Distance(place->position, nest.spec.position) > leash) return GoHome(m, now, out);
+        // The trace: its tactics' TraceData less however far it stands beyond 1.5 times its home radius; its target farther
+        // and it drops the fight where it stands (idle; it walks back from outside its circle and recovers there). A still
+        // one's trace is its reach; one whose boundary does not hold it (btTraceBoundary 0, 2) never gives up by distance.
+        // A bandit: led beyond 500 or its leash it goes home (as before; its own branch).
+        if (nest.spec.bandit != 0) {
+            const float leash = std::max(nest.spec.radius * 1.5f, 300.0f);
+            if (distance > kGiveUpDistance || Distance(place->position, nest.spec.position) > leash) return GoHome(m, now, out);
+        } else if (nest.spec.traceBoundary == 1) {
+            const float beyond = std::max(0.0f, Distance(place->position, nest.spec.position) - nest.spec.radius * 1.5f);
+            const float stillReach = (Static(nest) || nest.spec.trace <= 0.0f) && !nest.attacks.empty()
+                                         ? float(std::max(nest.attacks.front()->range, 10)) + m.stats.bodyRadius + kPlayerRadius
+                                         : 0.0f;
+            const float trace = (nest.spec.trace > 0.0f ? nest.spec.trace : stillReach) - beyond;
+            if (distance > trace) return DropFight(m, now);
+        }
         // Feared by its target, or confused: it drops the fight where it stands.
         if (m.states.Idles(m.target)) return DropFight(m, now);
         // The skill it uses next: one of its attacks at random; myopia shortens its reach.
@@ -907,11 +917,13 @@ struct Monsters::State {
             if (turn) {
                 const proto::FlatPosition a = proto::ToFlat(place->position), b = proto::ToFlat(goal);
                 const double length = std::max(1.0, std::hypot(a.x - b.x, a.z - b.z));
+                // Not struck for 5 s: it walks while its target is over 100 away (moving) or 150 (standing), runs nearer.
+                const bool walk = now - m.lastStrike > std::chrono::seconds(5) && distance > (world.Moving(m.target) ? 100.0f : 150.0f);
                 if (length > kChaseLeg) { // a far end: a leg's worth toward it (one walk's reach, never refused)
-                    world.MoveTo(m.entity, proto::FromFlat({a.x + (b.x - a.x) / length * kChaseLeg, a.z + (b.z - a.z) / length * kChaseLeg}, goal.y));
+                    world.MoveTo(m.entity, proto::FromFlat({a.x + (b.x - a.x) / length * kChaseLeg, a.z + (b.z - a.z) / length * kChaseLeg}, goal.y), walk);
                 } else {
                     const double stop = spot >= 0 ? 0.0 : std::min(double(reach) * 0.7, length); // onto its place's point
-                    world.MoveTo(m.entity, proto::FromFlat({b.x + (a.x - b.x) / length * stop, b.z + (a.z - b.z) / length * stop}, goal.y));
+                    world.MoveTo(m.entity, proto::FromFlat({b.x + (a.x - b.x) / length * stop, b.z + (a.z - b.z) / length * stop}, goal.y), walk);
                 }
                 m.aim = goal;
             }
@@ -920,6 +932,7 @@ struct Monsters::State {
         if (world.Moving(m.entity)) world.MoveTo(m.entity, place->position); // stop where it stands
         if (now < m.nextSwing) return;
         out.swings.push_back({m.entity, m.target, skill->id});
+        m.lastStrike = now;
         const game::AttackSpec attack = game::AttackOf(*skill);
         const int duration = std::max(500, skill->durationMs);
         m.swingEnds = now + std::chrono::milliseconds(duration);
@@ -1355,6 +1368,21 @@ void Monsters::Update(Clock::time_point now, const std::vector<Player>& players,
             continue;
         }
         s.LandHits(m, now, out);
+        // Its natural recovery: every 4 s, alive and standing (not walking or running), its row's MaxContain, no more than
+        // it lacks, cut by its recovery cut (panic); not a structure's nor a lab monster's.
+        if (now >= m.nextRecovery) {
+            m.nextRecovery = now + kRecoveryTick;
+            const auto& nest = s.nests[m.nest];
+            if (m.hp > 0 && m.hp < m.stats.maxHp && nest.row != nullptr && nest.row->maxContain > 0 && !nest.spec.fixed &&
+                nest.spec.lab == proto::LabBehaviour::Normal && !s.world.Moving(m.entity)) {
+                const std::uint32_t gain = game::RecoveryCut(m.states, std::min(nest.row->maxContain, m.stats.maxHp - m.hp), true);
+                if (gain > 0) {
+                    m.hp += gain;
+                    s.world.SetHp(m.entity, m.hp);
+                    out.healed.push_back(m.entity);
+                }
+            }
+        }
         // Knocked, frozen, asleep or stunned: it does nothing.
         if (m.knocked || m.states.Locked()) {
             ++it;

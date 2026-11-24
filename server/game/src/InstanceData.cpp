@@ -271,7 +271,7 @@ bool LoadGameWorlds(Database& db, const assets::FileSystem& files, const assets:
     QueryResult n = db.Query(
         "SELECT h.gameworldid, h.hatchobjtype, n.dwnestid, n.dwhiveid, o.codename128, n.nregiondbid, n.flocalposx, n.flocalposy, n.flocalposz, "
         "       n.winitialdir, n.nradius, n.ngenerateradius, n.nchampiongenpercentage, n.dwdelaytimemin, n.dwdelaytimemax, n.dwmaxtotalcount, "
-        "       n.btrespawn, n.bttype, t.btaggresstype, t.nsightrange "
+        "       n.btrespawn, n.bttype, t.btaggresstype, t.nsightrange, t.tracedata, t.bttraceboundary "
         "FROM tab_refnest n JOIN tab_refhive h ON h.dwhiveid = n.dwhiveid JOIN tab_reftactics t ON t.dwtacticsid = n.dwtacticsid "
         "JOIN _refobjcommon o ON o.id = t.dwobjid WHERE (h.gameworldid >= 63 AND h.gameworldid <= 84) OR h.gameworldid = 61 "
         "OR (h.gameworldid >= 51 AND h.gameworldid <= 59) ORDER BY n.dwnestid");
@@ -366,6 +366,8 @@ bool LoadGameWorlds(Database& db, const assets::FileSystem& files, const assets:
         nest.waiting = n.Int(i, 17) == 1;
         nest.aggressive = n.Int(i, 18) == 0;
         nest.sight = float(n.Int(i, 19));
+        nest.trace = float(n.Int(i, 20));
+        nest.traceBoundary = int(n.Int(i, 21));
         nest.nestId = std::uint32_t(n.Int(i, 2));
         nest.hive = std::uint32_t(n.Int(i, 3));
         nest.yaw = YawOf(n.Int(i, 9));

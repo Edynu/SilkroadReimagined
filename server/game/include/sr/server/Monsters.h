@@ -71,6 +71,10 @@ struct MonsterNest {
     int maxCount = 1;
     bool aggressive = false; // attacks players it sees
     float sight = 0;
+    // Its tactics' trace (Tab_RefTactics.TraceData, 500 for most; 0: none, a still one's its reach) and whether its
+    // boundary holds it (btTraceBoundary 1; 0 or 2: it never gives up by distance).
+    float trace = 500.0f;
+    int traceBoundary = 1;
     // A fortress's structure (Monsters::AddFixed): it stands where it is
     // put whether the navigation is in or not, never moves nor fights nor heals, and is not refilled.
     bool fixed = false;

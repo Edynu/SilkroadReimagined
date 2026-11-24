@@ -503,7 +503,13 @@ TEST_CASE("Game server: an attack pet fights a monster: its hits, the monster's 
         if (a.client->Expect(swing, 20ms) && swing.attacker == wolf.entity) swung = true;
         while (a.client->Expect(hit, 10ms)) {
             if (hit.attacker == wolf.entity && hit.target == monster) {
-                if (lastHp != 0) CHECK(hit.hp == (hit.damage >= lastHp ? 0 : lastHp - hit.damage));
+                // Its health the last less the hit's damage, give or take its natural recovery's ticks (MaxContain each 4 s
+                // while it stands) in between.
+                if (lastHp != 0 && hit.hp > 0) {
+                    const std::uint32_t after = hit.damage >= lastHp ? 0 : lastHp - hit.damage;
+                    CHECK(hit.hp >= after);
+                    CHECK(hit.hp <= after + 2 * foe->maxContain);
+                }
                 lastHp = hit.hp;
                 struck = struck || hit.damage > 0;
                 MESSAGE("the wolf hits for " << hit.damage << ", the monster at " << hit.hp);
