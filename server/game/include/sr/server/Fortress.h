@@ -309,6 +309,20 @@ public:
         (void)refObjId;
         return 0;
     }
+    // A structure's own skill (its characterdata's DefaultSkill_1, an appearance skill 'S'; U14-04): its period in ms (a
+    // pulse's 'puls'; an aura's 1000, renewed as a flag's; 0: none).
+    virtual int FortressStructureSkillMs(std::uint32_t refObjId) const {
+        (void)refObjId;
+        return 0;
+    }
+    // That skill once, for the side of `holder` (0: nobody holds the fortress): a tower's or a stone's pulse of HP-ratio
+    // damage ('pdm2' percent of the most health) and its states on the war's fighters not of that side within its area
+    // ('efr'), or an aura for that side (a position's, the headquarters') as a flag's.
+    virtual void FortressStructureSkill(std::uint32_t structure, std::uint32_t refObjId, std::uint32_t holder) {
+        (void)structure;
+        (void)refObjId;
+        (void)holder;
+    }
     // A repair kit's skill as its rows give it (SKILL_FORT_REPAIR_KIT_0n: 'heal' percent of the most health, 'puls', 'dura';
     // none: no such skill).
     struct KitSkill {

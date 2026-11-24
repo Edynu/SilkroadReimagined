@@ -170,6 +170,7 @@ struct Fortresses::State {
         bool dirty = false;         // its health to write
         bool open = false;          // a gate opened by its pulley (the state word's bit 1)
         bool paying = false;        // a repair or an upgrade paid for, its transaction under way
+        Clock::time_point nextSkill{}; // its own skill's next time (the war's; FortressStructureSkill)
     };
     struct Fortress {
         FortressSpec spec;
@@ -1489,6 +1490,17 @@ struct Fortresses::State {
             }
         }
         std::erase_if(kitRepairs, [](const KitRepair& r) { return r.pulsesLeft <= 0; });
+        // The structures' own skills while the war is on (their 'S' skills, cast as they stand in the original): each
+        // standing one's at its period, for the holder's side.
+        for (Fortress& f : forts) {
+            if (!f.atWar) continue;
+            for (Structure& s : f.structures) {
+                if (s.entity == 0 || s.state != kStructStanding || s.hp <= 0 || now < s.nextSkill) continue;
+                const int ms = host.FortressStructureSkillMs(s.refObjId);
+                s.nextSkill = now + std::chrono::milliseconds(ms > 0 ? ms : 60'000);
+                if (ms > 0) host.FortressStructureSkill(s.entity, s.refObjId, f.Controller());
+            }
+        }
         std::vector<std::uint32_t> expired;
         for (Fortress& f : forts) {
             for (auto& [entity, o] : f.objects) {

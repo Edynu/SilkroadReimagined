@@ -1861,3 +1861,76 @@ TEST_CASE("Fortress smith: Item repairing mends the bag's and the worn pieces fo
     CHECK(t.Db().Query("SELECT ownerguildid FROM _siegefortressstruct WHERE refeventstructid = 200").Int(0, 0) == 202);
     rig.game->Stop();
 }
+
+TEST_CASE("Fortress war: the structures' own skills: the heart's pulse every 5 s strikes the war's fighters about it (game files; U14-04)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    const auto dir = FortressGameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    std::string error;
+    assets::FileSystem fs;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, dir.string(), error), error);
+    auto characters = std::make_shared<assets::CharacterTable>();
+    REQUIRE_MESSAGE(characters->Load(fs, error), error);
+    auto skills = std::make_shared<assets::SkillTable>();
+    REQUIRE_MESSAGE(skills->Load(fs, error), error);
+    // The heart's skill: SKILL_FORT_STRUCTURE_FORT_STONE_01, 5 % of the most health every 5 s within 300.
+    const assets::ObjectRow* stone = characters->Find(kHeart);
+    REQUIRE(stone != nullptr);
+    const assets::SkillRow* pulse = skills->Find(stone->skills[0]);
+    REQUIRE(pulse != nullptr);
+    CHECK(pulse->aiType == 'S');
+    const int percent = assets::FindSkillParam(*pulse, assets::SkillTag("pdm2")).Int(0);
+    REQUIRE(percent > 0);
+
+    Rig rig(t, characters, skills);
+    rig.Settle();
+    {
+        Player a = rig.Join("Raider");
+        Player b = rig.Join("Keeper");
+        Player d = rig.Join("Loner");
+        MakeGuild(t, 101, "Raiders", 3, a, 6); // 7 members, as an application needs
+        MakeGuild(t, 102, "Keepers", 3, b, 6);
+    }
+    rig.Restart();
+    Player a = rig.Join("Raider");
+    Player b = rig.Join("Keeper");
+    Player d = rig.Join("Loner");
+    const server::Fortresses* forts = rig.game->GetFortresses();
+    REQUIRE(forts != nullptr);
+    const std::uint32_t heart = forts->Structures(1, game::StructureKind::Heart)[0];
+    REQUIRE(heart != 0);
+    a.c->Send(proto::FortressDev{proto::FortressDevAction::StartRequests});
+    Notice(a, proto::FortressNoticeKind::RequestsOpen);
+    a.c->Send(proto::FortressApply{a.official, 1, Side::Attack});
+    CHECK(Answer(a, proto::FortressAction::Apply).ok);
+    b.c->Send(proto::FortressApply{b.official, 1, Side::Attack});
+    CHECK(Answer(b, proto::FortressAction::Apply).ok);
+    for (int i = 0; i < 500 && t.Db().Query("SELECT guildid FROM _siegefortressrequest WHERE fortressid = 1").Rows() != 2; ++i) rig.pump();
+    a.c->Send(proto::FortressDev{proto::FortressDevAction::EndRequests});
+    a.c->Send(proto::FortressDev{proto::FortressDevAction::StartWar});
+    Notice(a, proto::FortressNoticeKind::WarBegin);
+    // Nobody holds the fortress: both attackers by it are struck, each its percent of the most health; the one out of
+    // the war is not.
+    const auto struckBy = [&](Player& p) {
+        proto::EntityDamaged hurt;
+        for (int i = 0; i < 400; ++i) {
+            if (!p.c->Expect(hurt, 50ms)) continue;
+            if (hurt.target == p.entity && hurt.attacker == heart) return std::optional<proto::EntityDamaged>(hurt);
+        }
+        return std::optional<proto::EntityDamaged>{};
+    };
+    const auto hitA = struckBy(a);
+    REQUIRE(hitA.has_value());
+    CHECK(hitA->damage > 0);
+    CHECK(struckBy(b).has_value());
+    proto::EntityDamaged other;
+    bool loner = false;
+    for (int i = 0; i < 40; ++i) {
+        if (d.c->Expect(other, 50ms) && other.target == d.entity && other.attacker == heart) loner = true;
+    }
+    CHECK_FALSE(loner);
+}

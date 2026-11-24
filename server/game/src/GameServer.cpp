@@ -8445,6 +8445,59 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
         }
     }
+    int FortressStructureSkillMs(std::uint32_t refObjId) const override {
+        const assets::SkillRow* skill = FlagSkill(refObjId);
+        if (skill == nullptr || skill->aiType != 'S') return 0;
+        if (!assets::FindSkillParam(*skill, assets::SkillTag("pdm2"))) return 1000; // an aura, renewed
+        const assets::SkillParam pulse = assets::FindSkillParam(*skill, assets::SkillTag("puls"));
+        return pulse ? std::max(1000, pulse.Int(0)) : 0;
+    }
+    void FortressStructureSkill(std::uint32_t structure, std::uint32_t refObjId, std::uint32_t holder) override {
+        const assets::SkillRow* skill = FlagSkill(refObjId);
+        if (skill == nullptr) return;
+        const assets::SkillParam ratio = assets::FindSkillParam(*skill, assets::SkillTag("pdm2"));
+        if (!ratio) return FortressFlagAura(structure, refObjId, holder, false); // a position's or the headquarters' aura
+        const auto there = world->Where(structure);
+        if (!there || !fortresses) return;
+        const assets::SkillParam area = assets::FindSkillParam(*skill, assets::SkillTag("efr"));
+        const double reach = area ? double(std::max(1, area.Int(2))) : 200.0;
+        const std::optional<FortressGuild> side = holder != 0 ? FortressGuildById(holder) : std::nullopt;
+        const proto::FlatPosition c = proto::ToFlat(there->position);
+        const Clock::time_point now = Clock::now();
+        // Its enemies: alive, within reach, fighting in this war (the original's 0x3043 refuses others), not of its side
+        // (0x303C).
+        std::vector<std::uint64_t> struck;
+        for (auto& [peerId, p] : players) {
+            if (p.entity == 0 || p.dead || now < p.untouchableUntil) continue;
+            const auto at = world->Where(p.entity);
+            if (!at || at->position.layer != there->position.layer) continue;
+            const proto::FlatPosition q = proto::ToFlat(at->position);
+            if (std::hypot(q.x - c.x, q.z - c.z) > reach || !fortresses->Fighting(p.selected, at->position.region)) continue;
+            const std::optional<FortressGuild> g = FortressGuildOf(p.selected);
+            if (side && g && (g->id == side->id || (side->alliance != 0 && g->alliance == side->alliance))) continue;
+            struck.push_back(peerId);
+        }
+        const std::vector<game::StateGift> gifts = game::StateGiftsOf(*skill);
+        const int pulse = assets::FindSkillParam(*skill, assets::SkillTag("puls")).Int(0);
+        for (const std::uint64_t peerId : struck) {
+            const auto it = players.find(peerId);
+            if (it == players.end() || it->second.dead) continue;
+            PlayerWorld& p = it->second;
+            // Its damage: the percent of the most health (Formulae_CalculateHPRatioDamage), then its states.
+            const std::uint32_t damage = std::uint32_t(std::llround(double(ratio.Int(0)) / 100.0 * double(p.stats.maxHp)));
+            p.hp = damage >= p.hp ? 0 : p.hp - damage;
+            p.lastHurt = now;
+            p.combat.battleUntil = now + std::chrono::seconds(20);
+            world->SetHp(p.entity, p.hp);
+            Broadcast(p.entity, proto::EntityDamaged{p.entity, structure, damage, p.hp, std::uint8_t(p.hp == 0 ? proto::kDamageKilled : 0)});
+            if (p.hp > 0 && !gifts.empty()) {
+                GiveStates(p, game::RollStates(gifts, StateDefenceOf(p), p.combat.states.Susceptibility(), monsterStateRolls[structure], fightRandom, structure,
+                                               skill->id, pulse, now),
+                           now);
+            }
+            if (p.hp == 0) Die(p, nullptr, refObjId);
+        }
+    }
     std::optional<FortressHost::KitSkill> FortressKitSkill(const std::string& code) const override {
         const assets::SkillRow* skill = config.skills ? config.skills->Find(std::string_view(code)) : nullptr;
         if (skill == nullptr) return std::nullopt;
