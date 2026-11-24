@@ -4217,9 +4217,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         o.alive = !p->dead;
         o.murderer = p->pvpState == std::uint8_t(game::PvpState::Murderer);
         o.free = !(exchanges && exchanges->Busy(entity)) && !(stalls && (stalls->Owner(entity) || stalls->Visiting(entity)));
-        // In a fight (ours: the original's own mark is not traced): hurt within the time, or attacking now.
-        o.fought = (p->lastHurt != Clock::time_point{} && Clock::now() - p->lastHurt < std::chrono::seconds(game::kCosAfterFightSeconds)) ||
-                   p->combat.attackTarget != 0;
+        // In a fight: the battle mark (20 s from a hit given or taken), as everything else judges it.
+        o.fought = Clock::now() < p->combat.battleUntil;
         // The job's suit worn (itemdata TID 3/1/7/x: x 1 trader, 2 thief, 3 hunter).
         if (const game::ItemInstance* suit = p->inventory.At(game::slot::kJobSuit); suit != nullptr && config.rules->items) {
             if (const assets::ItemRow* row = config.rules->items->Find(suit->refId); row != nullptr && row->typeId[0] == 3 && row->typeId[1] == 1 && row->typeId[2] == 7) {
@@ -7248,12 +7247,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             player.nextRegen = now + std::chrono::seconds(4);
             if (world->Moving(player.entity) || (player.motion != proto::kMotionStand && player.motion != proto::kMotionSit)) continue;
             if (player.hp >= player.stats.maxHp && player.mp >= player.stats.maxMp) continue;
-            const double rate = player.motion == proto::kMotionSit ? 8.0 : 0.8;
-            const auto gain = [rate](std::uint32_t most) {
+            // The rates are the parameter keeper's 0x19 (HP) and 0x1A (MP), the motion's 0.8 / 8 their base: a toggle's
+            // 0 stops MP's, recovery buffs and blues raise them.
+            const float base = player.motion == proto::kMotionSit ? 8.0f : 0.8f;
+            const double hpRate = std::max(0.0, double(player.combat.Sheet().Value(game::stat::kHpRecovery, base)));
+            const double mpRate = std::max(0.0, double(player.combat.Sheet().Value(game::stat::kMpRecovery, base)));
+            const auto gain = [](std::uint32_t most, double rate) {
+                if (rate <= 0.0) return 0u; // a rate of 0 (a toggle's MP): none
                 return std::min(most / 2, std::max(1u, std::uint32_t(double(most) * rate / 100.0)));
             };
-            player.hp = std::min(player.stats.maxHp, player.hp + game::RecoveryCut(player.combat.states, gain(player.stats.maxHp), true));
-            player.mp = std::min(player.stats.maxMp, player.mp + game::RecoveryCut(player.combat.states, gain(player.stats.maxMp), false));
+            player.hp = std::min(player.stats.maxHp, player.hp + game::RecoveryCut(player.combat.states, gain(player.stats.maxHp, hpRate), true));
+            player.mp = std::min(player.stats.maxMp, player.mp + game::RecoveryCut(player.combat.states, gain(player.stats.maxMp, mpRate), false));
             world->SetHp(player.entity, player.hp);
             world->SetVitals(player.entity, player.hp, player.stats.maxHp, player.mp, player.stats.maxMp);
             if (Peer* peer = peers->Find(peerId)) SendVitals(*peer, player);

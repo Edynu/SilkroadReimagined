@@ -538,6 +538,8 @@ TEST_CASE("Game server: an attack pet fights a monster: its hits, the monster's 
     // Dead, back into its item), its experience less its death penalty (10,000,000 x 2 % halved, 99,999, over the cap of
     // the monster experience 100 x 100: 10,000).
     CHECK(risen.level == 2);
+    // Its fight put its owner in battle (20 s): the mark cleared (a developer's reset), then put away.
+    a.client->Send(proto::DevReset{proto::DevReset::kBattle});
     a.client->Send(proto::CosDismiss{wolf.entity});
     CHECK(Next<proto::CosDismissed>(a).entity == wolf.entity);
     for (int i = 0; i < 300 && t.Db().Query("SELECT state FROM _charcos WHERE id = $1", {petRow}).Int(0, 0) != 1; ++i) s.game.Poll(10ms);
@@ -2117,7 +2119,9 @@ TEST_CASE("Game server: the cargo: a killed transport drops its goods; the trade
     for (int i = 0; i < 20 && answer.code == 0; ++i) answer = Next<proto::ItemMoved>(trader);
     CHECK(answer.status == proto::ItemStatus::JobSuit);
     CHECK(answer.code == 0x1861);
-    // The thief with his own transport out: into it, the trader's alias still its maker.
+    // The thief with his own transport out: into it, the trader's alias still its maker. (His attack on the cart put him in
+    // battle for 20 s, when no transport is summoned: the mark cleared first, a developer's reset.)
+    thief.client->Send(proto::DevReset{proto::DevReset::kBattle});
     thief.client->Send(proto::UseItem{PlaceOf(thief.bag, kCartScroll)});
     const auto own = Next<proto::CosSummoned>(thief);
     thief.client->Send(proto::PickUp{dropped});
@@ -2739,6 +2743,7 @@ TEST_CASE("Game server: an attack pet's stance: defensive, it fights only on its
     // Offensive: kept in its row, as it was after an unsummon and a new summon; it defends its owner.
     a.client->Send(proto::CosCommand{wolf.entity, proto::CosOrder::Stance, 0});
     REQUIRE(Next<proto::CosStance>(a).aggressive);
+    a.client->Send(proto::DevReset{proto::DevReset::kBattle}); // its fight's battle mark (a pet is not put away in battle)
     a.client->Send(proto::CosDismiss{wolf.entity});
     Next<proto::CosDismissed>(a);
     for (int i = 0; i < 100; ++i) s.game.Poll(2ms); // its row saved
