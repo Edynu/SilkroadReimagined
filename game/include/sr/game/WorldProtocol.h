@@ -428,6 +428,9 @@ enum class GateStatus : std::uint8_t {
     FortressNotParticipant = 28, // UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02
     FortressNotMember = 29,      // UIIT_MSG_FORT_NOT_POSSESS_FORTRESS_MEMBER
     FortressClosed = 30,         // UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE
+    Returning = 31,  // 0x1C14 UIIT_MSG_INTERACTION_FAIL_TELESCROLL_ALREADY_WORKING: a return scroll counting down
+    ThiefDen = 32,   // 0x1C18 UIIT_INTERACTION_FAIL_ONLY_ROBBER_CAN_TELEPORT_TO_THIEFDEN: a trader's or hunter's league
+    Busy = 33,       // 0x1C0B UIIT_MSG_INTERACTION_FAIL_IM_BUSY: an exchange, a stall, an alchemy run (an NPC's talk)
 };
 
 // The world goes on on another game server of the shard: connect there and show

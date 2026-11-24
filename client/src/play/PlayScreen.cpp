@@ -633,6 +633,9 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                           : refused->status == proto::GateStatus::FortressNotParticipant ? "UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02"
                           : refused->status == proto::GateStatus::FortressNotMember      ? "UIIT_MSG_FORT_NOT_POSSESS_FORTRESS_MEMBER"
                           : refused->status == proto::GateStatus::FortressClosed         ? "UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE"
+                          : refused->status == proto::GateStatus::Returning ? "UIIT_MSG_INTERACTION_FAIL_TELESCROLL_ALREADY_WORKING"
+                          : refused->status == proto::GateStatus::ThiefDen  ? "UIIT_INTERACTION_FAIL_ONLY_ROBBER_CAN_TELEPORT_TO_THIEFDEN"
+                          : refused->status == proto::GateStatus::Busy      ? "UIIT_MSG_INTERACTION_FAIL_IM_BUSY"
                                                                            : "UIIT_MSG_STATE_TELEPORT_FAIL";
         if (!replay_ && refused->status == proto::GateStatus::Murderer) player_.Notify(game::Banner::Kind::Warning, gui_.data().Text(key), context.time);
         if (!replay_) player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);

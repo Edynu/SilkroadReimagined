@@ -1432,6 +1432,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (it == npcs.end() && instances && instances->AtPillar(player.entity, talk.entity)) {
             return SendMessage(*peer.connection, proto::NpcMenu{talk.entity, proto::kNpcPartySummon});
         }
+        // Busy (an exchange, its stall or another's, an alchemy run): 0x1C0B.
+        if ((exchanges && exchanges->Busy(player.entity)) || (stalls && (stalls->Owner(player.entity) || stalls->Visiting(player.entity))) ||
+            (alchemy && alchemy->Busy(player.entity))) {
+            return RefuseGate(peer, talk.entity, "npc", proto::GateStatus::Busy);
+        }
         const auto me = world->Where(player.entity);
         const auto npc = world->Where(talk.entity);
         if (it == npcs.end() || !npc) return RefuseGate(peer, talk.entity, "npc", proto::GateStatus::NoSuchGate);
@@ -2424,6 +2429,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
         victim->hp = damage >= victim->hp ? 0 : victim->hp - damage;
         victim->lastHurt = now;
+        CancelSuitChange(*victim); // a hit gives up a job suit's change
         HitWhileSitting(*victim, now); // a hit stands a sitting player up
         victim->combat.battleUntil = now + std::chrono::seconds(20);
         world->SetHp(victim->entity, victim->hp);
@@ -6644,7 +6650,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // The return point's arrival (the gate where it was set; else its country's first town).
     const assets::TeleportPoint* ReturnArrival(const PlayerWorld& player) const {
         if (!config.teleports) return nullptr;
-        const std::uint32_t id = player.returnPoint != 0 ? player.returnPoint : player.wearer.country == 1 ? 25u : 1u; // GATE_EU, GATE_CH
+        const std::uint32_t id = player.returnPoint != 0 ? player.returnPoint : player.wearer.country == 1 ? 20u : 1u; // GATE_EU, GATE_CH
         const assets::TeleportPoint* to = config.teleports->Point(id);
         return to == nullptr || !to->HasArrival() || (to->region & 0x8000) != 0 ? nullptr : to;
     }
@@ -6656,7 +6662,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // In a Capture the Flag match the camp's revival is the match's (the death box's camp button).
         if (!flagReviving && flagWorlds && player.dead && flagWorlds->Resurrect(player.entity)) return;
         if (!flagReviving && arenas && player.dead && arenas->Resurrect(player.entity)) return; // the arena's gate, automatic
-        if (!player.dead || (kind != 1 && kind != 2) || (kind == 2 && player.level > 10 && !flagReviving)) return;
+        if (!player.dead || (kind != 1 && kind != 2) || (kind == 2 && std::max(player.level, player.maxLevel) > 10 && !flagReviving)) return;
         // Dead in a fortress war: no rising in the first 15 s (silently), and the point by the side.
         std::string warGate;
         std::optional<proto::WorldPosition> warPlace;
@@ -6671,9 +6677,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         player.dead = false;
         player.revivalOffer.reset(); // what the death took is gone for good (ours: the original clears it on the way to town)
         player.deathLoss = 0;
-        player.hp = player.stats.maxHp;
-        player.mp = player.stats.maxMp;
-        player.untouchableUntil = Clock::now() + std::chrono::seconds(5);
+        // Rising where it fell (the death window's choice 2): 40 % of its most health and mana, untouchable 6 s (11 s in a
+        // fortress's area); else full, 5 s (ours: the town's rise is the return's, not traced).
+        const bool inPlace = kind == 2 && !flagReviving;
+        const auto fell = world->Where(player.entity);
+        const bool fortressArea = fell && fortresses && fortresses->FortressArea(fell->position.region);
+        player.hp = inPlace ? std::max<std::uint32_t>(1, std::uint32_t(double(player.stats.maxHp) * 0.4)) : player.stats.maxHp;
+        player.mp = inPlace ? std::uint32_t(double(player.stats.maxMp) * 0.4) : player.stats.maxMp;
+        player.untouchableUntil = Clock::now() + (inPlace ? std::chrono::milliseconds(fortressArea ? 11000 : 6000) : std::chrono::milliseconds(5000));
+        if (inPlace && !player.combat.states.All().empty()) {
+            player.combat.states.Clear(); // its states cleared
+            TellStates(player.entity, {}, Clock::now());
+        }
         player.combat.StopFighting();
         world->SetVitals(player.entity, player.hp, player.stats.maxHp, player.mp, player.stats.maxMp);
         SendVitals(peer, player);
@@ -6724,6 +6739,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void SetMotion(PlayerWorld& player, std::uint8_t wanted, Clock::time_point now) {
         if (player.dead || player.motion == proto::kMotionChanging || player.combat.transform.mode != 0) return;
         if (wanted == proto::kMotionWalk || wanted == proto::kMotionRun) {
+            // Not while a cast or a chain holds the motion, nor sitting.
+            if (now < player.combat.castUntil || now < player.combat.chainUntil || player.motion == proto::kMotionSit) return;
             const bool walking = wanted == proto::kMotionWalk;
             if (walking == player.walking) return;
             player.walking = walking;
@@ -7136,7 +7153,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const double bodies = 2.0 * double(Skills::kPlayerRadius);
         for (auto& [peerId, player] : players) {
             if (player.traceTarget == 0 || player.entity == 0 || now < player.nextTrace) continue;
-            player.nextTrace = now + std::chrono::milliseconds(250);
+            player.nextTrace = now + std::chrono::milliseconds(100);
             const PlayerWorld* target = PlayerByEntity(player.traceTarget);
             const auto me = world->Where(player.entity);
             const auto them = world->Where(player.traceTarget);
@@ -7146,7 +7163,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
             const proto::FlatPosition a = proto::ToFlat(me->position), b = proto::ToFlat(them->position);
             const double d = std::hypot(b.x - a.x, b.z - a.z);
-            if (d > double(world->Config().viewRadius)) {
+            // Given up beyond 1,000 (3D), as the original's.
+            if (std::hypot(d, double(them->position.y - me->position.y)) > 1000.0) {
                 player.traceTarget = 0;
                 continue;
             }
@@ -7155,7 +7173,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 continue;
             }
             if (!world->Moving(player.entity) && d <= bodies + double(proto::kTraceFar)) continue; // near enough while it stands
-            // Towards the target, to kTraceNear short of its body.
+            // Towards the target, to kTraceNear short of its body; a walking tracer runs (as if it asked).
+            if (player.walking) SetMotion(player, proto::kMotionRun, now);
             const double k = (d - (bodies + double(proto::kTraceNear) - 5.0)) / d;
             world->MoveTo(player.entity, proto::FromFlat({a.x + (b.x - a.x) * k, a.z + (b.z - a.z) * k}, them->position.y));
         }
@@ -8588,13 +8607,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const auto place = world->Where(player.entity);
         const proto::FlatPosition at = place ? proto::ToFlat(place->position) : proto::FlatPosition{};
         const proto::FlatPosition spot = proto::ToFlat(*stands);
-        if (!place || std::hypot(at.x - spot.x, at.z - spot.z) > config.gateReach) {
-            core::LogInfo("{}: {} is {:.0f} from gate {}", config.name, player.name, place ? std::hypot(at.x - spot.x, at.z - spot.z) : -1.0, gateId);
+        // The reach by the target's kind (3D): a gate structure 800, an NPC 300 (`gateReach`).
+        const double reach = gate != nullptr ? std::max(double(config.gateReach), kGateStructureReach) : double(config.gateReach);
+        const double d = place ? std::hypot(std::hypot(at.x - spot.x, at.z - spot.z), double(place->position.y - stands->y)) : -1.0;
+        if (!place || d > reach) {
+            core::LogInfo("{}: {} is {:.0f} from gate {}", config.name, player.name, d, gateId);
             return proto::GateStatus::TooFar;
         }
         return proto::GateStatus::Ok;
     }
 
+    static constexpr double kGateStructureReach = 800.0;
     // Whether a transport is out: the original asks whether the player's first pet is one (a horse, a trade cart); pets
     // that follow (attack, pick) are not (Coses::TransportOut).
     bool TransportOut(const PlayerWorld& player) const { return coses && player.entity != 0 && coses->TransportOut(player.entity); }
@@ -8644,9 +8667,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             case 6: // no active job (0x1C24: the Roc's gate is not for one in a job's suit)
                 if (JobState(player) != kNoJob) return proto::GateStatus::Condition;
                 break;
-            case 7: // the job's suit worn (slot 8) with a transport out (0x1C10: the ferries)
-                if (player.inventory.At(game::slot::kJobSuit) != nullptr && TransportOut(player)) return proto::GateStatus::Transport;
+            case 7: { // a thief's suit worn (slot 8) with a transport out (0x1C10: the ferries); a trader's or hunter's passes
+                const game::ItemInstance* suit = player.inventory.At(game::slot::kJobSuit);
+                const assets::ItemRow* row = suit != nullptr && config.rules->items ? config.rules->items->Find(suit->refId) : nullptr;
+                if (game::JobStateOf(row) == std::uint8_t(game::JobType::Thief) && TransportOut(player)) return proto::GateStatus::Transport;
                 break;
+            }
             case 3: // a mask of PvP states, bit 1 << state (0x1C19; unused by any link of the 1.188 data)
                 if ((r.a & (1u << player.pvpState)) != 0) return proto::GateStatus::PvpState;
                 break;
@@ -8839,9 +8865,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 refuse(why);
             };
             if (instances && instances->LayerOf(player.entity) != 0) return refuseWith(0x18F5, "in an instance");
-            if (const auto at = world->Where(player.entity); at && fortresses && fortresses->WarArea(at->position.region)) {
-                return refuseWith(0x18EB, "in a fortress at war");
-            }
+            if (arenas && arenas->InMatch(player.entity)) return refuseWith(0x187A, "in a Battle Arena match");
             if (player.returnAt) return refuseWith(0x185D, "already travelling");
             // A murderer: 0x1875.
             if (player.pvpState == std::uint8_t(game::PvpState::Murderer)) return refuseWith(0x1875, "a murderer");
@@ -8858,6 +8882,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             } else {
                 return refuseWith(2, "no such option");
             }
+            // Into a fortress's world: not in a job suit (0x18E9), not while a fortress war runs (0x18F2).
+            const std::uint16_t destination = use.option == proto::kReverseToRecall ? player.recallSpot.region
+                                              : use.option == proto::kReverseToDeath ? player.deathSpot.region
+                                                                                     : optionalTeleports.at(use.point).region;
+            if (fortresses && fortresses->FortressArea(destination)) {
+                if (ActivityOf(player).jobSuit) return refuseWith(0x18E9, "a job suit into a fortress");
+                if (fortresses->WarOn()) return refuseWith(0x18F2, "into a fortress in its war");
+            }
             if (given == nullptr) TakeOne(peer, player, use.slot);
             Broadcast(player.entity, proto::ItemUsed{player.entity, row->refObjId});
             const int ms = std::max(100, row->params[0]);
@@ -8871,22 +8903,6 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // The thieves' town scroll (ITEM_ETC_SCROLL_RETURN_THIEFDEN_01, use kind THIEFDEN): a
         // thief's only (0x186A), and unlike the others it works with a transport out, which comes along.
         const bool thiefDen = row->typeId == std::array<int, 4>{3, 3, 3, 1} && row->paramTexts[2] == "THIEFDEN";
-        if (thiefDen && player.jobState != std::uint8_t(game::JobType::Thief)) {
-            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x186A});
-            return refuse("only a thief reads it");
-        }
-        // Where it leads: the building its Param4 names
-        // (ITEM_ETC_SCROLL_RETURN_THIEFDEN_01: STORE_TD_GATE) and that building's teleport point (GATE_TD); none: refused 2.
-        const assets::TeleportPoint* den = nullptr;
-        if (thiefDen && config.teleports) {
-            for (const assets::TeleportGate& g : config.teleports->Gates()) {
-                if (g.codename == row->paramTexts[3]) den = config.teleports->PointOf(g.refObjId);
-            }
-        }
-        if (thiefDen && (den == nullptr || !den->HasArrival())) {
-            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 2});
-            return refuse("no point for its building");
-        }
         // Fireworks, the berserk potion, the bonus scrolls, the quests' and events' items, the uses the original
         // refuses.
         // The guild recall: its master's, its members asked on both game servers.
@@ -8896,23 +8912,35 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
         if (!returnScroll && !thiefDen && UseSpecialItem(peer, player, use, *row, item)) return;
         if (!returnScroll && !thiefDen) return refuse("not usable yet");
-        if (player.returnAt) return refuse("already returning");
-        // A murderer reads no return scroll (after the teleport under way): 0x1875.
-        if (player.pvpState == std::uint8_t(game::PvpState::Murderer)) {
-            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x1875});
-            return refuse("a murderer");
+        // The original's order: a return under way (0x185D), a murderer (0x1875), a fortress's area in its war (0x18EB,
+        // UIIT_MSG_FORT_ITEMUSE_ERR_NOTPORTAL), a Battle Arena match (0x187A); then the den's scroll a thief's only (0x186A)
+        // and its building's point (2), the others not with a transport out (0x185E).
+        const auto refuseWith = [&](std::uint16_t code, const char* why) {
+            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, code});
+            refuse(why);
+        };
+        if (player.returnAt) return refuseWith(0x185D, "already returning");
+        if (player.pvpState == std::uint8_t(game::PvpState::Murderer)) return refuseWith(0x1875, "a murderer");
+        if (const auto at = world->Where(player.entity); at && fortresses && fortresses->WarArea(at->position.region)) {
+            return refuseWith(0x18EB, "in a fortress at war");
         }
-        if (!thiefDen && TransportOut(player)) {
-            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x185E}); // the others not with a transport out
-            return refuse("a transport is out");
+        if (arenas && arenas->InMatch(player.entity)) return refuseWith(0x187A, "in a Battle Arena match");
+        // Where the den's scroll leads: the building its Param4 names (ITEM_ETC_SCROLL_RETURN_THIEFDEN_01: STORE_TD_GATE)
+        // and that building's teleport point (GATE_TD).
+        const assets::TeleportPoint* den = nullptr;
+        if (thiefDen) {
+            if (player.jobState != std::uint8_t(game::JobType::Thief)) return refuseWith(0x186A, "only a thief reads it");
+            if (config.teleports) {
+                for (const assets::TeleportGate& g : config.teleports->Gates()) {
+                    if (g.codename == row->paramTexts[3]) den = config.teleports->PointOf(g.refObjId);
+                }
+            }
+            if (den == nullptr || !den->HasArrival()) return refuseWith(2, "no point for its building");
+        } else if (TransportOut(player)) {
+            return refuseWith(0x185E, "a transport is out");
         }
         player.toThiefDen = thiefDen;
         player.thiefDenPoint = den != nullptr ? den->id : 0;
-        // No return scroll in a fortress's area while its war runs (0x18EB, UIIT_MSG_FORT_ITEMUSE_ERR_NOTPORTAL).
-        if (const auto at = world->Where(player.entity); at && fortresses && fortresses->WarArea(at->position.region)) {
-            SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, 0x18EB});
-            return refuse("in a fortress at war");
-        }
         // Where it read it: the reverse return scroll's recall point (not in an instance).
         if (const auto spot = KeepableSpot(player)) {
             player.recallSpot = *spot;
@@ -9295,6 +9323,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
             core::LogInfo("{}: {} returns to {}", config.name, player.name, to->codename);
             DropHostility(player); // a return to town
+            // A return to town (not the thieves' den's) clears every abnormal state (poison, burn, ...).
+            if (!thiefDen && !player.combat.states.All().empty()) {
+                player.combat.states.Clear();
+                TellStates(player.entity, {}, now);
+                StatsChanged(player.entity);
+            }
             TravelTo(peerId, player, {to->region, to->x, to->y, to->z}, thiefDen);
         }
     }
@@ -9330,6 +9364,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // follows).
     void UseGate(Peer& peer, PlayerWorld& player, const proto::UseGate& use) {
         const auto refuse = [&](proto::GateStatus status) { RefuseGate(peer, use.gate, "teleport", status); };
+        // A return scroll counting down: 0x1C14, before anything else.
+        if (player.returnAt) return refuse(proto::GateStatus::Returning);
         const assets::TeleportPoint* from = nullptr;
         if (const auto status = AtGate(player, use.gate, from); status != proto::GateStatus::Ok) return refuse(status);
         // A transport out farther than 1000 from him (3D), before the link is read: 0x1C13.
@@ -9349,6 +9385,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (link == links.end()) return refuse(proto::GateStatus::NoSuchLink);
         const assets::TeleportPoint* to = config.teleports->Point(use.destination);
         if (!to || !to->HasArrival()) return refuse(proto::GateStatus::Nowhere);
+        // The thieves' den (GATE_TD) is not for a trader's or a hunter's league (0x1C18).
+        if (to->codename == "GATE_TD" && (player.job.type == game::JobType::Trader || player.job.type == game::JobType::Hunter)) {
+            return refuse(proto::GateStatus::ThiefDen);
+        }
+        if (const proto::GateStatus status = LinkRefusal(player, **link); status != proto::GateStatus::Ok) return refuse(status);
+        // The fare, free for one whose highest level is 20 or less, and the fortress tax of the gate's town on it; the gold.
+        std::uint32_t taxFortress = 0;
+        const std::uint64_t fare = std::max(player.level, player.maxLevel) <= 20 ? 0u : (*link)->fee;
+        const std::int64_t tax = fare > 0 ? TaxOn(from->ownerRefObjId, player, fare, &taxFortress) : 0;
+        const std::uint64_t fee = tax >= 0 ? fare + std::uint64_t(tax) : fare - std::min<std::uint64_t>(fare, std::uint64_t(-tax));
+        if (player.inventory.gold < fee) return refuse(proto::GateStatus::NotEnoughGold);
         // Into a fortress's world (the original's world check): through one of its fortress gates (TID 4/1/1/1) the war's
         // entry, through any other gate there (its revival, charge and glory gates) the holder's side only; the murderer's
         // check is not made there.
@@ -9365,14 +9412,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             default: return refuse(proto::GateStatus::FortressNotParticipant);
             }
         }
-        // A murderer through a gate structure (0x1C16): every gate of ours is one
-        // (teleportbuilding's), within the main world or into the Tomb of Qin's 6th floor (region 0x8002); not into an
-        // instance world (ours: none is reached through a gate yet), nor into a fortress's world.
-        if (!intoFortress && player.pvpState == std::uint8_t(game::PvpState::Murderer) &&
+        // A murderer through a gate structure (0x1C16: a teleportbuilding gate, not an NPC's teleport), within the main
+        // world or into the Tomb of Qin's 6th floor (region 0x8002); not into an instance world (ours: none is reached
+        // through a gate yet), nor into a fortress's world.
+        if (!intoFortress && config.teleports->Gate(use.gate) != nullptr && player.pvpState == std::uint8_t(game::PvpState::Murderer) &&
             (places.Of(to->region) == game::PlaceKind::Field || to->region == 0x8002)) {
             return refuse(proto::GateStatus::Murderer);
         }
-        if (const proto::GateStatus status = LinkRefusal(player, **link); status != proto::GateStatus::Ok) return refuse(status);
         // Up to the Roc's Peak: its own check (not on a
         // ride, 0x1C30; ours the transport's words), the gate open (ours: shut, nowhere to go), then the link's key used up
         // (kind 5) and the player into the Peak's layer.
@@ -9402,11 +9448,6 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             return;
         }
         if (!CanTravelTo(to->region)) return refuse(proto::GateStatus::ServerDown);
-        // The fare and the fortress tax of the gate's town.
-        std::uint32_t taxFortress = 0;
-        const std::int64_t tax = (*link)->fee > 0 ? TaxOn(from->ownerRefObjId, player, (*link)->fee, &taxFortress) : 0;
-        const std::uint64_t fee = tax >= 0 ? (*link)->fee + std::uint64_t(tax) : (*link)->fee - std::min<std::uint64_t>((*link)->fee, std::uint64_t(-tax));
-        if (player.inventory.gold < fee) return refuse(proto::GateStatus::NotEnoughGold);
         CollectTax(taxFortress, tax);
         if (fee > 0) {
             player.inventory.gold -= fee;
@@ -10026,6 +10067,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         ApplyMove(peer, player, m);
     }
 
+    // A job suit's change under way given up (a walk, an attack, a cast, a hit taken, a free-PvP change): the suit stays
+    // where it was, those near told its end (the original's cancel, 0x3042).
+    void CancelSuitChange(PlayerWorld& player) {
+        if (!player.suitChange) return;
+        const bool on = player.suitChange->on;
+        player.suitChange.reset();
+        if (player.entity != 0) Broadcast(player.entity, proto::EntityJobChange{player.entity, std::uint8_t(on ? 1 : 0), 0});
+        core::LogInfo("{}: {} gives up its job suit's change", config.name, player.name);
+    }
     // The job suits' changes whose 10 s are over: the move made now (a refusal of the inventory's now: given up); once on,
     // the job lock's 10 s.
     void TickSuitChanges(Clock::time_point now) {
@@ -11350,6 +11400,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                     // Not farther than 100 m from its transport left standing: the walk stops at the line (Coses::Tether).
                     if (coses && !coses->Tether(player.entity, move.target, toward)) return;
                     if (coses && coses->KeptOutOfTown(player.entity, move.target)) return;
+                    CancelSuitChange(player);
                     StandUp(player);
                     player.traceTarget = 0;
                     if (skillUnit) {
@@ -11455,7 +11506,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 if (proto::Trace t; decode(t) && player.entity != 0) StartTrace(player, t.target);
                 return;
             case proto::FreePvp::kId:
-                if (proto::FreePvp f; decode(f) && player.entity != 0) SetFreePvp(peer, player, f.team);
+                if (proto::FreePvp f; decode(f) && player.entity != 0) {
+                    CancelSuitChange(player);
+                    SetFreePvp(peer, player, f.team);
+                }
                 return;
             case proto::Emote::kId:
                 // A gesture, told as it is to everyone who sees the player (no checks;
@@ -11478,6 +11532,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 return;
             case proto::AttackTarget::kId:
                 if (proto::AttackTarget a; decode(a) && player.entity != 0 && player.motion != proto::kMotionChanging) {
+                    CancelSuitChange(player);
                     StandUp(player);
                     player.traceTarget = 0;
                     Attack(peer, player, a);
@@ -11485,6 +11540,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 return;
             case proto::UseSkill::kId:
                 if (proto::UseSkill u; decode(u) && player.entity != 0 && player.motion != proto::kMotionChanging) {
+                    CancelSuitChange(player);
                     StandUp(player);
                     player.traceTarget = 0;
                     UseSkill(peer, player, u);
@@ -11802,6 +11858,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         n.name = c.name;
         n.model = c.model;
         n.height = c.height;
+        // Its return point the race's town gate (STORE_EU_GATE 19554, STORE_CH_GATE 2094), as the original's creation.
+        if (const assets::ObjectRow* race = config.characters ? config.characters->Find(c.model) : nullptr) n.returnGate = race->country == 1 ? 19554u : 2094u;
         n.level = game::StartingStats::kLevel;
         n.strength = game::StartingStats::kStrength;
         n.intelligence = game::StartingStats::kIntelligence;

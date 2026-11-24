@@ -829,10 +829,10 @@ CreateCharacterResult CreateCharacter(Database& db, std::int64_t account, std::u
             // As the original's creation makes it: 45 places, the place given on entering (ours).
             QueryResult made = tx.Query(
                 "INSERT INTO _char (refobjid, charname16, scale, strength, intellect, curlevel, maxlevel, hp, mp, posx, posy, posz, inventorysize, "
-                "                   lastlogout, worldid) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, 0, 0, 0, 45, localtimestamp, 1) RETURNING charid",
+                "                   lastlogout, worldid, appointedteleport) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, 0, 0, 0, 45, localtimestamp, 1, $9) RETURNING charid",
                 {std::int64_t(character.model), character.name, int(character.height), int(character.strength), int(character.intelligence),
-                 int(character.level), std::int64_t(character.hp), std::int64_t(character.mp)});
+                 int(character.level), std::int64_t(character.hp), std::int64_t(character.mp), std::int64_t(character.returnGate)});
             if (!made.Ok()) {
                 if (made.State() == "23505") {
                     result = CreateCharacterResult::NameTaken;

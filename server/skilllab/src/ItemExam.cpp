@@ -894,7 +894,7 @@ private:
         return failed;
     }
     std::optional<proto::WorldPosition> TownOf(int race) const {
-        const assets::TeleportPoint* p = data_.teleports->Point(race == 1 ? 25u : 1u); // GATE_EU, GATE_CH: no return point designated
+        const assets::TeleportPoint* p = data_.teleports->Point(race == 1 ? 20u : 1u); // GATE_EU, GATE_CH: no return point designated
         if (p == nullptr || !p->HasArrival()) return std::nullopt;
         return proto::WorldPosition{p->region, p->x, p->y, p->z};
     }

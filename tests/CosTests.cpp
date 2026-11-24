@@ -1132,6 +1132,9 @@ TEST_CASE("Game server: the reverse return scroll: refused with the original's c
     // A return scroll read here keeps this place as the recall point, in _char too.
     a.client->Send(proto::UseItem{back});
     Next<proto::ReturnStarted>(a);
+    // A gate while it counts down: 0x1C14, before the gate is looked at.
+    a.client->Send(proto::UseGate{4242, 1});
+    CHECK(Next<proto::GateRefused>(a).status == proto::GateStatus::Returning);
     for (int i = 0; i < 50 && t.Db().Query("SELECT telregion FROM sro_vt_shard._char WHERE charid = $1", {a.character}).Int(0, 0) == 0; ++i) {
         s.game.Poll(20ms);
     }

@@ -664,6 +664,9 @@ struct NewCharacter {
     std::uint32_t hp = 0, mp = 0;
     std::uint8_t level = 1;
     std::vector<CharacterRow::Item> equipment;
+    // The gate whose point is its return point (`_Char.AppointedTeleport`: the race's town gate, as the original's
+    // creation writes one; 0 none).
+    std::uint32_t returnGate = 0;
 };
 
 enum class CreateCharacterResult : std::uint8_t { Created, NameTaken, TooMany, Failed };

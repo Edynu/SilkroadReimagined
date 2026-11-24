@@ -1614,6 +1614,8 @@ TEST_CASE("Game server: a gate takes a player to the point it links to") {
     proto::LobbyResult r;
     REQUIRE(c.Expect(r));
     REQUIRE(r.status == proto::LobbyStatus::Ok);
+    // Past level 20 (a highest level of 20 or less travels free).
+    REQUIRE(t.Db().Query("UPDATE sro_vt_shard._char SET curlevel = 21, maxlevel = 21 WHERE lower(charname16) = 'gamma'").Ok());
     c.Send(proto::CharacterSelect{"Gamma"});
     REQUIRE(c.Expect(r));
     c.Send(proto::WorldEnter{});
@@ -1622,7 +1624,7 @@ TEST_CASE("Game server: a gate takes a player to the point it links to") {
     REQUIRE(start.status == proto::WorldStatus::Ok);
     const int rx = start.position.region & 0xFF, rz = start.position.region >> 8;
     teleports->Decode(gateRow(9001, rx, rz, start.position.x + 20.0f, start.position.z) +
-                          gateRow(9002, rx, rz, start.position.x + 500.0f, start.position.z),
+                          gateRow(9002, rx, rz, start.position.x + 900.0f, start.position.z),
                       row({"1", "1", "GATE_A", "9001", "SN_A", "0", "0", "0", "0", "0", "0", "0", "1"}) +
                           row({"1", "2", "GATE_B", "9002", "SN_B", std::to_string(assets::RegionId(170, 98)), "1000", "0", "1000", "0", "0", "0", "1"}) +
                           row({"1", "3", "GATE_C", "0", "SN_C", "0", "0", "0", "0", "0", "0", "0", "1"}),
@@ -1631,7 +1633,7 @@ TEST_CASE("Game server: a gate takes a player to the point it links to") {
     c.Send(proto::UseGate{4242, 2}); // no such gate
     REQUIRE(c.Expect(refused));
     CHECK(refused.status == proto::GateStatus::NoSuchGate);
-    c.Send(proto::UseGate{9002, 1}); // a gate 500 away
+    c.Send(proto::UseGate{9002, 1}); // a gate 900 away (a gate structure's reach is 800)
     REQUIRE(c.Expect(refused));
     CHECK(refused.status == proto::GateStatus::TooFar);
     c.Send(proto::UseGate{9001, 7}); // not linked
@@ -1680,6 +1682,25 @@ TEST_CASE("Game server: a gate takes a player to the point it links to") {
     CHECK(there.position.region == assets::RegionId(170, 98));
     CHECK(there.position.x == doctest::Approx(1000.0f));
     CHECK(there.position.z == doctest::Approx(1000.0f));
+    // Back at the gate with a highest level of 20: the same trip is free (the fare 0, its gold kept).
+    c.Send(proto::WorldLeave{});
+    REQUIRE(c.Expect(left));
+    REQUIRE(t.Db().Query("UPDATE sro_vt_shard._char SET curlevel = 20, maxlevel = 20, latestregion = $1, posx = $2, posy = $3, posz = $4 "
+                         "WHERE lower(charname16) = 'gamma'",
+                         {int(std::int16_t(start.position.region)), double(start.position.x), double(start.position.y), double(start.position.z)})
+                .Ok());
+    c.Send(proto::CharacterSelect{"Gamma"});
+    REQUIRE(c.Expect(r));
+    c.Send(proto::WorldEnter{});
+    REQUIRE(c.Expect(start));
+    REQUIRE(c.Expect(inventory));
+    CHECK(inventory.gold == 2000);
+    c.Send(proto::UseGate{9001, 2});
+    REQUIRE(c.Expect(there));
+    CHECK(there.position.region == assets::RegionId(170, 98));
+    c.Send(proto::WorldLeave{});
+    REQUIRE(c.Expect(left));
+    CHECK(t.Db().Query("SELECT remaingold FROM sro_vt_shard._char WHERE lower(charname16) = 'gamma'").Int(0, 0) == 2000);
     game.Stop();
 }
 
