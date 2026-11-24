@@ -310,3 +310,100 @@ TEST_CASE("Hives: an ordinary hive's cap holds its nests' monsters together, fil
     pump([] { return false; }, 400);
     CHECK(hive() == 6);
 }
+
+TEST_CASE("Party monsters: a nest an exp-shared party's kill marked hatches one at 50 % until it comes; champions only by a champion row") {
+    // The kinds' health: a party monster's base 10, then its grade's.
+    CHECK(proto::MonsterMaxHp(100, 0x00) == 100);
+    CHECK(proto::MonsterMaxHp(100, 0x10) == 1'000);
+    CHECK(proto::MonsterMaxHp(100, 0x11) == 2'000);
+    CHECK(proto::MonsterMaxHp(100, 0x14) == 20'000);
+    CHECK(proto::MonsterMaxHp(100, 0x07) == 3'000);
+    CHECK(proto::MonsterMaxHp(100, 0x06) == 400);
+
+    const char* gameDir = std::getenv("SR_GAME_DIR");
+    if (gameDir == nullptr) {
+        MESSAGE("SR_GAME_DIR not set: skipped");
+        return;
+    }
+    std::string error;
+    assets::FileSystem fs;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, gameDir, error), error);
+    assets::CharacterTable characters;
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    const assets::ObjectRow* tiger = characters.Find(std::string_view("MOB_CH_TIGER"));
+    REQUIRE(tiger != nullptr);
+
+    // Three nests of one: a plain one with no champion row (champion% 0), the same where party monsters are off (an
+    // instance world's), one whose every hatch is a champion or a giant.
+    const std::uint16_t region = assets::RegionId(168, 97);
+    const auto nest = [&](float x, int champion, bool party) {
+        server::MonsterNest n;
+        n.refObjId = tiger->refObjId;
+        n.position = {region, x, 0.0f, 1300.0f};
+        n.spawnRadius = 5;
+        n.radius = 50;
+        n.delayMin = n.delayMax = 0.05f;
+        n.maxCount = 1;
+        n.championPercent = champion;
+        n.partyMonsters = party;
+        return n;
+    };
+    core::JobSystem jobs(2);
+    server::WorldConfig config;
+    server::World world(config, jobs, &fs);
+    server::Monsters monsters(world, characters, nullptr, {nest(400, 0, true), nest(800, 0, false), nest(1200, 101, true)}, 11);
+    std::vector<server::WorldMessage> out;
+    const auto pump = [&](const std::function<bool()>& until, int rounds = 2000) {
+        for (int i = 0; i < rounds; ++i) {
+            const auto now = server::WorldClock::now();
+            world.Update(now, out);
+            server::Monsters::Events events;
+            monsters.Update(now, {}, events);
+            out.clear();
+            if (until()) return true;
+            std::this_thread::sleep_for(2ms);
+        }
+        return false;
+    };
+    const auto at = [&](float x) { // the living one there
+        for (const std::uint32_t e : monsters.Near({region, x, 0, 1300}, 100)) {
+            if (monsters.Hp(e) > 0) return e;
+        }
+        return 0u;
+    };
+    server::WorldPlayer player;
+    player.peer = 1;
+    player.character = 77;
+    player.position = {region, 800, 0, 1300};
+    player.dropOnGround = true;
+    const std::uint32_t me = world.Enter(player);
+    // Kills the one at x, marked by a party's kill or not; its rarity.
+    const auto kill = [&](float x, bool party) {
+        std::uint32_t victim = 0;
+        REQUIRE(pump([&] { return (victim = at(x)) != 0; }));
+        const std::uint32_t hp = monsters.Hp(victim);
+        const server::Monsters::Damaged d = monsters.Damage(victim, me, 2'000'000'000, std::chrono::steady_clock::now());
+        REQUIRE(d.killed);
+        CHECK(hp == proto::MonsterMaxHp(tiger->maxHp, d.rarity));
+        if (party) monsters.PartyKilled(victim);
+        return d.rarity;
+    };
+
+    // Unmarked: plain. Marked: a party monster within a few hatchings (each 50 %), then plain again.
+    CHECK(kill(400, true) == 0);
+    int tries = 0;
+    std::uint8_t r = 0;
+    while (tries < 40 && (r = kill(400, false)) == 0) ++tries;
+    CHECK(r == 0x10);
+    for (int i = 0; i < 8; ++i) CHECK(kill(400, false) == 0);
+    // Where party monsters are off: never one.
+    for (int i = 0; i < 8; ++i) CHECK(kill(800, true) == 0);
+    // A champion row and 101 %: every one a champion or a giant (a party one once marked).
+    bool party = false;
+    for (int i = 0; i < 12; ++i) {
+        const std::uint8_t c = kill(1200, true);
+        CHECK(((c & 0x0F) == 1 || (c & 0x0F) == 4));
+        party = party || (c >> 4) == 1;
+    }
+    CHECK(party);
+}

@@ -276,15 +276,17 @@ struct EntityMoved {
 enum class EntityKind : std::uint8_t { Character = 0, GroundItem = 1, Monster = 2, SkillObject = 3, Cos = 4 };
 
 // A monster's most health: its reference's (characterdata col 59) times its kind's, as the client
-// works it out for the target window (champion x 2, giant x 20, titan
-// x 100, elite x 4).
+// works it out for the target window: a party monster's (the rarity's high nibble 1) base 10, else 1, then by its
+// grade (the low nibble): champion x 2, giant x 20, titan x 100, elite x 4, grade 7 x 30.
 inline std::uint32_t MonsterMaxHp(std::uint32_t referenceHp, std::uint8_t rarity) {
-    switch (rarity) {
-    case 1: return referenceHp * 2;
-    case 4: return referenceHp * 20;
-    case 5: return referenceHp * 100;
-    case 6: return referenceHp * 4;
-    default: return referenceHp;
+    const std::uint32_t base = (rarity >> 4) == 1 ? referenceHp * 10 : referenceHp;
+    switch (rarity & 0x0F) {
+    case 1: return base * 2;
+    case 4: return base * 20;
+    case 5: return base * 100;
+    case 6: return base * 4;
+    case 7: return base * 30;
+    default: return base;
     }
 }
 

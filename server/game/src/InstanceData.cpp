@@ -270,9 +270,11 @@ bool LoadGameWorlds(Database& db, const assets::FileSystem& files, const assets:
     // The nests of each world's hives (Tab_RefHive.GameWorldID), with their tactics' aggression and sight.
     QueryResult n = db.Query(
         "SELECT h.gameworldid, h.hatchobjtype, n.dwnestid, n.dwhiveid, o.codename128, n.nregiondbid, n.flocalposx, n.flocalposy, n.flocalposz, "
-        "       n.winitialdir, n.nradius, n.ngenerateradius, n.nchampiongenpercentage, n.dwdelaytimemin, n.dwdelaytimemax, n.dwmaxtotalcount, "
-        "       n.btrespawn, n.bttype, t.btaggresstype, t.nsightrange, t.tracedata, t.bttraceboundary "
+        "       n.winitialdir, n.nradius, n.ngenerateradius, CASE WHEN c.dwtacticsid IS NULL THEN 0 ELSE n.nchampiongenpercentage END, "
+        "       n.dwdelaytimemin, n.dwdelaytimemax, n.dwmaxtotalcount, "
+        "       n.btrespawn, n.bttype, t.btaggresstype, t.nsightrange, t.tracedata, t.bttraceboundary, coalesce(c.nsightrange, 0) "
         "FROM tab_refnest n JOIN tab_refhive h ON h.dwhiveid = n.dwhiveid JOIN tab_reftactics t ON t.dwtacticsid = n.dwtacticsid "
+        "LEFT JOIN tab_reftactics c ON c.dwtacticsid = t.dwchampiontacticsid AND t.dwchampiontacticsid <> 0 "
         "JOIN _refobjcommon o ON o.id = t.dwobjid WHERE (h.gameworldid >= 63 AND h.gameworldid <= 84) OR h.gameworldid = 61 "
         "OR (h.gameworldid >= 51 AND h.gameworldid <= 59) ORDER BY n.dwnestid");
     if (!n.Ok()) return fail(n);
@@ -368,6 +370,10 @@ bool LoadGameWorlds(Database& db, const assets::FileSystem& files, const assets:
         nest.sight = float(n.Int(i, 19));
         nest.trace = float(n.Int(i, 20));
         nest.traceBoundary = int(n.Int(i, 21));
+        nest.championSight = float(n.Int(i, 22));
+        // Its world's PARTYMONSTER_SPAWN (OFF in every instance world in service): no party monster unless ON.
+        const auto party = world->config.find("PARTYMONSTER_SPAWN");
+        nest.partyMonsters = party != world->config.end() && party->second == "ON";
         nest.nestId = std::uint32_t(n.Int(i, 2));
         nest.hive = std::uint32_t(n.Int(i, 3));
         nest.yaw = YawOf(n.Int(i, 9));

@@ -1383,6 +1383,7 @@ Parties::Kill Parties::ShareKill(const std::vector<std::pair<std::uint32_t, std:
             eligible.push_back({p->level, p->race == 1});
             entities.push_back(m.entity);
         }
+        out.partyMembers = std::max(out.partyMembers, int(entities.size()));
         const game::PartyExperience shares = game::PartyExperienceShares(eligible, monsterLevel, partyMonster);
         for (std::size_t i = 0; i < entities.size(); ++i) out.shares.push_back({entities[i], part * shares.factors[i]});
     }

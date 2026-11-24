@@ -78,10 +78,11 @@ constexpr std::uint32_t kStun = 79, kDamage2 = 9, kDown = 62, kDownLoop = 63, kD
 constexpr double kDownFallSeconds = 0.6, kDownRiseSeconds = 0.8; // ours: the clips' own lengths are not read yet
 constexpr double kFadeInSeconds = 2.0, kFadeOutSeconds = 1.5; // CIDecoAppear, CIDecoDisappear
 
-// A monster's size: its reference's times its kind's (champion 1.5, giant 3, elite 1.7).
+// A monster's size: its reference's times its grade's (champion 1.5, giant 3, elite 1.7; a party monster's by its grade).
 float MonsterScale(const assets::ObjectRow* row, std::uint8_t rarity) {
     const float base = row != nullptr ? float(row->scalePercent) / 100.0f : 1.0f;
-    return base * (rarity == 1 ? 1.5f : rarity == 4 ? 3.0f : rarity == 6 ? 1.7f : 1.0f);
+    const int grade = rarity & 0x0F;
+    return base * (grade == 1 ? 1.5f : grade == 4 ? 3.0f : grade == 6 ? 1.7f : 1.0f);
 }
 constexpr double kPickSeconds = 1.0;
 constexpr float kFadeSeconds = 0.5f;
@@ -1457,7 +1458,8 @@ void PlayScreen::SelectMonster(std::uint32_t entity) {
     t.model = e->look.model;
     t.name = gui_.data().Text(row->nameKey);
     t.level = std::uint8_t(std::clamp(row->level, 0, 255));
-    t.rarity = e->rarity;
+    t.rarity = e->rarity & 0x0F;      // the grade
+    t.party = (e->rarity >> 4) == 1;  // a party monster
     t.maxHp = proto::MonsterMaxHp(row->maxHp, e->rarity);
     if (const proto::EntityStructure* structure = fortress_.Structure(entity)) t.maxHp = structure->maxHp; // a fortress's (its server's)
     t.hp = e->look.hp;
@@ -3847,9 +3849,10 @@ const WorldScreen::StageLook* PlayScreen::LookOf(ScreenContext& context, const g
             // material set 2 (when its own is 0 or 1), a giant 3 times, an elite 1.7; its own material
             // set otherwise (characterdata col 109; 2 counts as 0).
             const int own = row->materialKind == 2 ? 0 : row->materialKind;
-            const int set = e.rarity == 1 && own <= 1 ? 2 : own;
+            const int grade = e.rarity & 0x0F; // a party monster's by its grade
+            const int set = grade == 1 && own <= 1 ? 2 : own;
             if (set != 0) look.model += "#set" + std::to_string(set);
-            look.height *= e.rarity == 1 ? 1.5f : e.rarity == 4 ? 3.0f : e.rarity == 6 ? 1.7f : 1.0f;
+            look.height *= grade == 1 ? 1.5f : grade == 4 ? 3.0f : grade == 6 ? 1.7f : 1.0f;
         }
         return &(looks_[e.id] = look);
     }

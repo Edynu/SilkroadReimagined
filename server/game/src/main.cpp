@@ -813,6 +813,9 @@ int main(int argc, char** argv) {
                     // Then its tactics' trace and boundary (records made before them: 500 and 1).
                     int trace = 500, boundary = 1;
                     if (!(row >> trace >> boundary)) trace = 500, boundary = 1;
+                    // Then the champion row's sight (0: its own).
+                    float championSight = 0;
+                    if (!(row >> championSight)) championSight = 0;
                     server::MonsterNest& n = policies[{code, region, x, z}];
                     n.radius = radius;
                     n.spawnRadius = spawnRadius;
@@ -827,6 +830,7 @@ int main(int argc, char** argv) {
                     n.hiveMax = hiveMax;
                     n.trace = float(trace);
                     n.traceBoundary = boundary;
+                    n.championSight = championSight;
                 }
             }
             std::size_t matched = 0, instanceOwn = 0;

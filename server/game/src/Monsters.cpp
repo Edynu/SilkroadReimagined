@@ -52,6 +52,7 @@ struct Monsters::State {
         Clock::time_point nextRefill;
         int left = 0;       // a nest that does not refill: the monsters it has still to spawn
         int bodies = 0;     // its monsters standing or lying (a temporary nest goes with its last)
+        bool partyNext = false; // a party's kill marked it: its next hatchings may give a party monster
         bool removed = false;
         // Its monsters' summons (their skills 'ssou': groups of four, the monster, its rarity, the fewest and the most
         // raised). A monster that only summons (a seal stone, a
@@ -116,6 +117,7 @@ struct Monsters::State {
         std::uint32_t entity = 0;
         std::size_t nest = 0;
         std::uint8_t rarity = 0;
+        bool championRow = false; // a champion or a giant of the roll: it fights by its tactics' champion row
         std::uint32_t hp = 0;
         game::CombatStats stats;
         Mode mode = Mode::Idle;
@@ -306,6 +308,7 @@ struct Monsters::State {
 
     float Uniform(float a, float b) { return std::uniform_real_distribution<float>(a, b)(random); }
     int Percent() { return std::uniform_int_distribution<int>(0, 99)(random); }
+    int Roll101() { return std::uniform_int_distribution<int>(0, 100)(random); } // the original's rand % 101
     static Clock::duration Seconds(float s) {
         return std::chrono::duration_cast<Clock::duration>(std::chrono::duration<float>(s));
     }
@@ -454,10 +457,19 @@ struct Monsters::State {
     void Spawn(std::size_t n, Clock::time_point now) {
         Nest& nest = nests[n];
         std::uint8_t rarity = std::uint8_t(nest.row->rarity);
+        bool championRow = false;
         if (nest.spec.rarity >= 0) {
             rarity = std::uint8_t(nest.spec.rarity);
-        } else if (rarity == 0 && Percent() < nest.spec.championPercent) {
-            rarity = Percent() < 15 ? 4 : 1; // giant or champion
+        } else if (rarity != 1 && (rarity < 3 || rarity > 8)) {
+            // An ordinary monster: a party monster at rand % 101 < 50 from a nest a party's kill marked (not a quest's
+            // monster, TID4 4); then, where its tactics names a champion row, a champion or a giant (rand % 101 <= 14,
+            // the original's start value) at the nest's rand % 101 < percent, fighting by that row.
+            rarity = 0;
+            if (nest.partyNext && nest.spec.partyMonsters && nest.row->typeId[3] != 4 && Roll101() < 50) rarity = 0x10;
+            if (nest.spec.championPercent > 0 && Roll101() < nest.spec.championPercent) {
+                rarity |= Roll101() <= 14 ? 4 : 1;
+                championRow = true;
+            }
         }
         World::MonsterLook look;
         look.model = nest.spec.refObjId;
@@ -487,6 +499,8 @@ struct Monsters::State {
         m.entity = entity;
         m.nest = n;
         m.rarity = rarity;
+        m.championRow = championRow;
+        if ((rarity >> 4) == 1) nest.partyNext = false; // its party monster came
         // A god's loot body: linked both ways (the god leads).
         if (nest.spec.linkTo != 0) {
             if (const auto god = monsters.find(nest.spec.linkTo); god != monsters.end()) god->second.body = entity;
@@ -664,7 +678,7 @@ struct Monsters::State {
     static bool Protected(const Monster& m, const Player& p) {
         if (p.protectedGrades == 0) return false;
         std::uint8_t bit = 0;
-        switch (m.rarity) {
+        switch (m.rarity & 0x0F) {
         case 0: bit = 1; break;
         case 1: bit = 2; break;
         case 3: bit = 4; break;
@@ -765,9 +779,12 @@ struct Monsters::State {
         if (!place) return;
         if (nest.spec.bandit != 0) return BanditLook(m, *place, now);
         // Aggressive by their nest, or by their kind: champions, giants and elites look for a fight.
-        const bool aggressive = nest.spec.aggressive || m.rarity == 1 || m.rarity == 4 || m.rarity == 6;
+        // A champion or giant of the roll by its tactics' champion row (every one aggressive, its own sight).
+        const int grade = m.rarity & 0x0F;
+        const bool aggressive = nest.spec.aggressive || m.championRow || grade == 1 || grade == 4 || grade == 6;
         if (aggressive && !nest.attacks.empty()) {
-            const float sight = nest.spec.sight > 0 ? nest.spec.sight : 100.0f;
+            const float own = m.championRow && nest.spec.championSight > 0 ? nest.spec.championSight : nest.spec.sight;
+            const float sight = own > 0 ? own : 100.0f;
             const Player* best = nullptr;
             float bestDistance = sight;
             const int rx = place->position.region & 0xFF, rz = place->position.region >> 8;
@@ -1328,6 +1345,12 @@ std::optional<Monsters::Corpse> Monsters::CorpseOf(std::uint32_t entity) const {
     if (it == s_->monsters.end() || it->second.mode != State::Mode::Dead) return std::nullopt;
     const State::Nest& nest = s_->nests[it->second.nest];
     return Corpse{nest.spec.refObjId, nest.row != nullptr ? nest.row->level : 0, it->second.rarity, nest.row != nullptr ? nest.row->typeId[3] : 0};
+}
+
+void Monsters::PartyKilled(std::uint32_t entity) {
+    const auto it = s_->monsters.find(entity);
+    if (it == s_->monsters.end() || it->second.nest >= s_->nests.size()) return;
+    s_->nests[it->second.nest].partyNext = true;
 }
 
 Monsters::Monsters(World& world, const assets::CharacterTable& characters, const assets::SkillTable* skills, std::vector<MonsterNest> nests,

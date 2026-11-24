@@ -1524,7 +1524,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
 
     // A kill's experience (the original's): the monster's
-    // (characterdata col 85) times its kind's (champion 2, giant 15, titan 60, elite 4), the player's
+    // (characterdata col 85) times its kind's (a party monster's base 7.5, else 1; then by its grade: champion x 2,
+    // giant x 15, titan x 60, elite x 4, grade 7 x 30; 0, 3 and 8 the base; another grade 1), the player's
     // share of the damage, a level-gap scale (a monster more than 10 above: 2 % less a level beyond;
     // the player 4..6 above: 0.9; 7 or more above: 15 % less a level beyond 3; at least 0.1), and a
     // bonus of 3 % a level for monsters not 3 or more below (1 + 0.03 x min(13, gap + 3)); skill
@@ -1533,7 +1534,19 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // level and the highest mastery (game::MasteryGapRatesOf), then the rates; at least 1 experience.
     void Reward(Peer& peer, PlayerWorld& player, std::uint32_t monster, const assets::ObjectRow& row, std::uint8_t rarity, double share) {
         if (config.levels.empty() || share <= 0.0) return;
-        const double kind = rarity == 1 ? 2.0 : rarity == 4 ? 15.0 : rarity == 5 ? 60.0 : rarity == 6 ? 4.0 : 1.0;
+        const double population = (rarity >> 4) == 1 ? 7.5 : 1.0;
+        double kind = 1.0;
+        switch (rarity & 0x0F) {
+        case 0:
+        case 3:
+        case 8: kind = population; break;
+        case 1: kind = population * 2.0; break;
+        case 4: kind = population * 15.0; break;
+        case 5: kind = population * 60.0; break;
+        case 6: kind = population * 4.0; break;
+        case 7: kind = population * 30.0; break;
+        default: break;
+        }
         const int gap = row.level - player.level; // the monster above the player
         double scale = 1.0;
         if (gap > 10) scale = 1.0 - 0.02 * double(gap - 10);
@@ -2089,6 +2102,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const bool partyMonster = (row->rarity >> 4) == 1 || (d.rarity >> 4) == 1;
         const Parties::Kill kill = parties->ShareKill(d.damageBy, row->level, partyMonster,
                                                       where ? std::optional<proto::WorldPosition>(where->position) : std::nullopt);
+        // Killed by an exp-shared party with two or more members near: its nest may hatch a party monster next.
+        if (kill.partyMembers > 1 && monsters) monsters->PartyKilled(monster);
         if (config.drops && where && kill.owner != 0) {
             if (PlayerWorld* killer = PlayerByEntity(kill.owner)) {
                 std::vector<DropTable::Drop> loot = config.drops->Roll(*row, d.rarity, killer->level, config.rates, fightRandom);

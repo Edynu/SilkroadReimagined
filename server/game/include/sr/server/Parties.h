@@ -151,6 +151,7 @@ public:
     struct Kill {
         std::uint32_t owner = 0;
         std::vector<KillShare> shares;
+        int partyMembers = 0; // the most members of one exp-shared party sharing it (alive, within reach)
     };
     Kill ShareKill(const std::vector<std::pair<std::uint32_t, std::uint64_t>>& damageBy, int monsterLevel, bool partyMonster,
                    const std::optional<game::proto::WorldPosition>& at) const;
