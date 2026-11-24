@@ -2259,6 +2259,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     proto::SkillUseStatus AttackRefusal(std::uint32_t attacker, std::uint32_t target) const override {
         const PlayerWorld* a = PlayerByEntity(attacker);
         if (a == nullptr) return proto::SkillUseStatus::Ok;
+        // An untouchable target (a player, or a COS of one) is not attacked at all (0x3020), not hit for 0.
+        {
+            const PlayerWorld* t = PlayerByEntity(target);
+            if (t == nullptr && coses) t = PlayerByEntity(coses->OwnerOf(target));
+            if (t != nullptr && Clock::now() < t->untouchableUntil) return proto::SkillUseStatus::Untouchable;
+        }
         // A rider neither attacks nor casts (0x3021).
         if (a->riding) return proto::SkillUseStatus::Riding;
         // A job monster (0x3006): a thief monster not by thieves, a hunter monster not by traders nor
@@ -4154,6 +4160,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (std::hypot(a.x - b.x, a.z - b.z) > config.gateReach) return std::nullopt;
         return std::pair<std::string, std::uint32_t>{it->second->codename, it->second->refObjId};
     }
+    bool TradeThreeStarCap() const override { return config.pkProhibited; } // the PK switch's cap (the original's +0x42404)
     bool TradeQuestDone(std::uint32_t entity, std::string_view quest) const override {
         if (!quests) return false;
         const game::QuestDef* q = quests->Find(quest);

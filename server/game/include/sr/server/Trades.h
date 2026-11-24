@@ -59,6 +59,8 @@ public:
     // no NPC).
     virtual std::optional<std::pair<std::string, std::uint32_t>> TradeNpcNear(std::uint32_t entity, std::uint32_t npc) const = 0;
     virtual bool TradeQuestDone(std::uint32_t entity, std::string_view quest) const = 0;
+    // The shard's PK switch (pk-prohibited): no trader's cargo past three stars.
+    virtual bool TradeThreeStarCap() const { return false; }
     // The trader's transport (its entity, its model's codename, its trade bag), none when it has none out.
     struct Cart {
         std::uint32_t entity = 0;

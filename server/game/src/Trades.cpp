@@ -106,6 +106,17 @@ void Trades::Buy(std::uint32_t entity, std::uint32_t npc, const assets::ItemRow&
     }
     const double far = host_.TradeDistance(entity, cart->entity);
     if (far < 0.0 || far > game::kCartReach) return refuse(TradeCode::TooFarFromCart);
+    // The shard's PK switch on: the cargo with these goods no more than three stars (0x1893; ours refuses the purchase,
+    // the original cuts it to what fits).
+    if (host_.TradeThreeStarCap()) {
+        std::uint64_t goods = std::uint64_t(std::max(0, count));
+        if (const assets::ItemTable* items = host_.TradeItems()) {
+            for (const auto& [p, item] : *cart->bag) {
+                if (const assets::ItemRow* row = items->Find(item.refId); row != nullptr && game::IsSpecialtyGood(*row)) goods += item.count;
+            }
+        }
+        if (game::CargoStars(host_.TradeRules(), goods, t->highestLevel, cart->codename) > 3) return refuse(TradeCode::MaxTrading);
+    }
     if (t->gold < price) return refuse(TradeCode::NotEnoughGold);
     // Into the transport's bag: onto the trader's own stack of the good with room, else the first free place.
     const int stack = std::max(1, int(good.maxStack));

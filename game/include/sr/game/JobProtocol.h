@@ -169,6 +169,7 @@ enum class TradeCode : std::uint16_t {
     NotSellTime = 0x18AF,      // bargain goods outside the bargain hours
     QuestNotDone = 0x18B0,     // the NPC's trade quest not done
     BargainLocked = 0x18D1,    // bargain goods again too soon after a purchase
+    MaxTrading = 0x1893,       // the shard's PK switch on: no cargo past three stars (UIIT_MSG_STRGERR_MAX_TRADING_LIMIT_EXCEEDED)
 };
 
 enum class TradeRequest : std::uint8_t { Buy = 1, Sell = 2 };

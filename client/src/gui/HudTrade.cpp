@@ -196,6 +196,7 @@ const char* TradeCodeKey(std::uint16_t code, bool* banner) {
     case proto::TradeCode::QuestNotDone: return with("UIIT_MSG_SPECIALTY_ERR_QUEST_NOTCOMPLETE", false);
     case proto::TradeCode::NotSellTime: return with("UIIT_MSG_SPECIALTY_ERR_NOTSELL", false);
     case proto::TradeCode::BargainLocked: return with("UIIT_MSG_SPECIALTY_ERR_TRADESHOP", false);
+    case proto::TradeCode::MaxTrading: return with("UIIT_MSG_STRGERR_MAX_TRADING_LIMIT_EXCEEDED", false);
     case proto::TradeCode::TooFarFromCart: return with("UIIT_MSG_STRGERR_CANT_DEAL_SPECIALTY_SINCE_TOO_FAR_FROM_CART", false);
     case proto::TradeCode::NotDealer: return with("UIIT_MSG_STRGERR_DEALER_DONT_TREAT_THIS_ITEM", false);
     case proto::TradeCode::StolenGoods: return with("UIIT_MSG_STRGERR_DEALER_DONT_TREAT_STOLEN_ITEM", false);
