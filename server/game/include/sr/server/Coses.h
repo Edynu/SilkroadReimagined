@@ -29,7 +29,9 @@
 //   (UIIT_MSG_COSPETERR_CANT_PICKITEM1). Items move between its bag and its owner's inventory (CosBagMove; not a pet's
 //   summoning item into it, UIIT_MSG_COSPETERR_CANT_MOVETO_SUMITEM), both saved together (SaveCosItems).
 // - Unridden, a COS keeps near its owner: farther than game::kCosFollowFar it walks back towards it (Follow: at once).
-// - A ride goes with its owner's death, leaving, a teleport or a move to another game server (nothing of it is saved).
+// - A ride and a transport are _CharCOS rows from their summon (the original's _AddNewCOS) and come along on their
+//   owner's teleports (made again beside him, the one ridden boarded again; across game servers by their rows). A ride
+//   ends (its row deleted) when its rider gets off it, logs out or dies on it.
 //   A transport is a _CharCOS row from its summon (its bag _InvCOS, every change written in its owner's order of saves
 //   with his gold: a purchase, a sale, a pick-up), as the original's: its owner's leaving (a logout, a dropped
 //   connection, a move to another game server) despawns it and keeps the row, and his next entry makes it again beside
@@ -110,8 +112,12 @@ public:
         bool free = true;    // in no dealing (a stall, an exchange)
         bool fought = false; // in a fight within game::kCosAfterFightSeconds
         std::uint8_t job = 0; // the job's suit worn (its TID4): 1 trader, 2 thief, 3 hunter; 0 none
-        bool inTown = false;
+        bool inTown = false;   // a region whose battlefield byte is 0 (_RefRegion.IsBattleField): a thief summons no transport there
         bool murderer = false; // PvP state 2: his pets' deaths take the murderer's numbers
+        // The original's summon and boarding refusals: its logout counting down, on its way elsewhere (a move, an entry),
+        // a free-PvP state (changing, or on), hidden (stealth, invisibility), in a Battle Arena match, sitting or
+        // getting up or down.
+        bool loggingOut = false, travelling = false, freePvpChanging = false, freePvp = false, hidden = false, inArena = false, sitting = false;
     };
     virtual std::optional<Owner> CosOwner(std::uint32_t entity) = 0;
     virtual void CosSend(std::uint64_t peer, game::proto::MessageId id, const std::vector<std::byte>& payload) = 0;
@@ -191,8 +197,13 @@ public:
         (void)entity;
         (void)states;
     }
-    // A transport's trade bag: its row's _RefObjChar.InventorySize (0: none).
-    virtual int CosTransportBagSize(std::uint32_t model) const { (void)model; return 0; }
+    // A transport's trade bag for an owner of `level` (the original's: it grows with the owner's level, at most its row's
+    // _RefObjChar.InventorySize; 0: none).
+    virtual int CosTransportBagSize(std::uint32_t model, int level) const {
+        (void)model;
+        (void)level;
+        return 0;
+    }
     // `owner`'s transport went (dismissed, dead, its owner gone): its goods with it (their drop
     // comes with step 7).
     virtual void CosTransportGone(std::uint32_t owner) { (void)owner; }
@@ -235,6 +246,15 @@ public:
         (void)models;
         done({});
     }
+    // A ride, transport or grab pet killed (`killer` the killing hit's attacker): its killers credited as a monster's
+    // (the original's: its row's experience by the damage's shares and a party's, a murderer's PK relief, the quests'
+    // kill event). `damageBy` its damagers in order of the first hit.
+    virtual void CosKilled(std::uint32_t cos, std::uint32_t model, const std::vector<std::pair<std::uint32_t, std::uint64_t>>& damageBy, std::uint32_t killer) {
+        (void)cos;
+        (void)model;
+        (void)damageBy;
+        (void)killer;
+    }
     // A town region (`_RefRegion.IsBattleField` 0): a thief's transport stays out of them.
     virtual bool CosTown(std::uint16_t region) const {
         (void)region;
@@ -271,9 +291,10 @@ public:
     // The unridden follow their owners; the pets coming back come out once their owner stands.
     void Tick(Clock::time_point now);
     // Every COS of `owner` sent away: its death or leaving (`comesBack` false: its pets Inactive), a teleport or a move
-    // to another game server (true: its pets stay Summoned and come out again where it arrives). Its transport's row
-    // stays (it comes back at the next entry).
-    void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false);
+    // to another game server (true: its pets stay Summoned and come out again where it arrives). `keepTransport`: its
+    // ride and transport stay out (a teleport on this server: BringTransport). Its transport's row stays (it comes back at
+    // the next entry); its ride's row stays only on a move to another game server (`moving`), else it is its end.
+    void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false, bool moving = false);
     // Its owner died: as the original's, only the COS it rides goes (its ride slot; a ridden transport too, its goods
     // not dropped); its pets and a transport it walks beside stay out.
     void OwnerDied(std::uint32_t owner);
@@ -309,9 +330,13 @@ public:
     bool CarriesGoods(std::uint32_t owner) const;
     // Its bag changed (a purchase, a sale): told to its owner (CosBag).
     void CartChanged(std::uint32_t entity);
-    // A walk of `owner` to `target` would take it farther than game::kCosLeash from its transport left standing
-    // (UIIT_MSG_COSERR_TOO_FAR_FROM_TRADECART): refused, and its owner told why.
-    bool Leashed(std::uint32_t owner, const game::proto::WorldPosition& target);
+    // Its owner's level rose: its transport's bag grows with it (the original's 0x30C9 kind 2; ours the bag told again).
+    void OwnerLevelChanged(std::uint32_t owner);
+    // A walk of `owner` to `target` held by its transport left standing (the original's tether, checked on every step):
+    // a walk towards it goes; one leading farther than game::kCosLeash from it goes only to that line (`target` moved
+    // there, its owner told UIIT_MSG_COSERR_TOO_FAR_FROM_TRADECART); one starting beyond the line and leading farther does
+    // not go (false). `toward` (a walk that way, a click on the sky) becomes a walk to the line when it is cut.
+    bool Tether(std::uint32_t owner, game::proto::WorldPosition& target, bool& toward);
     // A COS's owner (0: `entity` is no COS).
     std::uint32_t OwnerOf(std::uint32_t entity) const;
     // A COS's level (0: not a COS).
@@ -421,6 +446,8 @@ private:
         int bagMost = 0; // a grab pet's places allocated (its row's InventorySize): the bag never grows past them
         // A transport's: its _CharCOS row (0: not made yet) and its owner's character (its saves' order).
         std::int64_t cart = 0, character = 0;
+        // Who hurt it and by how much, in order of the first hit (its killers' credit, CosKilled).
+        std::vector<std::pair<std::uint32_t, std::uint64_t>> damageBy;
     };
     // Its states changed: its stand and its speed from them, those who see it told.
     void StatesChanged(Cos& c, Clock::time_point now);
@@ -465,8 +492,8 @@ private:
     // Sent away; a pet's row saved Summoned (`comesBack`), Dead (`dead`: its rental over) or Inactive. A transport's
     // cargo drops where it stands and its row goes only when it is killed (`dead`) or terminated (`terminate`: its
     // owner sends it away); every other end keeps its row and goods for its owner's next entry (as the original's).
-    void Dismiss(std::uint32_t entity, bool comesBack = false, bool dead = false, bool terminate = false);
-    // The transports' models (characterdata rows of kind Transport).
+    void Dismiss(std::uint32_t entity, bool comesBack = false, bool dead = false, bool terminate = false, bool moving = false);
+    // The rides' and transports' models (characterdata rows of those kinds: their rows are kept).
     const std::vector<std::uint32_t>& TransportModels();
     std::vector<std::uint32_t> transportModels_;
     bool transportModelsRead_ = false;
@@ -503,6 +530,9 @@ private:
     // Owners whose kept transports are being read (Entered), and those read, to make once their owner stands (Tick).
     std::unordered_set<std::uint32_t> cartLoading_;
     std::unordered_map<std::uint32_t, std::vector<CosRow>> carts_;
+    // Owners walking to their ride or transport to board it (Ride from farther than the reach): boarded on arrival.
+    std::unordered_map<std::uint32_t, std::uint32_t> boarding_;
+    void Boardings(Clock::time_point now);
     void Arrived(); // Tick: those whose owner stands at the other end, told again
     Clock::time_point nextFollow_{}, lastFollow_{};
     std::mt19937 random_{0x5EED0C05u};

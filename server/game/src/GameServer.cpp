@@ -1624,6 +1624,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             LogChar(player, logs::CharEvent::LevelChanged, startLevel, player.level);
             if (guilds) guilds->LevelChanged(player.selected, player.level);
             if (academies) academies->LevelChanged(player.selected, player.level, player.maxLevel);
+            if (coses) coses->OwnerLevelChanged(player.entity); // its transport's bag grows
             // Saved at once: a level is worth keeping.
             QueueProgressSave(player);
             player.progressDirty = false;
@@ -2354,6 +2355,40 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                        now);
     }
     void CosStates(std::uint32_t entity, std::vector<proto::StateRecord> states) override { TellStates(entity, std::move(states), Clock::now()); }
+    void CosKilled(std::uint32_t cos, std::uint32_t model, const std::vector<std::pair<std::uint32_t, std::uint64_t>>& damageBy, std::uint32_t killer) override {
+        const assets::ObjectRow* row = config.characters ? config.characters->Find(model) : nullptr;
+        const auto where = world->Where(cos);
+        PlayerWorld* owner = coses ? PlayerByEntity(coses->OwnerOf(cos)) : nullptr;
+        PlayerWorld* by = PlayerByEntity(AsOwner(killer));
+        if (row == nullptr || !where) return;
+        // A riding horse killed by a team's foe (the kill relation 2: an event, the arena, free PvP) credits nobody.
+        if (game::CosKindOf(*row) == game::CosKind::Ride && owner != nullptr && by != nullptr && KillRelationOf(*owner, by) == game::KillRelation::Team) return;
+        // Its experience by the damage's shares (a COS's damage its owner's; monsters' damage none), a party's split.
+        std::vector<std::pair<std::uint32_t, std::uint64_t>> players;
+        for (const auto& [attacker, damage] : damageBy) {
+            const std::uint32_t who = AsOwner(attacker);
+            if (PlayerByEntity(who) == nullptr) continue;
+            const auto same = std::find_if(players.begin(), players.end(), [&](const auto& e) { return e.first == who; });
+            if (same != players.end()) same->second += damage;
+            else players.push_back({who, damage});
+        }
+        if (parties && !players.empty()) {
+            const Parties::Kill kill = parties->ShareKill(players, row->level, false, where->position);
+            for (const Parties::KillShare& share : kill.shares) {
+                PlayerWorld* other = PlayerByEntity(share.entity);
+                if (other == nullptr || other->dead) continue;
+                if (Peer* peer = peers->Find(world->PeerOf(share.entity))) Reward(*peer, *other, cos, *row, 0, share.share);
+            }
+        }
+        if (by == nullptr) return;
+        // A murderer's penalty points less, as for a monster of its level; the quests' kill event.
+        if (by->pkPoints > 0) {
+            AddPkPoints(*by, -game::MonsterKillRelief(row->level, by->level));
+            TellPk(*by);
+        }
+        if (quests) quests->Killed(cos, row->codename, 0, by->entity);
+        core::LogInfo("{}: {} kills {}'s {} ({})", config.name, by->name, owner != nullptr ? owner->name : std::string("?"), row->codename, cos);
+    }
     Monsters::Damaged HitCos(std::uint32_t cos, std::uint32_t attacker, std::uint32_t damage) {
         Monsters::Damaged d;
         if (!coses) return d;
@@ -3698,9 +3733,21 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // The jobs' trade: the specialty NPCs' markets, buying into the transport, selling (Trades.h).
     std::unique_ptr<Trades> trades;
     std::unordered_map<std::uint32_t, int> transportBags; // a transport's model -> its trade bag (_RefObjChar.InventorySize)
-    int CosTransportBagSize(std::uint32_t model) const override {
+    int CosTransportBagSize(std::uint32_t model, int level) const override {
         const auto it = transportBags.find(model);
-        return it != transportBags.end() ? it->second : 0;
+        if (it == transportBags.end()) return 0;
+        const int most = it->second;
+        if (most <= 0 || jobRules.goldMin.size() < 2) return most;
+        // The original's: by its owner's level, int(40 / S x G x 2448 / 11796) at least 1, G = int(GoldMin(level) x 10 x
+        // 0.125) (_RefDropGold), S its capacity class by its Rarity (1: 40, 2: 30), a mall transport's S / 1.4; at most
+        // its row's InventorySize (a level-20 trader's horse: 24 of its 60).
+        const assets::ObjectRow* row = config.characters ? config.characters->Find(model) : nullptr;
+        double s = row != nullptr && row->rarity == 2 ? 30.0 : 40.0;
+        if (row != nullptr && row->cashItem) s /= 1.4;
+        const std::size_t at = std::clamp<std::size_t>(std::size_t(std::max(1, level)), 1, jobRules.goldMin.size() - 1);
+        const int g = int(double(jobRules.goldMin[at]) * 10.0 * 0.125);
+        const int places = std::max(1, int(40.0 / s * double(g) * 2448.0 / 11796.0));
+        return std::min(most, places);
     }
     // A transport's row and bag (_CharCOS, _InvCOS), in its owner's character's order of saves (Coses.h).
     void CosCartCreate(std::int64_t character, const CosRow& row, std::vector<std::uint32_t> older, std::function<void(std::int64_t)> done) override {
@@ -4122,7 +4169,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
         }
         const auto place = world->Where(entity);
-        o.inTown = place && place->position.layer == 0 && towns && towns->TownAt(place->position.region, place->position.x, place->position.z) >= 0;
+        // A town by the region's battlefield byte (the original's thief test; _RefRegion.IsBattleField 0).
+        o.inTown = place && place->position.layer == 0 && BanditTown(place->position.region);
+        o.loggingOut = p->loggingOut;
+        o.travelling = p->moving || p->entering;
+        o.freePvpChanging = p->freePvpAt.has_value();
+        o.freePvp = p->freePvp != 0;
+        o.hidden = p->hidden;
+        o.inArena = arenas && arenas->InMatch(entity);
+        o.sitting = p->motion != proto::kMotionStand;
         return o;
     }
     void CosSend(std::uint64_t peerId, proto::MessageId id, const std::vector<std::byte>& payload) override { GuildSend(peerId, id, payload); }
@@ -4262,6 +4317,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 !(parties && parties->SharesItems(std::uint32_t(g.owner), std::uint32_t(p->selected)))) {
                 continue;
             }
+            // A quest item goes to its owner's bag (PetQuestItem): not while it has no room there.
+            if (const assets::ItemRow* r = g.item.refId != 0 && config.rules->items ? config.rules->items->Find(g.item.refId) : nullptr;
+                r != nullptr && PetQuestItem(*r) && PlaceFor(p->inventory, *r, r->refObjId, g.item.count) < 0) {
+                continue;
+            }
             const auto there = world->Where(entity);
             if (!there) continue;
             const proto::FlatPosition q = proto::ToFlat(there->position);
@@ -4287,18 +4347,49 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             good != nullptr && game::IsSpecialtyGood(*good)) {
             return Picked::Gone; // specialty goods: never a pet's (CosGroundNear)
         }
+        // Who it goes to (the original's recipient): gold and quest items its owner's bag (the Roc's alchemy items
+        // shared); in a party sharing items the member whose turn it is, within 1000; else the pet's own bag.
+        const assets::ItemRow* row = g.item.refId != 0 && config.rules->items ? config.rules->items->Find(g.item.refId) : nullptr;
+        const bool quest = row != nullptr && PetQuestItem(*row) && !row->codename.starts_with("ITEM_QNO_RM_ARCHEMY");
+        const std::uint32_t to = row != nullptr && !quest && parties ? parties->LootRecipient(owner) : owner;
+        const std::uint16_t count = std::uint16_t(std::min<std::uint32_t>(g.item.count, 0xFFFF));
+        // Into a player's bag (its owner's, or the turn's member's): false when it has no room.
+        const auto intoBag = [&](std::uint32_t entity) {
+            PlayerWorld* r = PlayerByEntity(entity);
+            Peer* rp = r != nullptr ? peers->Find(world->PeerOf(entity)) : nullptr;
+            const int place = r != nullptr && rp != nullptr ? PlaceFor(r->inventory, *row, row->refObjId, g.item.count) : -1;
+            if (place < 0 || !Put(*r, place, g.item)) return false;
+            proto::ItemMoved answer;
+            answer.from = answer.to = std::uint8_t(place);
+            answer.changed.push_back(r->inventory.Record(std::uint8_t(place)));
+            SendMessage(*rp->connection, answer);
+            QueueItemSave(r->selected, r->inventory, {std::uint8_t(place)}, {});
+            if (parties && parties->PartyOf(entity) != 0) {
+                parties->TellLoot(entity, g.item.refId, count, 0);
+            } else {
+                SendMessage(*rp->connection, proto::ItemGained{g.item.refId, count, 0});
+            }
+            if (quests) quests->BagChanged(entity);
+            if (const game::ItemInstance* got = r->inventory.At(std::uint8_t(place)))
+                LogItem(*r, logs::ItemOp::PickUp, got->refId, got->serial, g.item.count, logs::kNoSlot, std::uint8_t(place));
+            return true;
+        };
         if (g.item.refId == 0) {
             p->inventory.gold += g.gold; // gold to its owner
             SendMessage(*peer->connection, proto::GoldChanged{p->inventory.gold});
             QueueGoldSave(p->selected, p->inventory.gold);
             SendMessage(*peer->connection, proto::ItemGained{0, 0, g.gold}); // its owner's line, as for its own pick-up
+        } else if (row != nullptr && (quest || to != owner) && intoBag(quest ? owner : to)) {
+            // (into a player's bag)
+        } else if (quest) {
+            return Picked::Gone; // its owner's bag full: it stays on the ground (the original's 0x18B5)
         } else {
             if (freeItemIds.empty()) return Picked::Gone; // no id for it yet: it stays for now
             game::ItemInstance item = g.item;
             item.serial = freeItemIds.back();
             if (!put(item)) return Picked::NoRoom;
             freeItemIds.pop_back();
-            SendMessage(*peer->connection, proto::ItemGained{g.item.refId, std::uint16_t(std::min<std::uint32_t>(g.item.count, 0xFFFF)), 0});
+            SendMessage(*peer->connection, proto::ItemGained{g.item.refId, count, 0});
         }
         core::LogInfo("{}: {}'s pet picks up ground item {}", config.name, p->name, entity);
         ground.erase(it);
@@ -4309,6 +4400,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         });
         return Picked::Taken;
     }
+    // A quest item (itemdata TID 3/3/9): a pet's pick-up of one goes to its owner's bag.
+    static bool PetQuestItem(const assets::ItemRow& row) { return row.typeId[0] == 3 && row.typeId[1] == 3 && row.typeId[2] == 9; }
     const assets::ItemTable* CosItems() const override { return config.rules->items.get(); }
     game::Inventory* CosInventory(std::uint32_t owner) override {
         PlayerWorld* p = PlayerByEntity(owner);
@@ -5620,14 +5713,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (alchemy) alchemy->End(player.entity);
         if (stalls) stalls->Leave(player.entity);       // and its stall
         const std::uint16_t owner = OwnerOf(to.region);
-        // A scroll's COS stays behind (gone); its pets come along.
-        if (coses) coses->DismissAll(player.entity, true, withTransport && owner == config.id);
+        // Its ride and transport come along (the original's teleport keeps their rows and makes them again at the
+        // arrival, the one ridden boarded again), where the teleport took them at all (a return scroll refuses a
+        // transport out, `withTransport` the links that allow one); its pets too.
+        (void)withTransport;
         if (owner == config.id) {
+            if (coses) coses->DismissAll(player.entity, true, true);
             world->Teleport(player.entity, to);
-            if (coses && withTransport) coses->BringTransport(player.entity, to);
+            if (coses) coses->BringTransport(player.entity, to);
             return;
         }
-        StartMove(peerId, player, to, 0.0f, owner);
+        StartMove(peerId, player, to, 0.0f, owner); // its leave keeps their rows: made again at the other server's entry
     }
     void GoneAfterMove(std::int64_t character) {
         if (guilds) guilds->Left(character);
@@ -11181,7 +11277,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 // A click (MoveTo), or one on the sky (MoveToward: that way until something stops it); the two are laid
                 // out alike.
                 if (proto::MoveTo move; decode(move) && player.entity != 0) {
-                    const bool toward = m.id == proto::MoveToward::kId;
+                    bool toward = m.id == proto::MoveToward::kId;
                     if (player.dead) return;
                     // A cast going on holds it where it stands until its impact (it is not cancelled), a chain
                     // of rows until its last went off (the client keeps the
@@ -11194,8 +11290,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                     // Not while sitting down or standing up; a sitting player stands as it
                     // goes, and its own walk ends a trace.
                     if (player.motion == proto::kMotionChanging) return;
-                    // Not farther than 100 m from its transport left standing (Coses.h).
-                    if (coses && coses->Leashed(player.entity, move.target)) return;
+                    // Not farther than 100 m from its transport left standing: the walk stops at the line (Coses::Tether).
+                    if (coses && !coses->Tether(player.entity, move.target, toward)) return;
                     if (coses && coses->KeptOutOfTown(player.entity, move.target)) return;
                     StandUp(player);
                     player.traceTarget = 0;
@@ -12071,7 +12167,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // logout (the user's report 2026-11-14: summoned pets come back on the next login); its ride goes. Its transport's
         // row stays with its goods (a logout, a dropped connection, a move alike: the original's departure), made again
         // beside it at its next entry (Coses.h).
-        if (coses) coses->DismissAll(player.entity, true);
+        if (coses) coses->DismissAll(player.entity, true, false, moving);
         if (quests) quests->Leave(player.entity);
         if (!moving) LogChar(player, logs::CharEvent::Logout);
         if (parties) {

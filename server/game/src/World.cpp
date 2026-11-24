@@ -1106,6 +1106,18 @@ void World::SetDetection(std::uint32_t entity, std::uint8_t mask, std::uint8_t l
     }
 }
 
+std::optional<World::Pace> World::PaceOf(std::uint32_t entity) const {
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end()) return std::nullopt;
+    const State::Entity& e = it->second;
+    Pace p;
+    p.walk = (e.walkSpeed > 0 ? e.walkSpeed : s_->config.walkSpeed) * e.speedFactor;
+    p.run = (e.runSpeed > 0 ? e.runSpeed : s_->config.runSpeed) * e.speedFactor;
+    p.now = e.moving ? e.speed : 0.0f;
+    p.walking = e.walkMode;
+    return p;
+}
+
 void World::SetSpeedFactor(std::uint32_t entity, float factor) {
     const auto it = s_->entities.find(entity);
     if (it == s_->entities.end() || it->second.speedFactor == factor) return;

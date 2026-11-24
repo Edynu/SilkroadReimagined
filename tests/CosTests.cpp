@@ -602,9 +602,13 @@ TEST_CASE("Game server: a ride summoned, ridden, left and sent away") {
     CHECK(mountLeg.speed == doctest::Approx(kHorseRun));
     CHECK(mountLeg.to.x == doctest::Approx(leg.to.x));
 
-    // One of a kind: a second ride, or a transport, is refused (and the scroll kept).
+    // One of a kind: a second ride, or a transport, is refused (and the scroll kept): the original's 0x185C.
     a.client->Send(proto::UseItem{PlaceOf(a.bag, kHorseScroll)});
-    CHECK(Next<proto::CosRefused>(a).text == "UIIT_MSG_COS_CANT_SUMMON_DUPLICATE_PETTYPE");
+    CHECK(Next<proto::CosRefused>(a).text == "UIIT_MSG_STRGERR_CANT_SUMMON_MULTIPLE_COSOBJ");
+    // A ride is a _CharCOS row while it is ridden (the original's _AddNewCOS), its end deletes it.
+    const auto rides = [&] { return t.Db().Query("SELECT count(*) FROM _charcos WHERE ownercharid = $1 AND refcharid = $2", {a.character, std::int64_t(kHorse)}).Int(0, 0); };
+    for (int i = 0; i < 300 && rides() != 1; ++i) s.game.Poll(5ms);
+    CHECK(rides() == 1);
     a.client->Send(proto::UseItem{PlaceOf(a.bag, kCartScroll)}); // and a transport is no job for one without a trader's or a thief's suit
     CHECK(Next<proto::CosRefused>(a).text == "UIIT_MSG_STRGERR_YOU_CANT_ACTIVATE_CART");
 
@@ -623,6 +627,8 @@ TEST_CASE("Game server: a ride summoned, ridden, left and sent away") {
     for (;;) {
         if (Next<proto::EntityGone>(b).entity == summoned.entity) break;
     }
+    for (int i = 0; i < 300 && rides() != 0; ++i) s.game.Poll(5ms);
+    CHECK(rides() == 0);
     a.client->Send(proto::MoveTo{{assets::RegionId(168, 97), 1000, 0, 1000}});
     CHECK(NextLeg(a, a.entity).speed == doctest::Approx(50.0f));
 
@@ -690,6 +696,11 @@ TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and
     const auto far = Next<proto::CosRefused>(a);
     CHECK(far.text == "UIIT_MSG_COSERR_TOO_FAR_FROM_TRADECART");
     CHECK(far.arg == "100");
+    // The walk goes to the line, 1000 from it (the original's tether stops each step beyond it), not nowhere.
+    const auto cut = NextLeg(a, a.entity);
+    const double cutAt = proto::ToFlat(cut.to).z - proto::ToFlat({assets::RegionId(168, 97), 1000, 0, 1000}).z; // (the line is in the next region)
+    CHECK(cutAt > 900.0);
+    CHECK(cutAt < 1010.0);
     a.client->Send(proto::MoveTo{{assets::RegionId(168, 97), 1000, 0, 1000 + 500}});
     CHECK(NextLeg(a, a.entity).to.z == doctest::Approx(1500.0f));
     // It follows at its run pace.
@@ -1595,7 +1606,9 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     const auto cart = Next<proto::CosSummoned>(a);
     const auto empty = Next<proto::CosBag>(a);
     CHECK(empty.entity == cart.entity);
-    CHECK(empty.size == 40);
+    // Its bag by its owner's level (the original's: int(40 / 40 x int(GoldMin(30) x 1.25) x 2448 / 11796) = 33), at most
+    // its row's 40.
+    CHECK(empty.size == 33);
 
     // 40 bought: 15,320, into the transport, made by its alias; one star.
     r = buy(40);

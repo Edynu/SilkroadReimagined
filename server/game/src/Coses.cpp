@@ -20,7 +20,25 @@ namespace proto = game::proto;
 
 namespace {
 constexpr float kSummonAside = 10.0f;   // ours: a COS comes out this far to its owner's right
-constexpr float kBoardReach = 100.0f;   // ours: how near its COS a player boards it
+constexpr float kBoardReach = 30.0f;    // how near its COS a player boards it (3D; the original's bind)
+constexpr float kBoardWalk = 300.0f;    // ours: from how far its owner walks to it first to board
+constexpr double kCartFollowEnd = 65.0; // a ride or transport left standing stops keeping near its owner this far (the original's)
+
+// The distance between two places in 3D (a dungeon's by its own coordinates).
+double Distance3(const proto::WorldPosition& a, const proto::WorldPosition& b) {
+    double dx = 0, dz = 0;
+    if ((a.region & 0x8000) != 0 || (b.region & 0x8000) != 0) {
+        if (a.region != b.region) return 1e9;
+        dx = double(a.x) - double(b.x);
+        dz = double(a.z) - double(b.z);
+    } else {
+        const proto::FlatPosition fa = proto::ToFlat(a), fb = proto::ToFlat(b);
+        dx = fa.x - fb.x;
+        dz = fa.z - fb.z;
+    }
+    const double dy = double(a.y) - double(b.y);
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
 constexpr auto kFollowPeriod = std::chrono::milliseconds(250);
 constexpr double kFightLeash = 500.0; // ours: an attack pet gives a fight up this far from its owner (the monsters' own)
 // The natural recovery (the attack pet's own): its
@@ -122,8 +140,16 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
         return Use::Refused;
     };
     if (!o->alive) return refuse("UIIT_MSG_COSPETERR_CANT_DEACTIVATE_IN_DEADSTATE");
-    if (!o->free) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM");
+    // The original's order: its logout counting down (0x186B), on its way elsewhere (0x1869), a free-PvP state (0x18AD
+    // changing, else 0x189D), then the scroll's level, stealth (0x187A), the arena (0x1879), the place, a dealing.
+    if (o->loggingOut) return refuse("UIIT_MSG_STRGERR_CANT_OPERATE_REQUESTED_JOB_DURING_LOGOUT");
+    if (o->travelling) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM");
+    if (o->freePvpChanging) return refuse("UIIT_MGS_ERR_FRPVP_DURING_CHANGE");
+    if (o->freePvp) return refuse("UIIT_MSG_CANT_STRIP_TIME_COS_RECALL");
     if (o->level < item.requiredLevel) return refuse("UIIT_MSG_COS_HIGHER_LEVEL_REQUIRED_TO_USE_THISITEM");
+    if (o->hidden) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM");
+    if (o->inArena) return refuse("UIIT_MSG_COS_CREATE_DUNGEON");
+    if (!o->free || o->sitting) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM"); // a dealing; sitting (motion 4: 5)
     const std::optional<std::string> codename = game::CosOfScroll(item, o->level);
     if (!codename) return refuse("UIIT_MSG_COS_HIGHER_LEVEL_REQUIRED_TO_USE_THISITEM");
     const assets::ObjectRow* row = characters->Find(std::string_view(*codename));
@@ -142,10 +168,11 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
     const auto place = host_.CosWorld().Where(owner);
     if (!place) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM");
     if ((place->position.region & 0x8000) != 0) return refuse("UIIT_MSG_COS_CREATE_DUNGEON");
+    // A second ride or transport (riding anything, one out, or its kept one still coming): 0x185C.
+    if (PlaceTaken(owner, kind) || MountOf(owner) != 0 || cartLoading_.contains(owner) || carts_.contains(owner)) {
+        return refuse("UIIT_MSG_STRGERR_CANT_SUMMON_MULTIPLE_COSOBJ");
+    }
     if (o->fought) return refuse("UIIT_MSG_COS_CAN_NOT_CREATE_BATTLE");
-    if (PlaceTaken(owner, kind)) return refuse("UIIT_MSG_COS_CANT_SUMMON_DUPLICATE_PETTYPE");
-    // Its kept transport still coming (read at its entry, made once it stands): that one is its.
-    if (kind == game::CosKind::Transport && (cartLoading_.contains(owner) || carts_.contains(owner))) return refuse("UIIT_MSG_COS_CANT_SUMMON_DUPLICATE_PETTYPE");
     const std::uint32_t entity = Place(owner, *row);
     if (entity == 0) return refuse("UIIT_MSG_COSPETERR_CANT_USEITEM");
     Cos& c = coses_[entity];
@@ -158,11 +185,14 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
     c.walkSpeed = row->walkSpeed;
     c.runSpeed = row->runSpeed;
     if (kind == game::CosKind::Transport) {
-        c.bagSize = std::clamp(host_.CosTransportBagSize(row->refObjId), 0, 255); // its trade bag
+        c.bagSize = std::clamp(host_.CosTransportBagSize(row->refObjId, o->level), 0, 255); // its trade bag, by its owner's level
         // Its numbers as a monster's (its row's): the bandits' hits are rolled against them.
         c.stats = game::MonsterCombatStats(*row, 0);
         c.stats.maxHp = std::max<std::uint32_t>(1, row->maxHp);
-        // Its row (the original's _AddNewCOS), in its owner's order of saves: its bag's saves wait for it.
+    }
+    {
+        // Its row (the original's _AddNewCOS, a ride's and a transport's), in its owner's order of saves: its bag's
+        // saves wait for it.
         c.character = o->character;
         CosRow made;
         made.owner = o->character;
@@ -173,7 +203,7 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
         host_.CosCartCreate(o->character, made, TransportModels(), [this, entity, owner, character = o->character](std::int64_t id) {
             if (id == 0) return;
             const auto it = coses_.find(entity);
-            if (it == coses_.end() || it->second.owner != owner || it->second.kind != game::CosKind::Transport) {
+            if (it == coses_.end() || it->second.owner != owner || (it->second.kind != game::CosKind::Transport && it->second.kind != game::CosKind::Ride)) {
                 host_.CosCartDelete(character, id); // gone before its row was made
                 return;
             }
@@ -538,8 +568,14 @@ void Coses::Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult
     const auto it = coses_.find(pet);
     if (it == coses_.end() || it->second.hp == 0) return;
     Cos& c = it->second;
+    const std::uint64_t dealt = std::min<std::uint64_t>(hit.damage, c.hp);
     c.hp = hit.damage >= c.hp ? 0 : c.hp - hit.damage;
     host_.CosWorld().SetHp(pet, c.hp);
+    if (dealt > 0) {
+        const auto by = std::find_if(c.damageBy.begin(), c.damageBy.end(), [&](const auto& e) { return e.first == monster; });
+        if (by != c.damageBy.end()) by->second += dealt;
+        else c.damageBy.push_back({monster, dealt});
+    }
     std::uint8_t flags = hit.critical ? proto::kDamageCritical : 0;
     if (hit.blocked) flags |= proto::kDamageBlocked;
     if (c.hp == 0) flags |= proto::kDamageKilled;
@@ -555,7 +591,9 @@ void Coses::Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult
     std::uint64_t lost = 0;
     const std::span<const std::uint64_t> levels = host_.CosLevels();
     const std::span<const std::uint32_t> mobExp = host_.CosMonsterExperience();
-    if (c.row.id == 0) { // a scroll's COS (a ride, a transport: the bandits' hits): no row, no experience
+    // Its killers credited as a monster's (a ride's, a transport's, a grab pet's: the original's COS death credit).
+    if (c.kind == game::CosKind::Ride || c.kind == game::CosKind::Transport || c.kind == game::CosKind::GrabPet) host_.CosKilled(pet, c.model, c.damageBy, monster);
+    if (c.row.id == 0) { // a scroll's COS (a ride, a transport: the bandits' hits): no pet's experience
         if (const auto o = host_.CosOwner(c.owner)) core::LogInfo("cos: {}'s COS {} dies", o->name, pet);
         Dismiss(pet, false, true); // a transport's cargo: every slot on the ground where it fell (Dismiss)
         return;
@@ -573,6 +611,7 @@ void Coses::Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult
 void Coses::Fight(Cos& c, Clock::time_point now) {
     World& world = host_.CosWorld();
     const std::uint32_t entity = c.entity;
+    world.SetSpeeds(entity, c.walkSpeed, c.runSpeed); // its own row's pace in a fight (its owner's only as it follows)
     // The hits of its swing land when their time comes, on a foe still within reach (one at a time: a hit's kill can
     // take the pet away, its owner leaving with the news).
     for (std::size_t i = 0; i < c.pending.size();) {
@@ -937,9 +976,15 @@ bool Coses::Handle(std::uint32_t owner, proto::MessageId id, std::span<const std
         if (!proto::Decode(payload, m)) return false;
         const auto it = coses_.find(m.entity);
         if (it == coses_.end() || it->second.owner != owner) return true; // not its own: nothing happens
-        if (const auto o = host_.CosOwner(owner); o && !o->alive) {
-            Refuse(owner, "UIIT_MSG_COSPETERR_CANT_DEACTIVATE_IN_DEADSTATE");
-            return true;
+        // A pet put away (the original's 0x7116): refused in battle (0x440D), dead (0x4411), in a free-PvP change
+        // (0x4420), from 100 or more away (4). A ride or transport terminated (0x70C6): no such check.
+        if (IsPet(it->second.kind)) {
+            const auto o = host_.CosOwner(owner);
+            if (o && o->fought) return Refuse(owner, "UIIT_MSG_COSPETERR_CANT_PETRE_BATTLE"), true;
+            if (o && !o->alive) return Refuse(owner, "UIIT_MSG_COSPETERR_CANT_DEACTIVATE_IN_DEADSTATE"), true;
+            if (o && o->freePvpChanging) return Refuse(owner, "UIIT_MGS_ERR_FRPVP_DURING_CHANGE"), true;
+            const auto a = host_.CosWorld().Where(owner), b = host_.CosWorld().Where(m.entity);
+            if (a && b && Distance3(a->position, b->position) >= 100.0) return true;
         }
         Dismiss(m.entity, false, false, true); // terminated: a transport's cargo on the ground
         return true;
@@ -1129,22 +1174,32 @@ bool Coses::Ride(std::uint32_t owner, std::uint32_t entity, bool ride, Clock::ti
     if (ride) {
         const auto o = host_.CosOwner(owner);
         if (!o || !o->alive || !o->free) return false;
+        // The original's order: sitting or getting up (5), in battle (0xB), then its bind: a hunter on a transport (10),
+        // hidden (body mode 6 / 7: 0xC), farther than 30 (4).
+        if (o->sitting) return Refuse(owner, "UIIT_MSG_CMSERR_CANT_RIDE_ON_IT"), false;
         if (o->fought) {
             Refuse(owner, "UIIT_MSG_COS_CAN_NOT_RIDE_BATTLE");
             return false;
         }
-        if (c.kind == game::CosKind::Transport && o->job != std::uint8_t(game::Job::Trader) && o->job != std::uint8_t(game::Job::Thief)) {
+        if (c.kind == game::CosKind::Transport && o->job == std::uint8_t(game::Job::Hunter)) {
             Refuse(owner, "UIIT_MSG_CMSERR_HUNTER_CANT_RIDE_CART");
             return false;
         }
+        if (o->hidden) return Refuse(owner, "UIIT_MSG_CMSERR_CANT_RIDE_ON_IT"), false;
         const auto a = world.Where(owner), b = world.Where(entity);
         if (!a || !b) return false;
-        const proto::FlatPosition fa = proto::ToFlat(a->position), fb = proto::ToFlat(b->position);
-        // Beside it (ours: the original's reach is not traced; its client names no distance, only "Unable to board.").
-        if (std::hypot(fa.x - fb.x, fa.z - fb.z) > kBoardReach) {
+        // Within 30 (3D, one plane): farther, its owner walks to it first and boards there (ours: the original's client
+        // walks up before it asks; Tick's boarding walks).
+        if (a->position.layer != b->position.layer || Distance3(a->position, b->position) > kBoardReach) {
+            if (a->position.layer == b->position.layer && Distance3(a->position, b->position) <= kBoardWalk &&
+                world.MoveTo(owner, b->position) == World::MoveRefused::None) {
+                boarding_[owner] = entity;
+                return false;
+            }
             Refuse(owner, "UIIT_MSG_CMSERR_CANT_RIDE_ON_IT");
             return false;
         }
+        boarding_.erase(owner);
         world.SetSpeeds(owner, c.walkSpeed, c.runSpeed);
         world.Carry(owner, entity);
     } else {
@@ -1168,7 +1223,7 @@ bool Coses::Ride(std::uint32_t owner, std::uint32_t entity, bool ride, Clock::ti
     return true;
 }
 
-void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool terminate) {
+void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool terminate, bool moving) {
     const auto it = coses_.find(entity);
     if (it == coses_.end()) return;
     const std::uint32_t owner = it->second.owner;
@@ -1193,6 +1248,12 @@ void Coses::Dismiss(std::uint32_t entity, bool comesBack, bool dead, bool termin
     if (const Cos& c = it->second; c.kind == game::CosKind::Transport && c.cart != 0) {
         if (dead || terminate) host_.CosCartDelete(c.character, c.cart);
         else host_.CosCartRelease(c.character, c.cart, c.hp, wasRidden, c.bag);
+    }
+    // A ride's: kept only through a move to another game server (made again there, ridden); any other end is its end
+    // (the original deletes a riding horse at its rider's getting off, logout, death).
+    if (const Cos& c = it->second; c.kind == game::CosKind::Ride && c.cart != 0) {
+        if (moving && !dead && !terminate) host_.CosCartRelease(c.character, c.cart, c.hp, true, c.bag);
+        else host_.CosCartDelete(c.character, c.cart);
     }
     host_.CosWorld().Leave(entity);
     Send(owner, proto::CosDismissed{entity});
@@ -1227,12 +1288,27 @@ void Coses::CartChanged(std::uint32_t entity) {
     if (it->second.kind == game::CosKind::Transport) host_.CosCartSave(it->second.character);
 }
 
+void Coses::OwnerLevelChanged(std::uint32_t owner) {
+    const auto o = host_.CosOwner(owner);
+    const auto it = owned_.find(owner);
+    if (!o || it == owned_.end()) return;
+    for (const std::uint32_t entity : it->second) {
+        Cos& c = coses_.at(entity);
+        if (c.kind != game::CosKind::Transport) continue;
+        const int size = std::clamp(host_.CosTransportBagSize(c.model, o->level), 0, 255);
+        if (size <= c.bagSize) continue; // it only grows
+        c.bagSize = size;
+        SendBag(c);
+        core::LogInfo("cos: {}'s transport {} holds {} goods now", o->name, entity, size);
+    }
+}
+
 const std::vector<std::uint32_t>& Coses::TransportModels() {
     if (!transportModelsRead_) {
         transportModelsRead_ = true;
         if (const assets::CharacterTable* characters = host_.CosCharacters()) {
             for (const auto& [codename, row] : characters->rows())
-                if (game::CosKindOf(row) == game::CosKind::Transport) transportModels_.push_back(row.refObjId);
+                if (game::CosKindOf(row) == game::CosKind::Transport || game::CosKindOf(row) == game::CosKind::Ride) transportModels_.push_back(row.refObjId);
             std::sort(transportModels_.begin(), transportModels_.end());
         }
     }
@@ -1243,9 +1319,10 @@ void Coses::RestoreCart(std::uint32_t owner, const CosRow& row, Clock::time_poin
     const auto o = host_.CosOwner(owner);
     const assets::CharacterTable* characters = host_.CosCharacters();
     const assets::ObjectRow* shape = characters != nullptr ? characters->Find(row.refId) : nullptr;
-    if (!o || shape == nullptr || game::CosKindOf(*shape) != game::CosKind::Transport) return;
-    if (PlaceTaken(owner, game::CosKind::Transport)) {
-        core::LogInfo("cos: {}'s kept transport {} stays kept (one out already)", o->name, row.id);
+    const game::CosKind kind = shape != nullptr ? game::CosKindOf(*shape) : game::CosKind::None;
+    if (!o || (kind != game::CosKind::Transport && kind != game::CosKind::Ride)) return;
+    if (PlaceTaken(owner, kind)) {
+        core::LogInfo("cos: {}'s kept COS {} stays kept (one out already)", o->name, row.id);
         return;
     }
     const std::uint32_t entity = Place(owner, *shape);
@@ -1254,14 +1331,16 @@ void Coses::RestoreCart(std::uint32_t owner, const CosRow& row, Clock::time_poin
     c.entity = entity;
     c.owner = owner;
     c.model = shape->refObjId;
-    c.kind = game::CosKind::Transport;
+    c.kind = kind;
     c.maxHp = shape->maxHp;
     c.hp = row.hp != 0 ? std::min(row.hp, shape->maxHp) : shape->maxHp;
     c.walkSpeed = shape->walkSpeed;
     c.runSpeed = shape->runSpeed;
-    c.bagSize = std::clamp(host_.CosTransportBagSize(shape->refObjId), 0, 255);
-    c.stats = game::MonsterCombatStats(*shape, 0);
-    c.stats.maxHp = std::max<std::uint32_t>(1, shape->maxHp);
+    if (kind == game::CosKind::Transport) {
+        c.bagSize = std::clamp(host_.CosTransportBagSize(shape->refObjId, o->level), 0, 255);
+        c.stats = game::MonsterCombatStats(*shape, 0);
+        c.stats.maxHp = std::max<std::uint32_t>(1, shape->maxHp);
+    }
     c.character = o->character;
     c.cart = row.id;
     for (const StoredItem& s : row.bag) {
@@ -1272,12 +1351,14 @@ void Coses::RestoreCart(std::uint32_t owner, const CosRow& row, Clock::time_poin
     owned_[owner].push_back(entity);
     Send(owner, proto::CosSummoned{entity, c.model, std::uint8_t(c.kind), c.hp, c.maxHp, c.item});
     if (c.bagSize > 0) SendBag(c);
-    core::LogInfo("cos: {}'s transport {} back with {} stacks of goods (row {})", o->name, entity, c.bag.size(), row.id);
-    if (row.state == std::uint8_t(game::CosState::Active)) Ride(owner, entity, true, now);
-    host_.CosTransportBack(owner); // its goods count again: their stars, the bandits' caravan
+    core::LogInfo("cos: {}'s {} {} back with {} stacks of goods (row {})", o->name, kind == game::CosKind::Ride ? "ride" : "transport", entity, c.bag.size(),
+                  row.id);
+    // A ride is always ridden (getting off it is its end); a transport as it was.
+    if (kind == game::CosKind::Ride || row.state == std::uint8_t(game::CosState::Active)) Ride(owner, entity, true, now);
+    if (kind == game::CosKind::Transport) host_.CosTransportBack(owner); // its goods count again: their stars, the bandits' caravan
 }
 
-void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport) {
+void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport, bool moving) {
     // Pets still waiting to come back, their owner leaving for good: inactive.
     if (!comesBack) {
         if (const auto r = returning_.find(owner); r != returning_.end()) {
@@ -1300,7 +1381,7 @@ void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport) 
             travelling_[owner].list.push_back({entity, c->second.ridden}); // a rider stays on it through the travel
             continue;
         }
-        Dismiss(entity, comesBack);
+        Dismiss(entity, comesBack, false, false, moving);
     }
 }
 
@@ -1314,7 +1395,7 @@ void Coses::OwnerDied(std::uint32_t owner) {
         // The COS ridden goes, a transport too, its goods with it, none dropped (as the original's: the death releases
         // the ride slot with its database job 1, _DeleteCharCOS: a transport's row and goods deleted). One walked beside is
         // not touched (the loop's test). Rare: a rider is never a monster's target (its mount is).
-        if (Cos& ridden = c->second; ridden.kind == game::CosKind::Transport && ridden.cart != 0) host_.CosCartDelete(ridden.character, std::exchange(ridden.cart, 0));
+        if (Cos& ridden = c->second; ridden.cart != 0) host_.CosCartDelete(ridden.character, std::exchange(ridden.cart, 0));
         Dismiss(entity, false);
     }
 }
@@ -1392,20 +1473,54 @@ bool Coses::TransportOut(std::uint32_t owner) const {
     return false;
 }
 
-bool Coses::Leashed(std::uint32_t owner, const proto::WorldPosition& target) {
+bool Coses::Tether(std::uint32_t owner, proto::WorldPosition& target, bool& toward) {
     const auto it = owned_.find(owner);
-    if (it == owned_.end()) return false;
+    if (it == owned_.end()) return true;
+    const auto me = host_.CosWorld().Where(owner);
+    if (!me) return true;
     for (std::uint32_t id : it->second) {
         const Cos& c = coses_.at(id);
         if (c.kind != game::CosKind::Transport || c.ridden) continue;
         const auto at = host_.CosWorld().Where(id);
         if (!at) continue;
-        const proto::FlatPosition a = proto::ToFlat(at->position), b = proto::ToFlat(target);
-        if (std::hypot(a.x - b.x, a.z - b.z) <= game::kCosLeash) continue;
+        // Along the walk X(t) = from + t (to - from), t in 0..1 (a walk that way: as far as a region's walk), the
+        // steps go while its owner is within the line or getting nearer its transport.
+        const proto::FlatPosition t = proto::ToFlat(at->position), f = proto::ToFlat(me->position), p = proto::ToFlat(target);
+        double dx = p.x - f.x, dz = p.z - f.z;
+        if (toward) {
+            const double n = std::max(std::hypot(dx, dz), 1e-6);
+            dx = dx / n * double(game::kNavRegionSize);
+            dz = dz / n * double(game::kNavRegionSize);
+        }
+        const double ox = f.x - t.x, oz = f.z - t.z, l = game::kCosLeash;
+        const double a = dx * dx + dz * dz, b = 2.0 * (dx * ox + dz * oz), cc = ox * ox + oz * oz - l * l;
+        if (a < 1e-9) continue;
+        double stop = 1.0; // where along it the steps stop (1: the whole walk goes)
+        const double disc = b * b - 4.0 * a * cc;
+        if (cc <= 0.0) {
+            stop = (-b + std::sqrt(std::max(0.0, disc))) / (2.0 * a); // inside: until it crosses the line going out
+        } else if (b >= 0.0) {
+            stop = 0.0; // beyond the line and leading farther: no step goes
+        } else if (disc < 0.0) {
+            stop = -b / (2.0 * a); // nearer and nearer, never inside: as near as it comes
+        } else {
+            stop = (-b + std::sqrt(disc)) / (2.0 * a); // in, then out at the far side
+        }
+        if (stop >= 1.0) {
+            if (!toward) continue;
+            stop = 1.0;
+        }
+        if (stop <= 0.0) {
+            Refuse(owner, "UIIT_MSG_COSERR_TOO_FAR_FROM_TRADECART", std::to_string(game::kCosLeashMetres));
+            return false;
+        }
+        if (toward && stop >= 1.0) continue;
+        target = proto::FromFlat({float(f.x + dx * stop), float(f.z + dz * stop)}, me->position.y);
+        target.layer = me->position.layer;
+        toward = false;
         Refuse(owner, "UIIT_MSG_COSERR_TOO_FAR_FROM_TRADECART", std::to_string(game::kCosLeashMetres));
-        return true;
     }
-    return false;
+    return true;
 }
 
 int Coses::LevelOf(std::uint32_t entity) const {
@@ -1432,6 +1547,24 @@ std::uint32_t Coses::HpOf(std::uint32_t entity) const {
 // Rides and transports that came along on a travel: at the first tick their owner stands at the other end (placed by the
 // world's update, which delivers its WorldEntered at once; this tick runs before the next one), told to it again (its
 // client cleared its own at WorldEntered) with the riding of the one it is on, so it shows mounted from the start.
+void Coses::Boardings(Clock::time_point now) {
+    World& world = host_.CosWorld();
+    for (auto it = boarding_.begin(); it != boarding_.end();) {
+        const auto [owner, entity] = *it;
+        if (world.Moving(owner)) {
+            ++it;
+            continue;
+        }
+        it = boarding_.erase(it);
+        const auto c = coses_.find(entity);
+        const auto a = world.Where(owner), b = world.Where(entity);
+        if (c == coses_.end() || c->second.owner != owner || c->second.ridden || !a || !b) continue;
+        // Arrived beside it: boarded (its checks again); stopped short of it (another walk, a wall): not.
+        if (Distance3(a->position, b->position) > kBoardReach) continue;
+        Ride(owner, entity, true, now);
+    }
+}
+
 void Coses::Arrived() {
     World& world = host_.CosWorld();
     for (auto it = travelling_.begin(); it != travelling_.end();) {
@@ -1463,12 +1596,26 @@ bool Coses::Follow(Cos& c, double far) {
     if (!owner || !self) return true;
     const proto::FlatPosition a = proto::ToFlat(owner->position), b = proto::ToFlat(self->position);
     const double dx = a.x - b.x, dz = a.z - b.z, d = std::hypot(dx, dz);
-    if (d <= far) return true;
     // Frozen, asleep, stunned or rooted: it stays where it is (a teleport's relocation below still takes it).
     const bool held = c.states.Locked() || c.states.Rooted();
     // Back to kCosFollowNear short of its owner, on the line between them.
     const double k = std::max(0.0, d - game::kCosFollowNear) / std::max(d, 1e-6);
     const proto::WorldPosition to = proto::FromFlat({b.x + dx * k, b.z + dz * k}, owner->position.y);
+    // A ride or transport left standing keeps its spacing (the original's): within 65 of its owner it keeps near him (at
+    // its run pace, to kCosFollowNear of him); 65 or more away, or on another plane, it stands where it is: never moved
+    // to him (its owner comes back for it; the leash holds him within 100 m).
+    if (c.kind == game::CosKind::Transport || c.kind == game::CosKind::Ride) {
+        const bool apart = owner->position.layer != self->position.layer ||
+                           (((owner->position.region | self->position.region) & 0x8000) != 0 && owner->position.region != self->position.region);
+        if (apart || d >= kCartFollowEnd || d <= game::kCosFollowNear + 5.0 || held) return true;
+        // A thief's transport stays out of the towns: it waits at the edge.
+        if (c.kind == game::CosKind::Transport && host_.CosTown(to.region) && !host_.CosTown(self->position.region)) {
+            if (const auto o = host_.CosOwner(c.owner); o && o->job == std::uint8_t(game::JobType::Thief)) return true;
+        }
+        world.MoveTo(c.entity, to, false);
+        return true;
+    }
+    if (d <= far) return true;
     // A thief's transport stays out of the towns: it waits at the edge.
     if (c.kind == game::CosKind::Transport && host_.CosTown(to.region) && !host_.CosTown(self->position.region)) {
         if (const auto o = host_.CosOwner(c.owner); o && o->job == std::uint8_t(game::JobType::Thief)) return true;
@@ -1484,13 +1631,17 @@ bool Coses::Follow(Cos& c, double far) {
         return relocate();
     }
     if (held) return true;
-    // A transport follows at its run pace; others walk the last stretch.
-    const bool transport = c.kind == game::CosKind::Transport;
-    const bool walk = !transport && d < game::kCosFollowFar * 2.0;
-    // A transport never jumps over what stops it (the user's report 2026-11-22: a wall between it and its trader brought
-    // it to him, a way to shake off the bandits and to cross what a transport cannot): it stays where its walk ends, and
-    // the leash keeps its owner within 100 m of it (Leashed) until he comes back for it.
-    if (world.MoveTo(c.entity, to, walk) != World::MoveRefused::None) return transport ? true : relocate();
+    // A pet keeps its owner's pace (the original's): within 80 of him his speed now, beyond his run, 1.25 times it when
+    // he runs; its own row's again in a fight (Fight).
+    bool walk = d < game::kCosFollowFar * 2.0;
+    if (const auto pace = world.PaceOf(c.owner)) {
+        const float speed = d <= 80.0 ? (pace->now > 0.0f ? pace->now : pace->walking ? pace->walk : pace->run) : pace->run * (pace->walking ? 1.0f : 1.25f);
+        if (speed > 0.0f) {
+            world.SetSpeeds(c.entity, speed, speed);
+            walk = false;
+        }
+    }
+    if (world.MoveTo(c.entity, to, walk) != World::MoveRefused::None) return relocate();
     // Stuck: its walk stopped well short of the one asked for (a wall, a cliff; a walk is at most one region less 40, the
     // world's own cap, game::kNavRegionSize), and so short of its owner.
     const proto::FlatPosition wanted = proto::ToFlat(to);
@@ -1500,7 +1651,7 @@ bool Coses::Follow(Cos& c, double far) {
         const proto::FlatPosition e = proto::ToFlat(*end);
         walked = std::hypot(e.x - b.x, e.z - b.z);
     }
-    if (walked < asked - game::kCosFollowNear && !transport) return relocate();
+    if (walked < asked - game::kCosFollowNear) return relocate();
     return true;
 }
 
@@ -1516,6 +1667,7 @@ void Coses::Tick(Clock::time_point now) {
     for (auto& [entity, c] : coses_) Recover(c, now);
     TickStates(now);
     Arrived();
+    Boardings(now);
     if (now < nextFollow_) return;
     const double elapsed = lastFollow_ == Clock::time_point{} ? 0.0 : std::chrono::duration<double>(now - lastFollow_).count();
     lastFollow_ = now;

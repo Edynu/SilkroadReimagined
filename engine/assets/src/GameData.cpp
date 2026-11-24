@@ -570,6 +570,7 @@ bool DecodeObjectRows(std::string_view text, std::vector<ObjectRow>& out, std::s
             for (std::size_t i = 0; i < 4; ++i) row.typeId[i] = Int(columns[9 + i]);
         }
         if (columns.size() > 5) row.nameKey = std::string(columns[5]);
+        if (columns.size() > 7) row.cashItem = Int(columns[7]) != 0;
         if (columns.size() > 4 && columns[4] != "xxx" && columns[4] != "XXX") row.linkedCodename = std::string(columns[4]);
         if (columns.size() > 59) {
             row.level = Int(columns[57]);

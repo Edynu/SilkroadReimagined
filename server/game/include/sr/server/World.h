@@ -282,6 +282,13 @@ public:
     void SetVitals(std::uint32_t entity, std::uint32_t hp, std::uint32_t maxHp, std::uint32_t mp, std::uint32_t maxMp);
     // Its run speed times `factor` (a speed buff: 2 for +100 %): a walk under way goes on at it at once (Resume).
     void SetSpeedFactor(std::uint32_t entity, float factor);
+    // Its pace now: its walk and run speeds (the run's with its factor), the speed of its walk under way (0: it
+    // stands) and whether it walks rather than runs (none: no such entity).
+    struct Pace {
+        float walk = 0, run = 0, now = 0;
+        bool walking = false;
+    };
+    std::optional<Pace> PaceOf(std::uint32_t entity) const;
     // A walk under way started again from where it stands to the same end, at its speeds now (told as a new leg).
     void Resume(std::uint32_t entity);
     // Its moves at its walk speed from its next leg on (a player's walk mode: the Action page's Walk / Run).
