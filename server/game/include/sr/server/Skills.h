@@ -699,7 +699,8 @@ private:
     void CheckCasting(SkillCaster& caster, Clock::time_point now);
     void LandBuffs(SkillCaster& caster, Clock::time_point now);
     // A buff put on its holder (the release of CastBuff's cast): its admission again, its mana, its board.
-    bool InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets::SkillRow& skill, Clock::time_point now);
+    // `main`: the cast's own holder (paid for; Gross Scorn's area spread from it); else one its area took.
+    bool InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets::SkillRow& skill, Clock::time_point now, bool main = true);
     // The casting slot taken by a cast released at `release` (its first re-check on the next skill tick).
     void Occupy(SkillCaster& caster, const assets::SkillRow& skill, std::uint32_t target, Clock::time_point release, std::uint32_t mp, Clock::time_point now);
     // A cast's mana at its release (now when it has none), the slot taken till then.

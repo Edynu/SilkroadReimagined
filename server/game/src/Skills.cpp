@@ -581,13 +581,15 @@ void Skills::CastBuff(SkillCaster& caster, SkillCaster& holder, const assets::Sk
     InstallBuff(caster, holder, skill, now);
 }
 
-bool Skills::InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets::SkillRow& skill, Clock::time_point now) {
+bool Skills::InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets::SkillRow& skill, Clock::time_point now, bool main) {
     std::vector<const assets::SkillRow*> running;
     for (const SkillState::Buff& b : holder.state.buffs) running.push_back(table_ != nullptr ? table_->Find(b.skill) : nullptr);
     const game::BuffAdmission admission = game::AdmitBuff(skill, running);
     if (!admission.admitted) return false;
-    caster.mp -= std::min(caster.mp, PaidMana(caster, skill));
-    host_.VitalsChanged(caster.entity);
+    if (main) {
+        caster.mp -= std::min(caster.mp, PaidMana(caster, skill));
+        host_.VitalsChanged(caster.entity);
+    }
     std::vector<std::size_t> replaced = admission.replaces;
     std::sort(replaced.rbegin(), replaced.rend());
     for (const std::size_t i : replaced) EndBuff(holder, i);
@@ -629,6 +631,17 @@ bool Skills::InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets:
     host_.StatsChanged(holder.entity);
     core::LogInfo("skills: {} casts {} on {} ({} ms)", caster.entity, skill.codename,
                   holder.entity == caster.entity ? std::string("itself") : std::to_string(holder.entity), ms);
+    // Gross Scorn ('hitm' with an area: efr shape 2, its range about the holder, the most at once counting the holder):
+    // the caster's other enemy players there take its copy and link too (the original's efr on Scorn B), paid once.
+    if (main && holder.entity != caster.entity && assets::FindSkillParam(skill, assets::SkillTag("hitm")) &&
+        assets::FindSkillParam(skill, assets::SkillTag("efr"), 1)) {
+        for (const Struck& t : TargetsOf(caster, skill, holder.entity, 1)) {
+            if (t.target == holder.entity || t.target == caster.entity) continue;
+            std::optional<SkillCaster> other = host_.Player(t.target);
+            if (!other || other->dead || host_.AttackRefusal(caster.entity, t.target) != proto::SkillUseStatus::Ok) continue;
+            InstallBuff(caster, *other, skill, now, false);
+        }
+    }
     return true;
 }
 

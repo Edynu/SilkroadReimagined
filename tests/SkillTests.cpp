@@ -2581,6 +2581,27 @@ TEST_CASE("links: the guards take their share of their guarded one's hits, a div
         CHECK(f.host.All<proto::SkillUseAnswer>().back().status == proto::SkillUseStatus::Target);
         CHECK_FALSE(skills.Attack(scorned, Field::kSelected, t0 + std::chrono::milliseconds(100)));
     }
+    SUBCASE("Gross Scorn: the caster's enemy players within 100 of its target take its copy too (three at most, the target counted)") {
+        const assets::SkillRow* gross = Learn(f, table, "SKILL_EU_ROG_STEALTHA_CHANGE_B_01");
+        REQUIRE(gross != nullptr);
+        CHECK(game::SkillRouteOf(*gross) == game::SkillRoute::EnemyPlayerBuff);
+        f.player.stats = StrongPlayer(gross->weaponKinds[0] != 255 ? gross->weaponKinds[0] : 1);
+        WearFor(f.player, *gross);
+        f.host.enemyPlayers.insert(7);
+        f.host.enemyPlayers.insert(8); // 9 is no enemy: left out
+        f.host.mobs[8].stats = others[8].stats; // an enemy player is one a strike may take (the game server's Monster)
+        f.host.mobs[8].alive = true;
+        CHECK(use(gross, 7, t0) == proto::SkillUseStatus::Ok);
+        REQUIRE(others[7].state.buffs.size() == 1);
+        REQUIRE(others[8].state.buffs.size() == 1);
+        CHECK(others[9].state.buffs.empty());
+        CHECK(others[8].state.buffs[0].skill == gross->id);
+        CHECK(others[8].state.buffs[0].linkOwner == f.player.entity);
+        CHECK(f.player.state.links.size() == 2); // a link a copy
+        // Both aim only at the caster.
+        server::SkillCaster scorned = others[8].Caster();
+        CHECK_FALSE(skills.Attack(scorned, Field::kSelected, t0 + std::chrono::milliseconds(100)));
+    }
     SUBCASE("Mana Switch on a player not hostile: its link on that player, as a player's buff") {
         const assets::SkillRow* manaSwitch = Learn(f, table, "SKILL_EU_BARD_BATTLAA_MPSTEAL_A_01");
         REQUIRE(manaSwitch != nullptr);
