@@ -367,21 +367,32 @@ bool DropTable::MakeEquipment(int group, bool rare, const assets::ObjectRow& mon
     if (country != 0 && country != 1) return false;
     const auto& buckets = (rare ? rareItems_ : normalItems_)[country];
     const int step = rare ? 3 : 1;
+    const int level = std::max(1, monster.level);
     for (int g = group; g >= 0; g -= step) {
         const auto it = buckets.find(g);
-        if (it == buckets.end()) continue;
-        // Weighted among the items of the group a monster of this level may drop.
+        if (it == buckets.end() || it->second.empty()) continue; // an empty class: the next one down
+        // Drawn by weight among all of the class's items.
         double total = 0;
-        for (const Candidate& c : it->second) {
-            if (c.requiredLevel <= std::max(1, monster.level)) total += c.weight;
-        }
+        for (const Candidate& c : it->second) total += c.weight;
         if (total <= 0) continue;
         double u = Uniform(random) * total;
         const Candidate* chosen = nullptr;
         for (const Candidate& c : it->second) {
-            if (c.requiredLevel > std::max(1, monster.level)) continue;
             chosen = &c;
             if ((u -= c.weight) <= 0) break;
+        }
+        // Above the monster's level: the next class down, an item of the same type drawn evenly from it, until one fits;
+        // a lower class without that type: nothing; past the last class the last drawn is kept.
+        for (int lower = g - step; chosen != nullptr && chosen->requiredLevel > level && lower >= 0; lower -= step) {
+            const auto down = buckets.find(lower);
+            std::vector<const Candidate*> same;
+            if (down != buckets.end()) {
+                for (const Candidate& c : down->second) {
+                    if (c.row->typeId == chosen->row->typeId) same.push_back(&c);
+                }
+            }
+            if (same.empty()) return false;
+            chosen = same[std::size_t(Uniform(random) * double(same.size())) % same.size()];
         }
         if (chosen == nullptr || Uniform(random) > chosen->admit) return false;
         out.item = Instance(*chosen->row, 1, RollPlus(random), random);

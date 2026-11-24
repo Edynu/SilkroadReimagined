@@ -414,7 +414,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     std::priority_queue<std::pair<Clock::time_point, std::uint32_t>, std::vector<std::pair<Clock::time_point, std::uint32_t>>,
                         std::greater<>>
         groundExpiry;
-    static constexpr auto kGroundLifetime = std::chrono::seconds(180); // ours; the original's not known yet
+    static constexpr auto kGroundLifetime = std::chrono::seconds(180); // ours: for a row without a DecayTime
+    // How long an item lies on the ground: its row's DecayTime (ms; dropped specialty goods 30 minutes), gold its gold
+    // row's (`model`, ITEM_ETC_GOLD_*).
+    Clock::duration GroundLife(const game::ItemInstance& item, std::uint32_t model) const {
+        const std::uint32_t ref = item.refId != 0 ? item.refId : model;
+        const assets::ItemRow* row = ref != 0 && config.rules->items ? config.rules->items->Find(ref) : nullptr;
+        if (row != nullptr && row->decayMs > 0) return std::chrono::milliseconds(row->decayMs);
+        return kGroundLifetime;
+    }
     // The pick-up's reach: 10, compared inclusively (the original's); ours allows 5 more for where a walk on the
     // navigation stops.
     static constexpr float kPickUpReach = 15.0f;
@@ -441,8 +449,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     static std::string_view OwnedItemName(const assets::ItemRow& row, std::string_view owner) {
         return row.typeId[0] == 3 && row.typeId[1] == 3 && row.typeId[2] == 9 ? owner : std::string_view();
     }
-    void DropLoot(const proto::WorldPosition& at, std::int64_t owner, std::vector<DropTable::Drop> drops) {
+    // `rarity`: the dropper's (its grade picks the scatter's reach).
+    void DropLoot(const proto::WorldPosition& at, std::int64_t owner, std::vector<DropTable::Drop> drops, std::uint8_t rarity = 0) {
         std::uniform_real_distribution<float> turn(0.0f, 6.2831853f);
+        // Each item a random angle and a distance drawn evenly between the least and the most: 8..20; a unique's or a
+        // grade 8's 10..30, a giant's 10..40, a titan's 20..100 (the original's by the dropper's kind).
+        const int grade = rarity & 0x0F;
+        const float least = grade == 3 || grade == 8 || grade == 4 ? 10.0f : grade == 5 ? 20.0f : 8.0f;
+        const float most = grade == 3 || grade == 8 ? 30.0f : grade == 4 ? 40.0f : grade == 5 ? 100.0f : 20.0f;
+        std::uniform_real_distribution<float> reach(least, most);
         const proto::FlatPosition centre = proto::ToFlat(at);
         std::string ownerName;
         for (const auto& [peerId, p] : players) {
@@ -452,8 +467,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             DropTable::Drop& d = drops[i];
             std::uint32_t model = d.item.refId != 0 ? d.item.refId : GoldModel(d.gold);
             if (model == 0) continue;
-            // A ring around the spot, one place apart each (ours).
-            const float angle = turn(groundRandom), radius = i == 0 ? 0.0f : 6.0f + 2.0f * float(i / 6);
+            const float angle = turn(groundRandom), radius = reach(groundRandom);
             const proto::WorldPosition there = proto::FromFlat({centre.x + radius * std::sin(angle), centre.z + radius * std::cos(angle)}, at.y);
             const std::uint32_t amount = d.item.refId != 0 ? d.item.count : std::uint32_t(std::min<std::uint64_t>(d.gold, 0xFFFFFFFFu));
             // Specialty goods carry their owner's name, the alias they were bought under (the user's account of the
@@ -463,7 +477,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                                           : game::IsSpecialtyGood(*row) ? std::string_view(d.item.creator)
                                                                         : OwnedItemName(*row, ownerName);
             const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, d.item.plus, GroundState(d.item), name);
-            GroundItem g{std::move(d.item), d.gold, owner, Clock::now() + kDropOwned, Clock::now() + kGroundLifetime};
+            const Clock::duration life = GroundLife(d.item, model);
+            GroundItem g{std::move(d.item), d.gold, owner, Clock::now() + kDropOwned, Clock::now() + life};
             groundExpiry.push({g.expires, id});
             ground[id] = std::move(g);
         }
@@ -478,7 +493,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const proto::WorldPosition there = proto::FromFlat({at.x + spread(groundRandom), at.z + spread(groundRandom)}, place->position.y);
         const std::uint32_t amount = item.refId != 0 ? item.count : std::uint32_t(std::min<std::uint64_t>(gold, 0xFFFFFFFFu));
         const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, item.plus, GroundState(item));
-        GroundItem g{std::move(item), gold, 0, {}, Clock::now() + kGroundLifetime};
+        const Clock::duration life = GroundLife(item, model);
+        GroundItem g{std::move(item), gold, 0, {}, Clock::now() + life};
         groundExpiry.push({g.expires, id});
         ground[id] = std::move(g);
     }
@@ -2078,7 +2094,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                         if (drop.gold > 0) drop.gold = std::uint64_t(std::trunc(double(drop.gold) * (1.0 + double(gdr) / 100.0)));
                     }
                 }
-                DropLoot(where->position, killer->selected, std::move(loot));
+                DropLoot(where->position, killer->selected, std::move(loot), d.rarity);
             }
         }
         for (const Parties::KillShare& share : kill.shares) {
@@ -5113,7 +5129,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const proto::FlatPosition c = proto::ToFlat(where->position);
         const proto::WorldPosition there = proto::FromFlat({c.x + spread(groundRandom), c.z + spread(groundRandom)}, where->position.y);
         const std::uint32_t id = world->AddGroundItem(row->refObjId, there, turn(groundRandom), 1, 0, 0, OwnedItemName(*row, p->name));
-        GroundItem g{NewItem(*row, 1), 0, p->selected, Clock::now() + kGroundLifetime, Clock::now() + kGroundLifetime, true};
+        const Clock::duration life = GroundLife(game::ItemInstance{}, row->refObjId);
+        GroundItem g{NewItem(*row, 1), 0, p->selected, Clock::now() + life, Clock::now() + life, true};
         groundExpiry.push({g.expires, id});
         ground[id] = std::move(g);
     }
