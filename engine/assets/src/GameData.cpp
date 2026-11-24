@@ -573,6 +573,10 @@ bool DecodeObjectRows(std::string_view text, std::vector<ObjectRow>& out, std::s
         if (columns.size() > 7) row.cashItem = Int(columns[7]) != 0;
         if (columns.size() > 4 && columns[4] != "xxx" && columns[4] != "XXX") row.linkedCodename = std::string(columns[4]);
         if (columns.size() > 40) row.maxContain = static_cast<std::uint32_t>(std::max(0, Int(columns[40])));
+        if (columns.size() > 31) {
+            row.canSell = Int(columns[17]) != 0;
+            row.sellPrice = Int(columns[31]);
+        }
         if (columns.size() > 59) {
             row.level = Int(columns[57]);
             row.maxHp = static_cast<std::uint32_t>(std::strtoul(std::string(columns[59]).c_str(), nullptr, 10));

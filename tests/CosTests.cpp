@@ -727,6 +727,66 @@ TEST_CASE("Game server: a transport: a trader's, boarded when summoned, left and
     s.game.Stop();
 }
 
+TEST_CASE("Game server: a transport sold back at an NPC for its SellPrice (the original's 0x70C7): not while ridden, not a ride") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    CosServer s(t);
+    constexpr std::uint32_t kStable = 2009; // NPC_CH_HORSE
+    auto characters = std::make_shared<assets::CharacterTable>();
+    characters->Add(Cos(kHorse, "COS_C_TEST_HORSE", 1)); // CanSell 0, as every ride
+    assets::ObjectRow cart = Cos(kCart, "COS_T_TEST_CART", 2);
+    cart.canSell = true;
+    cart.sellPrice = 360;
+    characters->Add(cart);
+    s.config.characters = characters;
+    s.config.npcs.push_back({kStable, "NPC_CH_HORSE", {assets::RegionId(168, 97), 1050.0f, 0.0f, 1000.0f}, 0.0f});
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    const auto wearing = [&](std::uint32_t suit) {
+        return [&t, suit](std::int64_t character) {
+            REQUIRE(t.Db().Query("INSERT INTO _inventory (charid, slot, itemid) SELECT $1, 8, b.itemid FROM _inventory b JOIN _items it ON it.id64 = b.itemid "
+                                 "WHERE b.charid = $1 AND it.refitemid = $2 LIMIT 1 ON CONFLICT (charid, slot) DO UPDATE SET itemid = EXCLUDED.itemid",
+                                 {character, std::int64_t(suit)})
+                        .Ok());
+        };
+    };
+    auto a = s.Make("Seller", 1000, {Stored(kCartScroll, 1), Stored(kTraderSuit, 1)}, 1, 0, 0, 1000, wearing(kTraderSuit));
+    auto r = s.Make("Horseman", 1020, {Stored(kHorseScroll, 1)});
+    const auto stableOf = [&](CosServer::Player& p) {
+        for (;;) {
+            const auto m = Next<proto::EntityAppeared>(p);
+            if (m.character.model == kStable) return m.entity;
+        }
+    };
+    const std::uint32_t stable = stableOf(a);
+    const std::int64_t gold = t.Db().Query("SELECT remaingold FROM _char WHERE charid = $1", {a.character}).Int(0, 0);
+
+    // A ride: CanSell 0, refused before its rider is looked at.
+    r.client->Send(proto::UseItem{PlaceOf(r.bag, kHorseScroll)});
+    Next<proto::CosSummoned>(r);
+    r.client->Send(proto::CosSell{stableOf(r)});
+    CHECK(Next<proto::CosRefused>(r).text == "UIIT_MSG_COSERR_CANT_SELL_REQUESTED_COS");
+
+    // The transport, boarded at once: not while ridden; left standing, sold for its 360.
+    a.client->Send(proto::UseItem{PlaceOf(a.bag, kCartScroll)});
+    const auto summoned = Next<proto::CosSummoned>(a);
+    CHECK(Next<proto::CosRiding>(a).riding);
+    a.client->Send(proto::CosSell{stable});
+    CHECK(Next<proto::CosRefused>(a).text == "UIIT_MSG_COSERR_CANT_SELL_RIDING_COS");
+    a.client->Send(proto::CosRide{summoned.entity, false});
+    CHECK_FALSE(Next<proto::CosRiding>(a).riding);
+    a.client->Send(proto::CosSell{summoned.entity}); // not an NPC: nothing
+    a.client->Send(proto::CosSell{stable});
+    CHECK(Next<proto::GoldChanged>(a).gold == std::uint64_t(gold + 360));
+    CHECK(Next<proto::CosDismissed>(a).entity == summoned.entity);
+    bool saved = false;
+    for (int i = 0; i < 300 && !saved; ++i) {
+        s.game.Poll(10ms);
+        saved = t.Db().Query("SELECT remaingold FROM _char WHERE charid = $1", {a.character}).Int(0, 0) == gold + 360;
+    }
+    CHECK(saved);
+    s.game.Stop();
+}
+
 TEST_CASE("Game server: a transport's row: kept with its goods through its owner's leaving, made again beside him at his next entry, ridden; sent away, gone") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);

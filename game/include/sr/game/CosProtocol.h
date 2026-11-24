@@ -293,6 +293,20 @@ struct CosRename {
     }
 };
 
+// The player's ride or transport sold back at the NPC `npc` (a stable keeper's row; the original's 0x70C7 kind 3): for
+// its SellPrice (1..10,000,000), its gold told by GoldChanged and the COS gone (CosDismissed). Refused with
+// UIIT_MSG_COSERR_CANT_SELL_REQUESTED_COS (a COS the keeper does not buy: CanSell 0, every ride),
+// _CANT_SELL_COS_HAVE_ITEMS (goods aboard), _CANT_SELL_RIDING_COS (ridden); no COS out or the NPC not within reach:
+// nothing (the original's 5 and 3).
+struct CosSell {
+    static constexpr MessageId kId = 0x1317;
+    std::uint32_t npc = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("npc", npc);
+    }
+};
+
 // An item of the bag (`place`) used on a pet's summoning item (`target`, both bag places 13..): the Clock of
 // Reincarnation on an expired grab pet, the Grass of Life on a dead attack pet (game::PetTreatment). Refused with
 // UIIT_MSG_COSPETERR_CANT_USE_WRONGOBJECT (not a pet of that kind), _CANT_USEITEM (its pet is not dead).

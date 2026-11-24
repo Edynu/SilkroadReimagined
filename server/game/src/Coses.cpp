@@ -1038,6 +1038,12 @@ bool Coses::Handle(std::uint32_t owner, proto::MessageId id, std::span<const std
         UseOnPet(owner, m);
         return true;
     }
+    case proto::CosSell::kId: {
+        proto::CosSell m;
+        if (!proto::Decode(payload, m)) return false;
+        Sell(owner, m.npc);
+        return true;
+    }
     default: return false;
     }
 }
@@ -1452,6 +1458,31 @@ void Coses::Entered(std::uint32_t owner, std::vector<PetLink> pets) {
     }
     std::vector<PetLink>& list = returning_[owner];
     list.insert(list.end(), pets.begin(), pets.end());
+}
+
+// The original's 0x70C7 kind 3 (its handler's order): the NPC within reach (else 3), the player's ride or transport
+// out (else 5), the row's CanSell, no goods aboard, not ridden; then its SellPrice held to 1..10,000,000 paid and the
+// COS let go (its row deleted, as a terminate's).
+void Coses::Sell(std::uint32_t owner, std::uint32_t npc) {
+    if (!host_.CosNpcNear(owner, npc)) return;
+    const auto o = owned_.find(owner);
+    if (o == owned_.end()) return;
+    const auto vehicle = std::find_if(o->second.begin(), o->second.end(), [&](std::uint32_t id) {
+        const game::CosKind kind = coses_.at(id).kind;
+        return kind == game::CosKind::Ride || kind == game::CosKind::Transport;
+    });
+    if (vehicle == o->second.end()) return;
+    const std::uint32_t entity = *vehicle;
+    const Cos& c = coses_.at(entity);
+    const assets::CharacterTable* characters = host_.CosCharacters();
+    const assets::ObjectRow* row = characters != nullptr ? characters->Find(c.model) : nullptr;
+    if (row == nullptr || !row->canSell) return Refuse(owner, "UIIT_MSG_COSERR_CANT_SELL_REQUESTED_COS");
+    if (!c.bag.empty()) return Refuse(owner, "UIIT_MSG_COSERR_CANT_SELL_COS_HAVE_ITEMS");
+    if (c.ridden) return Refuse(owner, "UIIT_MSG_COSERR_CANT_SELL_RIDING_COS");
+    const std::uint64_t price = std::uint64_t(std::clamp(row->sellPrice, 1, 10'000'000));
+    core::LogInfo("cos: {} sold back for {}", row->codename, price);
+    host_.CosSellPay(owner, price);
+    Dismiss(entity, false, false, true);
 }
 
 std::uint32_t Coses::MountOf(std::uint32_t owner) const {

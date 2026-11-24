@@ -207,6 +207,9 @@ public:
     // `owner`'s transport went (dismissed, dead, its owner gone): its goods with it (their drop
     // comes with step 7).
     virtual void CosTransportGone(std::uint32_t owner) { (void)owner; }
+    // A sale at an NPC (CosSell): the NPC within reach of the owner; the price paid to it (its gold told and saved).
+    virtual bool CosNpcNear(std::uint32_t owner, std::uint32_t npc) const { (void)owner, (void)npc; return false; }
+    virtual void CosSellPay(std::uint32_t owner, std::uint64_t price) { (void)owner, (void)price; }
     // `owner`'s transport, kept in its row through his leaving, is out again (Entered): its goods count again.
     virtual void CosTransportBack(std::uint32_t owner) { (void)owner; }
     // A transport killed: every slot of its bag dropped whole where it fell, its goods with no owner's mark.
@@ -288,6 +291,8 @@ public:
     Use UseItem(std::uint32_t owner, const assets::ItemRow& item, const game::ItemInstance& instance, Clock::time_point now);
     // A request of the player `owner` (false: it does not decode).
     bool Handle(std::uint32_t owner, game::proto::MessageId id, std::span<const std::byte> payload, Clock::time_point now);
+    // The owner's ride or transport sold back at an NPC (CosSell).
+    void Sell(std::uint32_t owner, std::uint32_t npc);
     // The unridden follow their owners; the pets coming back come out once their owner stands.
     void Tick(Clock::time_point now);
     // Every COS of `owner` sent away: its death or leaving (`comesBack` false: its pets Inactive), a teleport or a move

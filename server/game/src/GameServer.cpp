@@ -3935,6 +3935,22 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             character, [character, models = std::move(models), rows](Database& db) { *rows = LoadCosOf(db, character, models); },
             [rows, done = std::move(done)] { done(std::move(*rows)); });
     }
+    bool CosNpcNear(std::uint32_t owner, std::uint32_t npc) const override {
+        const auto it = npcs.find(npc);
+        const auto me = world->Where(owner);
+        const auto there = world->Where(npc);
+        if (it == npcs.end() || !me || !there) return false;
+        const proto::FlatPosition a = proto::ToFlat(me->position), b = proto::ToFlat(there->position);
+        return std::hypot(a.x - b.x, a.z - b.z) <= config.gateReach;
+    }
+    void CosSellPay(std::uint32_t owner, std::uint64_t price) override {
+        PlayerWorld* player = PlayerByEntity(owner);
+        Peer* peer = player != nullptr ? peers->Find(world->PeerOf(owner)) : nullptr;
+        if (player == nullptr) return;
+        player->inventory.gold = player->inventory.gold > UINT64_MAX - price ? UINT64_MAX : player->inventory.gold + price;
+        if (peer != nullptr) SendMessage(*peer->connection, proto::GoldChanged{player->inventory.gold});
+        QueueGoldSave(player->selected, player->inventory.gold);
+    }
     void CosTransportGone(std::uint32_t owner) override {
         if (trades) trades->CargoChanged(owner); // its goods went with it: no stars
     }

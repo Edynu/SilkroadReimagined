@@ -23,11 +23,11 @@ TEST_CASE("DecodeObjectRows reads RefObjID, codename and model") {
     CHECK_FALSE(DecodeObjectRows("characterdata_5000.txt\r\n", rows, error)); // an index file: no object rows
 }
 
-TEST_CASE("DecodeObjectRows: a COS's speeds, icon and ride flag") {
-    std::string line = "1\t2000\tCOS_C_HORSE1"; // 1.188's 104 columns
+TEST_CASE("DecodeObjectRows: a COS's speeds, icon, ride flag and sale") {
+    std::string line = "1\t2000\tCOS_T_HORSE1"; // 1.188's 104 columns
     for (int c = 3; c < 104; ++c) {
         line += '\t';
-        line += c == 46 ? "30" : c == 47 ? "90" : c == 54 ? "cos\\horse.ddj" : c == 66 ? "1" : "0";
+        line += c == 46 ? "30" : c == 47 ? "90" : c == 54 ? "cos\\horse.ddj" : c == 66 ? "1" : c == 17 ? "1" : c == 31 ? "360" : "0";
     }
     std::vector<ObjectRow> rows;
     std::string error;
@@ -36,6 +36,8 @@ TEST_CASE("DecodeObjectRows: a COS's speeds, icon and ride flag") {
     CHECK(rows[0].runSpeed == 90.0f);
     CHECK(rows[0].iconPath == "cos\\horse.ddj");
     CHECK(rows[0].canRide);
+    CHECK(rows[0].canSell);          // col 17 CanSell
+    CHECK(rows[0].sellPrice == 360); // col 31 SellPrice
 }
 
 #include <cstring>
