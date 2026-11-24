@@ -140,6 +140,13 @@ struct TrialHost : server::QuestHost {
     }
     void QuestWorldLeave(std::uint32_t entity) override { layers[entity] = 0; }
     void QuestScene(std::uint32_t entity, const std::string& name) override { scenes.push_back({entity, name}); }
+    std::vector<std::string> coses;
+    std::set<std::uint32_t> removed;
+    std::uint32_t QuestResummon(std::uint32_t, const std::string& cos) override {
+        coses.push_back(cos);
+        return std::uint32_t(900 + coses.size());
+    }
+    void QuestCosRemove(std::uint32_t cos) override { removed.insert(cos); }
     struct Way {
         proto::WorldPosition at;
         std::optional<proto::WorldPosition> to;
@@ -441,6 +448,81 @@ TEST_CASE("Quest trial: BAEKRYOUNG_10's secret door: alone into the White Viper'
         CHECK(quests.Trials().empty());
         quests.Tick(start + 40s);
         CHECK(quests.Record(1, q->id)->status == proto::QuestStatus::Achieving);
+    }
+}
+
+TEST_CASE("Quest trial: BAEKRYOUNG_13's letter in its scene, paid inside, 14 begun at once; 14's escort of ShinMoo to the 4th floor's exit; lost, 13 again (a made-up host)") {
+    const auto coded = Coded();
+    TrialHost host;
+    host.who.position = {proto::WorldPosition{25000, 100.0f, 0.0f, 100.0f, 0}};
+    server::Quests quests(host, {});
+    quests.Load(Numbered(coded));
+    const game::QuestDef* q13 = quests.Find("QNO_TQ_BAEKRYOUNG_13");
+    const game::QuestDef* q14 = quests.Find("QNO_TQ_BAEKRYOUNG_14");
+    REQUIRE(q13 != nullptr);
+    REQUIRE(q14 != nullptr);
+    game::QuestDef again;
+    std::string error;
+    REQUIRE_MESSAGE(game::ParseQuest(game::WriteQuest(*q14), again, error), error);
+    CHECK(again.trial == q14->trial);
+    REQUIRE(q14->trial->to.size() == 4);
+    quests.Enter(1, {Record(q13->id, proto::QuestStatus::Achieving)});
+    host.bag["ITEM_QNO_TQ_BAEKRYEONG_13_01"] = 1;
+    REQUIRE(Ask(quests, proto::QuestTalk{10, q13->id}));
+    CHECK(host.Last<proto::QuestSays>().moment == "trial");
+    REQUIRE(Ask(quests, proto::QuestHandIn{10, q13->id, {}}));
+    REQUIRE(quests.Trials().size() == 1);
+    auto start = std::chrono::steady_clock::now();
+    quests.Tick(start);
+    REQUIRE(host.scenes.size() == 1);
+    CHECK(host.scenes[0].second == "qno_tq_baekryoung_13");
+    const std::uint32_t layer13 = quests.Trials()[0].second;
+    // 30 s: the letter delivered, 13 paid inside, its words; 14 begun; out, then into 14's world (the made-up host's
+    // leave is at once: the same tick).
+    quests.Tick(start + 31s);
+    CHECK(quests.Record(1, q13->id)->status == proto::QuestStatus::Done);
+    CHECK(host.bag["ITEM_QNO_TQ_BAEKRYEONG_13_01"] == 0);
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_13_09"));
+    REQUIRE(quests.Record(1, q14->id));
+    CHECK(quests.Record(1, q14->id)->status == proto::QuestStatus::Achieving);
+    REQUIRE(quests.Trials().size() == 1);
+    const std::uint32_t layer = quests.Trials()[0].second;
+    CHECK(layer != layer13);
+    CHECK(host.layers[1] == layer);
+    CHECK(host.enteredAt->region == 0x8005);
+    start += 33s;
+    quests.Tick(start);
+    CHECK(host.scenes.back().second == "qno_tq_baekryoung_14");
+    // 81 s on: ShinMoo beside the player, its words; a minute on, two thieves about the player.
+    quests.Tick(start + 82s);
+    REQUIRE(host.coses.size() == 1);
+    CHECK(host.coses[0] == "NPC_CH_QT_FLAMEMASTER_COS");
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_18"));
+    quests.Tick(start + 143s);
+    CHECK(host.Count("MOB_QT_TQ_THIEF_02") == 2);
+
+    SUBCASE("at the exit: ShinMoo's lines, 14 paid inside, out") {
+        host.who.position = {0x8005, 19343.0f, 549.0f, 15600.0f, 0};
+        auto at = start + 150s;
+        for (int i = 0; i < 12; ++i, at += 1s) quests.Tick(at);
+        for (const char* line : {"SN_TALK_QNO_TQ_BAEKRYEONG_14_09", "SN_TALK_QNO_TQ_BAEKRYEONG_14_14", "SN_TALK_QNO_TQ_BAEKRYEONG_14_15",
+                                 "SN_TALK_QNO_TQ_BAEKRYEONG_14_10"}) {
+            CAPTURE(line);
+            CHECK(host.Told(1, line));
+        }
+        CHECK(quests.Record(1, q14->id)->status == proto::QuestStatus::Done);
+        CHECK(host.layers[1] == 0);
+        CHECK(host.removed.contains(901u));
+    }
+    SUBCASE("the 15 minutes over: the warnings, lost, 14 given up and 13 to be taken again") {
+        for (auto at = start + 150s; at <= start + 82s + 15min + 10s; at += 5s) quests.Tick(at);
+        CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_16"));
+        CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_17"));
+        CHECK(host.Told(1, "SN_TALK_QNO_TQ_BAEKRYEONG_14_19"));
+        CHECK(quests.Record(1, q14->id)->status == proto::QuestStatus::Abandoned);
+        CHECK(quests.Record(1, q13->id)->times == 0); // as never finished: offered again (after 12)
+        CHECK(quests.Record(1, q13->id)->status == proto::QuestStatus::Abandoned);
+        CHECK(host.layers[1] == 0);
     }
 }
 

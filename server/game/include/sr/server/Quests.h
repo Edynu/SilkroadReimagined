@@ -422,14 +422,22 @@ private:
     struct TrialRun {
         std::uint32_t quest = 0, player = 0, layer = 0;
         const game::QuestDef::Trial* spec = nullptr;
-        enum class Phase : std::uint8_t { Waiting, Fighting, Scene, Ending } phase = Phase::Waiting;
-        Clock::time_point next;    // Waiting: the boss's coming; Scene: its end; Ending: everyone out
+        enum class Phase : std::uint8_t { Waiting, Fighting, Scene, Escort, Arrived, Ending } phase = Phase::Waiting;
+        Clock::time_point next;    // Waiting: the boss's coming; Scene: its end; Arrived: the next line; Ending: everyone out
+        std::uint32_t cos = 0;     // Escort: the escorted COS
+        std::size_t line = 0;      // Arrived: the next `arrive` line
         Clock::time_point ends;    // Fighting: the time's end
         Clock::time_point nextAdd; // Fighting: the next add (before the first warning)
         std::size_t boss = SIZE_MAX;
         std::set<std::uint32_t> warned;
     };
     std::vector<TrialRun> trials_;
+    // A chain's next trial, entered once its player is back in the shared world (Trial::then): the player, the quest.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> pendingTrials_;
+    // A trial's quest finished inside (Trial::finishHere): paid, its words said, the next one started (Trial::then).
+    void FinishTrial(std::uint32_t entity, const game::QuestDef& q);
+    // A trial's quest lost (an escort's time over): given up, and its chain's first made new again (Trial::restart).
+    void LoseTrial(std::uint32_t entity, const game::QuestDef& q);
     // The trial's entry at its NPC (the talk's row); false when refused.
     bool EnterTrial(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, Clock::time_point now);
     void TickTrials(Clock::time_point now);

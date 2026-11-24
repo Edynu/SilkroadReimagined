@@ -2322,9 +2322,17 @@ void Quests::TrialPassed(std::uint32_t entity, const QuestDef& q) {
     if (p == nullptr) return;
     const auto it = p->records.find(q.id);
     if (it == p->records.end() || !UnderWay(it->second)) return;
-    // The quest's state 8: its goals met; ours its kill goals at their count (a scene's: its talks too, its NPC inside).
+    // The quest's state 8: its goals met; ours its kill goals at their count (a scene's: its talks and deliveries too, its
+    // person inside).
+    const bool scene = q.trial && !q.trial->scene.empty();
     for (std::size_t i = 0; i < q.goals.size() && i < it->second.progress.size(); ++i) {
-        if (q.goals[i].kind == QuestGoalKind::Kill || (q.trial && !q.trial->scene.empty() && q.goals[i].kind == QuestGoalKind::Talk)) {
+        const QuestGoalKind k = q.goals[i].kind;
+        // A scene's delivery: its items handed over there (BAEKRYOUNG_13's letter to ShinMoo).
+        if (scene && k == QuestGoalKind::Deliver && it->second.progress[i] < Need(q.goals[i]) && !q.goals[i].items.empty()) {
+            host_.QuestTake(entity, q.goals[i].items);
+            BagChanged(entity);
+        }
+        if (k == QuestGoalKind::Kill || (scene && (k == QuestGoalKind::Talk || k == QuestGoalKind::Deliver))) {
             it->second.progress[i] = std::uint16_t(Need(q.goals[i]));
         }
     }
@@ -2440,7 +2448,69 @@ void Quests::TickTrials(Clock::time_point now) {
         }
         case TrialRun::Phase::Scene:
             if (now < run.next) break;
+            if (!t.escort.empty()) {
+                // BAEKRYOUNG_14's step 2: the escorted COS beside the player, its words, the waves from a minute on, the time.
+                run.cos = host_.QuestResummon(run.player, t.escort);
+                say(t.escortText);
+                run.phase = TrialRun::Phase::Escort;
+                run.ends = now + std::chrono::minutes(t.minutes);
+                run.nextAdd = now + std::chrono::seconds(t.waves ? t.waves->every : 60);
+                SetGauge(run.player, run.quest, t.minutes * 60, now);
+                break;
+            }
             TrialPassed(run.player, *q);
+            if (t.finishHere) FinishTrial(run.player, *q);
+            close();
+            break;
+        case TrialRun::Phase::Escort: {
+            // Step 3: at one of its places (the player within its radius, 3D), the lines; the waves about the player; the
+            // warnings; the time over, lost.
+            const bool there = std::any_of(t.to.begin(), t.to.end(), [&](const QuestDef::UseRule::Place& p) {
+                if (who->position.region != p.region) return false;
+                const double dx = who->position.x - p.x, dy = who->position.y - p.y, dz = who->position.z - p.z;
+                return std::sqrt(dx * dx + dy * dy + dz * dz) <= p.radius;
+            });
+            if (there) {
+                SetGauge(run.player, run.quest, 0, now);
+                run.phase = TrialRun::Phase::Arrived;
+                run.line = 0;
+                run.next = now;
+                break;
+            }
+            const auto left = std::chrono::duration_cast<std::chrono::seconds>(run.ends - now).count();
+            for (const auto& [minutes, text] : t.warnings) {
+                if (left <= std::int64_t(minutes) * 60 && run.warned.insert(minutes).second) say(text);
+            }
+            if (now >= run.ends) {
+                say(t.lost);
+                if (run.cos != 0) host_.QuestCosRemove(run.cos);
+                run.cos = 0;
+                close();
+                LoseTrial(run.player, *q);
+                break;
+            }
+            if (t.waves && now >= run.nextAdd) {
+                for (std::uint32_t i = 0; i < t.waves->count; ++i) {
+                    const QuestDef::UseRule::Place about{who->position.region, who->position.x, who->position.y, who->position.z, 0};
+                    host_.QuestSpawn(run.player, t.waves->monster, Around(about, game::QuestSpawnOffset(t.waves->near, t.waves->far, random_), run.layer));
+                }
+                run.nextAdd = now + std::chrono::seconds(t.waves->every);
+            }
+            break;
+        }
+        case TrialRun::Phase::Arrived:
+            // Step 4: the lines, each its time after the one before; then finished there and out.
+            if (now < run.next) break;
+            if (run.line < t.arrive.size()) {
+                say(t.arrive[run.line].second);
+                ++run.line;
+                run.next = now + std::chrono::milliseconds(run.line < t.arrive.size() ? t.arrive[run.line].first : 2500);
+                break;
+            }
+            if (run.cos != 0) host_.QuestCosRemove(run.cos);
+            run.cos = 0;
+            TrialPassed(run.player, *q);
+            if (t.finishHere) FinishTrial(run.player, *q);
             close();
             break;
         case TrialRun::Phase::Ending:
@@ -2449,6 +2519,58 @@ void Quests::TickTrials(Clock::time_point now) {
         }
     }
     std::erase_if(trials_, [](const TrialRun& r) { return r.layer == 0; });
+    // A chain's next trial, once its player is back in the shared world (gone, or the quest no longer under way: dropped).
+    for (auto it = pendingTrials_.begin(); it != pendingTrials_.end();) {
+        const auto who = host_.QuestPlayer(it->first);
+        const QuestDef* q = Find(it->second);
+        const PlayerQuests* p = Of(it->first);
+        const auto rec = p != nullptr ? p->records.find(it->second) : decltype(p->records.end()){};
+        if (!who || q == nullptr || !q->trial || p == nullptr || rec == p->records.end() || !UnderWay(rec->second)) {
+            it = pendingTrials_.erase(it);
+            continue;
+        }
+        if (who->position.layer != 0 || who->dead) {
+            ++it;
+            continue;
+        }
+        EnterTrial(it->first, *who, *q, now);
+        it = pendingTrials_.erase(it);
+    }
+}
+
+void Quests::FinishTrial(std::uint32_t entity, const QuestDef& q) {
+    PlayerQuests* p = Of(entity);
+    if (p == nullptr) return;
+    const auto it = p->records.find(q.id);
+    if (it == p->records.end() || it->second.status != proto::QuestStatus::Achieved) return;
+    // Paid there (no NPC), its words; then the chain's next one given and its trial entered once back outside.
+    Pay(entity, *p, q, it->second, 0, {});
+    if (!q.trial->finished.Empty()) host_.QuestSay(entity, q.trial->finished.key.empty() ? q.trial->finished.literal : q.trial->finished.key);
+    if (q.trial->then.empty()) return;
+    const QuestDef* next = Find(q.trial->then);
+    if (next == nullptr) return;
+    Start(entity, *p, *next, "the chain");
+    if (next->trial) pendingTrials_.push_back({entity, next->id});
+}
+
+void Quests::LoseTrial(std::uint32_t entity, const QuestDef& q) {
+    PlayerQuests* p = Of(entity);
+    if (p == nullptr) return;
+    Abandon(entity, q.id, proto::QuestEnd::Abandoned);
+    // The chain begun again (the original's Leebaek: "start again from the To the Flame Sprite quest"): its first one's
+    // record as never finished, offered again.
+    if (q.trial->restart.empty()) return;
+    const QuestDef* first = Find(q.trial->restart);
+    if (first == nullptr) return;
+    if (const auto it = p->records.find(first->id); it != p->records.end() && !UnderWay(it->second)) {
+        QuestRecord& r = it->second;
+        r.status = proto::QuestStatus::Abandoned;
+        r.times = 0;
+        r.progress = {};
+        host_.QuestSave(p->character, r);
+        TellMarks(entity, *p);
+        Send(entity, proto::QuestGone{first->id, proto::QuestEnd::Abandoned, 0});
+    }
 }
 
 std::vector<std::pair<std::uint32_t, std::uint32_t>> Quests::Trials() const {

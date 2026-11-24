@@ -293,6 +293,46 @@ talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_09
 talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_11
 talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_13
 
+# QNO_TQ_BAEKRYOUNG_13 ("To Flame Sprite Passage 1"; SR_GameServer's own class). Leebaek's letter for ShinMoo: under way,
+# Leebaek opens the secret door (_10_15 with the row); alone into INS_QNO_TQ_BAEKRYEONG_13 where the client plays its scene;
+# 30 s on the letter is delivered, the quest paid there (_09 "Continue to speak with ShinMoo") and QNO_TQ_BAEKRYOUNG_14
+# begun at once (the original's instance invitation; ours its trial entered once back outside).
+quest QNO_TQ_BAEKRYOUNG_13
+start level 89-
+start after all QNO_TQ_BAEKRYOUNG_12
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP
+finish NPC_CH_GENARAL_SP
+goal deliver NPC_CH_QT_FLAMEMASTER ITEM_QNO_TQ_BAEKRYEONG_13_01 1 talk @SN_TALK_QNO_TQ_BAEKRYEONG_13_08 text @SN_CON_QNO_TQ_BAEKRYOUNG_13_01
+trial INS_QNO_TQ_BAEKRYEONG_13 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_13_03 start -32765 187 -30 -954 scene qno_tq_baekryoung_13 30 finish-here finished @SN_TALK_QNO_TQ_BAEKRYEONG_13_09 then QNO_TQ_BAEKRYOUNG_14
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_13_01
+talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_13_02
+talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_13_04
+talk NPC_CH_GENARAL_SP bag-full @SN_TALK_QNO_TQ_BAEKRYEONG_13_12
+talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_10_15
+
+# QNO_TQ_BAEKRYOUNG_14 ("To Flame Sprite Passage 2"; SR_GameServer's own class), begun by 13, never offered (ours: 'never 13',
+# 13 being always taken first). Into
+# INS_QNO_TQ_BAEKRYEONG_14 (the 4th floor, _RefInstance_World_Start_Pos 21): its scene (81 s: Leebaek comes and curses), then
+# ShinMoo (the quest's COS NPC_CH_QT_FLAMEMASTER_COS) beside the player (_18), two MOB_QT_TQ_THIEF_02 90..100 from the
+# player every minute, 15 minutes (_16, _17); within 100 of one of the four exit places: ShinMoo's _09, _14, _15, _10
+# 1.25 / 1.25 / 1.25 s apart, the quest paid there 2.5 s later, out. The time over: _19, given up, and 13 to be taken
+# again. Ours: Leebaek's row also lets one whose run was cut short (out of the game) go in again.
+quest QNO_TQ_BAEKRYOUNG_14
+start level 89-
+start after all QNO_TQ_BAEKRYOUNG_13
+start never QNO_TQ_BAEKRYOUNG_13
+repeat 1
+giver NPC_CH_GENARAL_SP
+npc NPC_CH_GENARAL_SP
+finish NPC_CH_GENARAL_SP
+goal talk NPC_CH_QT_FLAMEMASTER_COS text @SN_CON_QNO_TQ_BAEKRYOUNG_14_01
+trial INS_QNO_TQ_BAEKRYEONG_14 at NPC_CH_GENARAL_SP row @SN_TALK_QNO_TQ_BAEKRYEONG_13_03 start -32763 712 13 1070 scene qno_tq_baekryoung_14 81 escort NPC_CH_QT_FLAMEMASTER_COS @SN_TALK_QNO_TQ_BAEKRYEONG_14_18 minutes 15 warn 10 @SN_TALK_QNO_TQ_BAEKRYEONG_14_16 warn 5 @SN_TALK_QNO_TQ_BAEKRYEONG_14_17 to -32763 15685 549 -19136 100 to -32763 -15539 549 19983 100 to -32763 -19279 584 -15979 100 to -32763 19343 549 15631 100 waves MOB_QT_TQ_THIEF_02 2 radius 90 100 every 60 arrive 0 @SN_TALK_QNO_TQ_BAEKRYEONG_14_09 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_14 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_15 arrive 1250 @SN_TALK_QNO_TQ_BAEKRYEONG_14_10 lost @SN_TALK_QNO_TQ_BAEKRYEONG_14_19 restart QNO_TQ_BAEKRYOUNG_13 finish-here
+talk NPC_CH_GENARAL_SP greeting @SN_NPC_CH_GENARAL_SP_QS
+talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_13_05
+
 quest QNO_TQ_BAEKRYOUNG_11
 start level 88-
 start after all QNO_TQ_BAEKRYOUNG_10

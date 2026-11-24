@@ -189,6 +189,14 @@ std::string TrialLine(const QuestDef::Trial& t) {
     if (!t.refuse.Empty()) s += " refuse " + Text(t.refuse);
     if (t.noJob) s += " no-job";
     if (!t.scene.empty()) s += std::format(" scene {} {}", t.scene, t.sceneSeconds);
+    if (!t.escort.empty()) s += std::format(" escort {} {} minutes {}", t.escort, Text(t.escortText), t.minutes);
+    for (const auto& p : t.to) s += std::format(" to {} {}", place(p), Number(p.radius));
+    if (t.waves) s += std::format(" waves {} {} radius {} {} every {}", t.waves->monster, t.waves->count, Number(t.waves->near), Number(t.waves->far), t.waves->every);
+    for (const auto& [ms, text] : t.arrive) s += std::format(" arrive {} {}", ms, Text(text));
+    if (!t.restart.empty()) s += " restart " + t.restart;
+    if (t.finishHere) s += " finish-here";
+    if (!t.finished.Empty()) s += " finished " + Text(t.finished);
+    if (!t.then.empty()) s += " then " + t.then;
     if (!t.boss.empty()) s += std::format(" after {} boss {} {} radius {} {} minutes {}", t.after, t.boss, place(t.bossAt), Number(t.near), Number(t.far), t.minutes);
     for (const auto& [minutes, text] : t.warnings) s += std::format(" warn {} {}", minutes, Text(text));
     if (t.adds) s += std::format(" adds {} {} radius {} {} every {}", t.adds->monster, place(t.adds->at), Number(t.adds->near), Number(t.adds->far), t.adds->every);
@@ -931,13 +939,34 @@ bool ParseTrial(Reader& r, QuestDef& q) {
         else if (what == "failed") ok = r.Text(t.failed, "what is said when failed");
         else if (what == "out") ok = r.Integer(t.out, "the seconds before all go out");
         else if (what == "scene") ok = r.Word(t.scene, "the scene's script") && r.Integer(t.sceneSeconds, "the scene's seconds");
+        else if (what == "escort") ok = r.Word(t.escort, "the escorted COS") && r.Text(t.escortText, "what is said as it comes");
+        else if (what == "to") {
+            QuestDef::UseRule::Place p;
+            ok = place(p) && r.Real(p.radius, "the place's radius");
+            if (ok) t.to.push_back(p);
+        } else if (what == "waves") {
+            QuestDef::Trial::Wave w;
+            ok = r.Word(w.monster, "the waves' monster") && r.Integer(w.count, "the monsters a wave") && r.Take("radius") &&
+                 r.Real(w.near, "the nearest radius") && r.Real(w.far, "the farthest radius") && r.Take("every") && r.Integer(w.every, "the seconds between them");
+            if (ok && w.every == 0) ok = r.Fail("'waves ... every S' takes S > 0");
+            if (ok) t.waves = std::move(w);
+        } else if (what == "arrive") {
+            std::pair<std::uint32_t, QuestText> a;
+            ok = r.Integer(a.first, "the milliseconds after the line before") && r.Text(a.second, "the line");
+            if (ok) t.arrive.push_back(std::move(a));
+        } else if (what == "restart") ok = r.Word(t.restart, "the quest made new again");
+        else if (what == "finish-here") t.finishHere = true;
+        else if (what == "finished") ok = r.Text(t.finished, "what is said when finished there");
+        else if (what == "then") ok = r.Word(t.then, "the quest started then");
         else ok = r.Fail(std::format("'{}' is no part of 'trial' (at, row, start, refuse, no-job, after, boss, minutes, warn, adds, pass-on-time, "
-                                     "passed, lost, berserk, take, give, failed, out, scene)",
+                                     "passed, lost, berserk, take, give, failed, out, scene, escort, to, waves, arrive, restart, finish-here, "
+                                     "finished, then)",
                                      what));
         if (!ok) return false;
     }
     if (t.npc.empty() || boss == !t.scene.empty())
         return r.Fail("a trial names its NPC ('at NPC') and either its boss ('boss MOB REGION X Y Z radius A B') or its scene ('scene NAME S')");
+    if (!t.escort.empty() && t.to.empty()) return r.Fail("an escort names where it goes ('to REGION X Y Z RADIUS')");
     if (t.near > t.far) return r.Fail("the boss's 'radius A B' takes A <= B");
     q.trial = std::move(t);
     return true;

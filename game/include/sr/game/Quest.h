@@ -479,6 +479,28 @@ struct QuestDef {
         // script\q_script\NAME.txt played on entry; `sceneSeconds` later the quest's goals are met and the player goes out.
         std::string scene;
         std::uint32_t sceneSeconds = 0;
+        // Finished there (the White Viper chain: paid inside, `finished` said) instead of at its NPC; then `then` started and
+        // its trial entered once the player is back in the shared world.
+        bool finishHere = false;
+        QuestText finished;
+        std::string then;
+        // An escort after the scene (BAEKRYOUNG_14: ShinMoo, the quest's COS, taken to the 4th floor's exit): the COS beside
+        // the player (`escortText` said), `waves` of monsters about the player, `minutes` and its warnings; the player
+        // within its radius of a `to` place: the `arrive` lines (each its milliseconds after the one before), then finished
+        // there; the time over: `lost` said, the quest given up and `restart` (the chain's first) made new again.
+        std::string escort;
+        QuestText escortText;
+        std::vector<UseRule::Place> to;
+        struct Wave {
+            std::string monster;
+            std::uint32_t count = 1;
+            float near = 0, far = 0;
+            std::uint32_t every = 60;
+            bool operator==(const Wave&) const = default;
+        };
+        std::optional<Wave> waves;
+        std::string restart;
+        std::vector<std::pair<std::uint32_t, QuestText>> arrive;
         bool operator==(const Trial&) const = default;
     };
     std::optional<Trial> trial;
