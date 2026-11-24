@@ -2042,7 +2042,7 @@ bool Quests::OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const
         }
         const auto rec = m->records.find(q.id);
         if (!u.npc.empty()) {
-            if (rec == m->records.end() || !UnderWay(rec->second)) continue;
+            if (rec == m->records.end() || !UnderWay(rec->second) || !TalkNeedHeld(member, q, u)) continue;
         } else {
             const bool finished = rec != m->records.end() && rec->second.times > 0;
             if (!finished && host_.QuestItemCount(member, u.item) == 0) continue;
@@ -2254,9 +2254,20 @@ bool Quests::PickTalkRule(std::uint32_t entity, const QuestHost::Player& who, co
         return false;
     }
     if (std::any_of(worlds_.begin(), worlds_.end(), [&](const QuestWorld& w) { return w.quest == q.id && w.inside.contains(entity); })) return false;
+    if (!TalkNeedHeld(entity, q, u)) return false; // silently (the original's master without the item: not taken)
     if (!OpenWorld(entity, who, q, u, now)) return false;
     core::LogInfo("quests: {} opens {} for {}", who.name, u.instance->world, q.codename);
     return true;
+}
+
+// The original's OLDWOMAN_6 move: each party member holding the quest, and, its kill goal not met, the Pile
+// of Rainbow Plant; ours a talk rule's `need` items, one whose goals are met excused.
+bool Quests::TalkNeedHeld(std::uint32_t entity, const QuestDef& q, const QuestDef::UseRule& u) {
+    if (u.need.empty()) return true;
+    const PlayerQuests* p = Of(entity);
+    if (p == nullptr) return false;
+    if (const auto rec = p->records.find(q.id); rec != p->records.end() && OriginalState(rec->second, &q) == 8) return true;
+    return std::all_of(u.need.begin(), u.need.end(), [&](const std::string& item) { return host_.QuestItemCount(entity, item) > 0; });
 }
 
 // --- A quest's trial (QuestDef::Trial; the hwan army tests) ---------------------------------

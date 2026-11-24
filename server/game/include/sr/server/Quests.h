@@ -413,6 +413,8 @@ private:
     // or the checks' words (Talk); its row picked (HandIn).
     const game::QuestDef::UseRule* TalkRule(const game::QuestDef& q, const QuestRecord& r, const std::string& npc) const;
     void AskTalkRule(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, std::uint32_t npc);
+    // A talk rule's `need` items held by one whose goals are not met (a talk rule's members: OLDWOMAN_6's Pile of Rainbow Plant).
+    bool TalkNeedHeld(std::uint32_t entity, const game::QuestDef& q, const game::QuestDef::UseRule& u);
     bool PickTalkRule(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, std::uint32_t npc,
                       Clock::time_point now);
     void TickWorlds(Clock::time_point now);

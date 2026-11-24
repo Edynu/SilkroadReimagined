@@ -811,6 +811,52 @@ TEST_CASE("Quest talk rule: GENERALORDER_4's secret door takes the party holding
     CHECK(host.ways[0].to->z == doctest::Approx(233.0f));
 }
 
+TEST_CASE("Quest talk rule: OLDWOMAN_6's Meet Shaitan takes the members holding the plant; Shaitan's lines, his death's way out, the necklace (a made-up host)") {
+    const auto coded = Coded();
+    TrialHost host;
+    host.npcs[11] = "NPC_RM_SLAVE2";
+    host.who.position = {25789, 900.0f, 0.0f, 700.0f, 0};
+    server::QuestHost::Player member = host.who;
+    member.peer = 2;
+    member.name = "Member";
+    host.others[2] = member; // holds the quest, not the plant (the bag is the made-up host's one: checked below)
+    server::Quests quests(host, {});
+    quests.Load(Numbered(coded));
+    const game::QuestDef* q = quests.Find("QNO_RM_OLDWOMAN_6");
+    REQUIRE(q != nullptr);
+    quests.Enter(1, {Record(q->id, proto::QuestStatus::Achieving)});
+    quests.Enter(2, {Record(q->id, proto::QuestStatus::Achieving)});
+    host.who.sharedParty = true;
+    host.party = {1, 2};
+    // The plant lost: the master's row opens nothing (silently).
+    REQUIRE(Ask(quests, proto::QuestTalk{11, q->id}));
+    CHECK(host.Last<proto::QuestSays>().text == "SN_TALK_QNO_RM_OLDWOMAN_6_07");
+    REQUIRE(Ask(quests, proto::QuestHandIn{11, q->id, {0}}));
+    CHECK(quests.Worlds().empty());
+    // Held: in, at the world's start (region 25789).
+    host.bag["ITEM_QNO_RM_OLDWOMAN_7_03"] = 1;
+    REQUIRE(Ask(quests, proto::QuestHandIn{11, q->id, {0}}));
+    REQUIRE(quests.Worlds().size() == 1);
+    REQUIRE(host.enteredAt.has_value());
+    CHECK(host.enteredAt->region == 25789);
+    // 30 s on Demon Shaitan, then the five lines 5 s apart and the battle.
+    const auto start = std::chrono::steady_clock::now();
+    quests.Tick(start + 31s);
+    REQUIRE(host.Count("MOB_QT_01_TAHOMET") == 1);
+    for (auto at = start + 32s; at <= start + 62s; at += 1s) quests.Tick(at);
+    for (const char* line : {"SN_TALK_QNO_RM_OLDWOMAN_6_25", "SN_TALK_QNO_RM_OLDWOMAN_6_08", "SN_TALK_QNO_RM_OLDWOMAN_6_09",
+                             "SN_TALK_QNO_RM_OLDWOMAN_6_10", "SN_TALK_QNO_RM_OLDWOMAN_6_11", "SN_TALK_QNO_RM_OLDWOMAN_6_34"}) {
+        CAPTURE(line);
+        CHECK(host.Told(1, line));
+    }
+    // Slain: his last words and a way out back where its user came in.
+    host.raised.back().standing = false;
+    quests.Tick(start + 70s);
+    CHECK(host.Told(1, "SN_TALK_QNO_RM_OLDWOMAN_6_12"));
+    REQUIRE(host.ways.size() == 1);
+    CHECK_FALSE(host.ways[0].to.has_value());
+}
+
 namespace {
 
 // Our game server with the game files and a database: two players of an auto-share party at EASTEU_21's place.

@@ -41,6 +41,36 @@ talk NPC_RM_SLAVE1 bag-full @SN_TALK_QNO_RM_SLAVE1_3_09
 talk NPC_RM_SLAVE2 done-now @SN_TALK_QNO_RM_SLAVE1_3_16
 talk NPC_RM_SLAVE1 middle @SN_TALK_QNO_RM_SLAVE1_3_14
 
+# QNO_RM_OLDWOMAN_6 ("Rahid 6"; SR_GameServer's own class). Taken in a party: Slave Shifle gives the
+# Pile of Rainbow Plant (_03, then the notice _24). Under way, the party's master is asked (_07) with the row _28 "Meet
+# Shaitan" (no party sharing both _06, a member _26, a transport out _35): the members holding the quest and the plant
+# (or with Tahomet slain) into INS_QNO_RM_OLDWOMAN_6 (_RefInstance_World_Start_Pos 10: region 25789). Its update: 30 s,
+# then Demon Shaitan (MOB_QT_01_TAHOMET) about the master, 5 s apart his _25, the player's _08, his _09, the player's _10,
+# his _11, then "The battle has begun." (_34) and 20 minutes (_30 at 10 left, _31 at 5, his _17 at the end and everyone
+# out 10 s later). Slain: his _12 and a way out (INS_QUEST_TELEPORT 20..100 from him, back where its user came in); the
+# kill swaps the plant for the Silver Crescent Necklace. At Shifle: _19, the necklace taken (OLDWOMAN_7 gives it again).
+quest QNO_RM_OLDWOMAN_6
+start level 79-
+start after all QNO_RM_OLDWOMAN_5
+start party
+repeat 1
+giver NPC_RM_SLAVE2
+npc NPC_RM_SLAVE2
+finish NPC_RM_SLAVE2
+start-item ITEM_QNO_RM_OLDWOMAN_7_03 1
+goal kill 1 MOB_QT_01_TAHOMET text @SN_CON_QNO_RM_OLDWOMAN_6
+need item ITEM_QNO_RM_OLDWOMAN_7_01 1
+on talk NPC_RM_SLAVE2 row @SN_TALK_QNO_RM_OLDWOMAN_6_28 ask @SN_TALK_QNO_RM_OLDWOMAN_6_07 need ITEM_QNO_RM_OLDWOMAN_7_03 start 25789 980 -14 771 instance INS_QNO_RM_OLDWOMAN_6 unique MOB_QT_01_TAHOMET after 30 minutes 20 master @SN_TALK_QNO_RM_OLDWOMAN_6_26 transport @SN_TALK_QNO_RM_OLDWOMAN_6_35 comes @SN_TALK_QNO_RM_OLDWOMAN_6_25 comes @SN_TALK_QNO_RM_OLDWOMAN_6_08 comes @SN_TALK_QNO_RM_OLDWOMAN_6_09 comes @SN_TALK_QNO_RM_OLDWOMAN_6_10 comes @SN_TALK_QNO_RM_OLDWOMAN_6_11 begun @SN_TALK_QNO_RM_OLDWOMAN_6_34 warn 10 @SN_TALK_QNO_RM_OLDWOMAN_6_30 warn 5 @SN_TALK_QNO_RM_OLDWOMAN_6_31 slain @SN_TALK_QNO_RM_OLDWOMAN_6_12 over @SN_TALK_QNO_RM_OLDWOMAN_6_17 way-out
+on kill MOB_QT_01_TAHOMET need ITEM_QNO_RM_OLDWOMAN_7_03 take ITEM_QNO_RM_OLDWOMAN_7_03 give ITEM_QNO_RM_OLDWOMAN_7_01
+talk NPC_RM_SLAVE2 greeting @SN_NPC_RM_SLAVE2_QS
+talk NPC_RM_SLAVE2 offer @SN_TALK_QNO_RM_OLDWOMAN_6_01
+talk NPC_RM_SLAVE2 accepted @SN_TALK_QNO_RM_OLDWOMAN_6_03
+talk NPC_RM_SLAVE2 denied @SN_TALK_QNO_RM_OLDWOMAN_6_04
+talk NPC_RM_SLAVE2 bag-full @SN_TALK_QNO_RM_OLDWOMAN_6_27
+talk NPC_RM_SLAVE2 done @SN_TALK_QNO_RM_OLDWOMAN_6_19
+talk NPC_RM_SLAVE2 not-party @SN_TALK_QNO_RM_OLDWOMAN_6_06
+talk NPC_RM_SLAVE2 middle @SN_TALK_QNO_RM_OLDWOMAN_6_26
+
 quest QNO_RM_OLDWOMAN_7
 start level 79-
 start after all QNO_RM_OLDWOMAN_6
