@@ -83,6 +83,9 @@ struct MonsterNest {
     bool waiting = false;
     // Gone by itself once its monsters are dead and lain (a summon, a trigger's monsters).
     bool temporary = false;
+    // A god's loot body (its codename the god's and _DROP): its monster linked to the god that summoned it (that
+    // entity): the god's death strikes it whole in the killer's name (Monsters::LinkedBody).
+    std::uint32_t linkTo = 0;
     int rarity = -1; // its monsters' rarity (-1: its reference's, a champion at the nest's chance)
     // Its hive's cap over all the hive's nests (Tab_RefHive dwOverwriteMaxTotalCount; 0: none). A unique's nests
     // (characterdata rarity 3) keep one state for their hive, awake or not: its monster exists while its region
@@ -294,6 +297,11 @@ public:
     // The towns' safe areas about them by position (regioninfo's town rectangles, the original's): the same
     // rules as the towns' regions (no monster in, none fights a player there).
     void SetTownAreas(std::function<bool(const game::proto::WorldPosition& at)> area);
+    // Where a summon of that codename stands (`_RefGameWorldNPC`'s INS_DEFAULT rows named after it: the gods' loot
+    // bodies), instead of the ring about its summoner.
+    void SetSummonPlaces(std::unordered_map<std::string, game::proto::WorldPosition> places);
+    // A god's linked loot body still standing (0: none): the god dead, it is struck whole in the killer's name.
+    std::uint32_t LinkedBody(std::uint32_t god) const;
 
 private:
     struct State;

@@ -78,6 +78,8 @@ public:
         std::uint8_t jobState = 4;
         bool alias = false;
         bool jobChanging = false;
+        // In a Battle Arena match: its team (0: in none).
+        std::uint8_t arenaTeam = 0;
     };
     virtual ~PartyHost() = default;
     virtual std::optional<Player> PlayerAt(std::uint32_t entity) const = 0;

@@ -110,6 +110,7 @@ struct Monsters::State {
         Clock::time_point swingEnds; // it stands through its swing's clip: no chase before then
         Clock::time_point nextLook; // an idle one's next look around for a player
         std::uint32_t summoned = 0; // its nest's summon skills used (a bit each)
+        std::uint32_t body = 0;     // a god's linked loot body (its _DROP summon)
         struct PendingHit {
             Clock::time_point at;
             std::uint32_t target = 0;
@@ -149,6 +150,7 @@ struct Monsters::State {
     std::vector<Nest> nests;
     std::function<bool(std::uint16_t)> town; // a bandit entering one is gone
     std::function<bool(const proto::WorldPosition&)> townArea; // a town's safe area (regioninfo's, by position)
+    std::unordered_map<std::string, proto::WorldPosition> summonPlaces; // a summon's own spot by its codename
     // Town ground: a town's region (`_RefRegion.IsBattleField` 0) or a town's safe area about it (the original's
     // regioninfo's rectangles of kind 2); never in an instance's layer.
     bool InTown(const proto::WorldPosition& at) const {
@@ -408,6 +410,10 @@ struct Monsters::State {
         m.entity = entity;
         m.nest = n;
         m.rarity = rarity;
+        // A god's loot body: linked both ways (the god leads).
+        if (nest.spec.linkTo != 0) {
+            if (const auto god = monsters.find(nest.spec.linkTo); god != monsters.end()) god->second.body = entity;
+        }
         m.stats = game::MonsterCombatStats(*nest.row, rarity);
         if (nest.spec.labHp > 0) m.stats.maxHp = nest.spec.labHp; // a lab monster's own health
         m.current = m.stats;
@@ -1027,10 +1033,15 @@ struct Monsters::State {
                 const assets::ObjectRow* row = characters.Find(group.refObjId);
                 const float ring = float(m.stats.bodyRadius) + (row != nullptr ? row->bodyRadius : 0.0f) + 30.0f;
                 const int count = std::uniform_int_distribution<int>(group.fewest, group.most)(random);
+                // Its own spot (a god's loot body: the INS_DEFAULT row named after it), else the ring.
+                const auto spot = row != nullptr ? summonPlaces.find(row->codename) : summonPlaces.end();
+                const bool lootBody = row != nullptr && row->codename == nest.row->codename + "_DROP";
                 for (int k = 0; k < count; ++k) {
                     const float angle = Uniform(0.0f, 2.0f * std::numbers::pi_v<float>);
                     const proto::FlatPosition c = proto::ToFlat(place->position);
-                    proto::WorldPosition at = proto::FromFlat({c.x + double(std::cos(angle) * ring), c.z + double(std::sin(angle) * ring)}, place->position.y);
+                    proto::WorldPosition at = spot != summonPlaces.end()
+                                                  ? spot->second
+                                                  : proto::FromFlat({c.x + double(std::cos(angle) * ring), c.z + double(std::sin(angle) * ring)}, place->position.y);
                     at.layer = place->position.layer;
                     MonsterNest raised;
                     raised.refObjId = group.refObjId;
@@ -1043,6 +1054,7 @@ struct Monsters::State {
                     raised.sight = 300.0f;
                     raised.respawn = false;
                     raised.temporary = true;
+                    if (lootBody) raised.linkTo = m.entity;
                     summons.push_back(raised);
                 }
             }
@@ -1190,6 +1202,15 @@ Monsters::Monsters(World& world, const assets::CharacterTable& characters, const
 
 void Monsters::SetTowns(std::function<bool(std::uint16_t)> town) { s_->town = std::move(town); }
 void Monsters::SetTownAreas(std::function<bool(const proto::WorldPosition&)> area) { s_->townArea = std::move(area); }
+
+void Monsters::SetSummonPlaces(std::unordered_map<std::string, proto::WorldPosition> places) { s_->summonPlaces = std::move(places); }
+
+std::uint32_t Monsters::LinkedBody(std::uint32_t god) const {
+    const auto it = s_->monsters.find(god);
+    if (it == s_->monsters.end() || it->second.body == 0) return 0;
+    const auto body = s_->monsters.find(it->second.body);
+    return body != s_->monsters.end() && body->second.hp > 0 ? it->second.body : 0u;
+}
 
 std::uint32_t Monsters::RefOf(std::uint32_t entity) const {
     const auto it = s_->monsters.find(entity);

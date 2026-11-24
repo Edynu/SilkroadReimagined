@@ -2583,6 +2583,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         Broadcast(entity, proto::EntityStates{entity, std::move(states)});
     }
     void Killed(std::uint32_t monster, const Monsters::Damaged& d) override {
+        // A god's linked loot body (Haroeris', Seth's _DROP) dies with him, struck whole in his killer's name: its loot
+        // falls for the killer.
+        if (const std::uint32_t body = monsters ? monsters->LinkedBody(monster) : 0u; body != 0) {
+            const std::uint32_t by = d.killer != 0 ? d.killer : (d.damageBy.empty() ? 0u : d.damageBy.back().first);
+            const Monsters::Damaged struck = monsters->Damage(body, by, std::max(1u, monsters->Hp(body)), Clock::now());
+            if (struck.killed) Killed(body, struck);
+        }
         // A fortress war's guard or tablet monster: the war's (no experience, no drops).
         if (fortresses && fortresses->IsWarObject(monster) && !fortresses->IsStructure(monster)) {
             const PlayerWorld* killer = d.damageBy.empty() ? nullptr : PlayerByEntity(d.killer != 0 ? d.killer : d.damageBy.back().first);
@@ -6105,6 +6112,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         out.jobState = JobState(p);
         out.alias = !p.alias.empty();
         out.jobChanging = p.suitChange.has_value();
+        if (const std::uint8_t team = arenas && arenas->InMatch(entity) ? arenas->TeamOf(entity) : std::uint8_t(0xFF); team != 0xFF) out.arenaTeam = std::uint8_t(team + 1);
         return out;
     }
     void Tell(std::uint32_t entity, const PartyMessage& message) override {
@@ -12973,6 +12981,16 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
                 state->monsters->SetTowns([s = state.get()](std::uint16_t region) { return s->BanditTown(region); });
                 state->monsters->SetTownAreas([s = state.get()](const proto::WorldPosition& at) { return s->InTownArea(at); });
             }
+        }
+        // The summons' own spots (`_RefGameWorldNPC`'s INS_DEFAULT rows: the gods' loot bodies).
+        if (state->monsters) { // (no such table: no rows)
+            const QueryResult rows = db->Query("SELECT npccodename128, regionid, posx, posy, posz FROM _refgameworldnpc WHERE worldcodename128 = 'INS_DEFAULT'");
+            std::unordered_map<std::string, proto::WorldPosition> places;
+            for (int k = 0; rows.Ok() && k < rows.Rows(); ++k) {
+                places[rows.Text(k, 0)] = proto::WorldPosition{std::uint16_t(std::int16_t(rows.Int(k, 1))), float(rows.Double(k, 2)), float(rows.Double(k, 3)),
+                                                               float(rows.Double(k, 4))};
+            }
+            state->monsters->SetSummonPlaces(std::move(places));
         }
         if (!LoadJobRules(*db, state->jobRules, error)) {
             core::LogWarning("{}: the jobs' constants: {}", config.name, error);

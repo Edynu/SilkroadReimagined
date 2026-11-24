@@ -89,6 +89,8 @@ const char* PartyStatusText(proto::PartyStatus status) {
     case S::MatchListed: return "UIIT_MSG_PARTYMATCH_RECORD_ERROR_INVITE";
     case S::JobMismatch: return "UIIT_MSG_PARTY_USER_MISSMATCH"; //, the Party line only
     case S::JobChanging: return "UIIT_MSG_JOBITEM_WEAR_ERR_PARTYMATCH";
+    case S::ArenaOpponent: return "UIIT_MGS_ARENA_ERR_CANT_PARTY_WITH_OPPONENT_IN_BATTLE_ARENA";
+    case S::ArenaMatching: return "UIIT_MGS_ARENA_ERR_FREGIST_PARTY_IN_BATTLE_ARENA";
     case S::NoAlias: return "UIIT_MSG_PARTYERR_UNKNOWN_OPERATION"; // code 5: "Wrong calculation." (1.188 group 2)
     case S::NotLeader: return "UIIT_MSG_PARTYMATCH_RECORD_ERROR_PARTYLEADER";
     }

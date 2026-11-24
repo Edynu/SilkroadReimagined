@@ -2239,6 +2239,8 @@ enum class PartyStatus : std::uint16_t {
     MatchListed = 0x2C25,  // the target has a listing of its own
     JobMismatch = 0x2C23,  // the job states may not party (game::JobsMayParty), or not this purpose (JobMayListPurpose)
     JobChanging = 0x2C26,  // a job suit's change is under way
+    ArenaOpponent = 0x2C28, // in a Battle Arena match: a player of the other team
+    ArenaMatching = 0x2C29, // in a Battle Arena match: no party matching listing
     NoAlias = 5,           // a listing in a job suit without an alias (its client line "Wrong calculation.")
     NotLeader = 0x2C30,    // ours: only the master may do it
 };

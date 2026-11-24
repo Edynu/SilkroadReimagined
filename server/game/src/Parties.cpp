@@ -762,6 +762,8 @@ void Parties::Invite(const PartyHost::Player& me, const proto::PartyInvite& m, C
     if (!target) return refuse(S::InvalidUser);
     if (!me.position || !target->position || !Within(*me.position, *target->position, game::kPartyInviteRange, true)) return refuse(S::TooFar, target->name);
     if (!target->alive) return refuse(S::MatchBusy, target->name); // the original's 0x2C06 for a dead target
+    // In a Battle Arena match: not a player of the other team (0x2C28).
+    if (me.arenaTeam != 0 && target->arenaTeam != 0 && me.arenaTeam != target->arenaTeam) return refuse(S::ArenaOpponent, target->name);
     if (const Party* theirs = PartyOfCharacter(target->character)) return refuse(theirs == party ? S::ExistingMember : S::OtherParty, target->name);
     if (entryOf_.contains(target->character)) return refuse(S::MatchListed, target->name);
     if (proposals_.contains(target->entity) || applying_.contains(target->character)) return refuse(S::Busy, target->name);
@@ -951,6 +953,7 @@ void Parties::Register(const PartyHost::Player& me, const proto::PartyMatchForm&
     if (party != nullptr && party->leader != me.character) return refuse(S::MatchLeader);
     if (party == nullptr && me.level < game::kPartyMinLevel) return refuse(S::LowLevel);
     if (form.purpose >= game::kPartyPurposes || form.title.empty()) return refuse(S::Unknown);
+    if (me.arenaTeam != 0) return refuse(S::ArenaMatching); // not in a Battle Arena match (0x2C29)
     // The jobs: no suit's
     // change under way (0x2C26), an alias in a suit (5), the purpose the job's (0x2C23).
     if (me.jobChanging) return refuse(S::JobChanging);
