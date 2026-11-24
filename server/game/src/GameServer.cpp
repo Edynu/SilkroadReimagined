@@ -6569,6 +6569,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // and that piece goes when it may; otherwise one of the bag's filled places at random, refused when it may not. To
     // the ground at his feet (the item move of kind 0x17; inferred), anyone's.
     void DropOnDeath(PlayerWorld& player, bool murderer) {
+        // The shard's PK switch refuses the death's drop (the original's forced move 0x17 answers 2 under it).
+        if (config.pkProhibited) return;
         if (int(deathDropRandom() % 101u) > game::DeathItemChance(player.pkPoints)) return;
         int place = -1;
         if (murderer) {
@@ -9495,6 +9497,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (player.returnAt) return refuse(proto::GateStatus::Returning);
         const assets::TeleportPoint* from = nullptr;
         if (const auto status = AtGate(player, use.gate, from); status != proto::GateStatus::Ok) return refuse(status);
+        // The shard's PK switch shuts the thieves' gates: the temple's (GATE_TEMPLE_THIEF_GATE) does nothing, the desert's
+        // structure (STORE_DESERT_THIEF_GATE, its point GATE_DESERT_THIEF_GATE) cannot even be selected (the original's
+        // selection answers 3); ours: no answer to either.
+        if (config.pkProhibited && (from->codename == "GATE_TEMPLE_THIEF_GATE" || from->codename == "GATE_DESERT_THIEF_GATE")) return;
         // A transport out farther than 1000 from him (3D), before the link is read: 0x1C13.
         if (coses) {
             if (const auto cart = coses->TransportCart(player.entity)) {

@@ -452,3 +452,21 @@ TEST_CASE("Game server: a murderer's refusals: no ride (0x1876), no return scrol
     v.client->Send(proto::LogoutCancel{});
     s.game.Stop();
 }
+
+TEST_CASE("Game server: under the shard's PK switch a murderer's death drops nothing (the original's forced drop refused; U13-01)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    MurderServer s(t);
+    s.config.pkProhibited = true;
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    const auto murderer = [&t](std::int64_t character) {
+        REQUIRE(server::SavePkCounts(t.Db(), character, 3, 1, 30'000));
+    };
+    auto a = s.Make("Abel", 1000, 60, {Stored(kHerb, 5)}, murderer);
+    s.Pump(100);
+    // Killed with no player: at 30,000 points the herbs would go (100 %); the switch keeps them.
+    a.client->Send(proto::DevDie{});
+    proto::ItemMoved none;
+    CHECK_FALSE(a.client->Expect(none, 1s));
+    s.game.Stop();
+}
