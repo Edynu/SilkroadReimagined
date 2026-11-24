@@ -375,6 +375,13 @@ TEST_CASE("Mall services: the NPC's repair: its price, a partial repair, the cod
     CHECK(Answer(p).request == proto::ServiceRequest::Hammer);
     p.client->Send(proto::UseItem{s.PlaceOf(p.bag, kHammer), 0, 0});
     CHECK(Answer(p).code == game::repaircode::kHammerNothing);
+    // The saves written (behind the answers: waited for, a loaded machine's writes take longer).
+    const auto mended = [&] {
+        return t.Db().Query("SELECT count(*) FROM _inventory v JOIN _items i ON i.id64 = v.itemid WHERE v.charid = $1 AND i.refitemid = $2 AND i.data = 40",
+                            {p.character, std::int64_t(kSword)})
+            .Int(0, 0);
+    };
+    for (int i = 0; i < 2500 && mended() != 2; ++i) s.game.Poll(2ms);
     for (int i = 0; i < 100; ++i) s.game.Poll(2ms);
     CHECK(t.Db().Query("SELECT count(*) FROM _inventory v JOIN _items i ON i.id64 = v.itemid WHERE v.charid = $1 AND i.refitemid = $2 AND i.data = 40",
                        {p.character, std::int64_t(kSword)})
@@ -513,7 +520,8 @@ TEST_CASE("Mall services: a magic cube filled with its kind of elixir to its lim
     CHECK(Answer(p).code == 0);
     p.client->Send(proto::CubeMove{0, elixirs[2], cube, 0});
     CHECK(Answer(p).code == game::cubecode::kFull);
-    for (int i = 0; i < 100; ++i) s.game.Poll(2ms);
+    // The cube's rows written (waited for: a loaded machine's writes take longer).
+    for (int i = 0; i < 2500 && t.Db().Query("SELECT count(*) FROM _inventoryforlinkedstorage").Int(0, 0) != 2; ++i) s.game.Poll(2ms);
     CHECK(t.Db().Query("SELECT count(*) FROM _inventoryforlinkedstorage").Int(0, 0) == 2);
     s.Relog(p, "Cuber");
     const auto kept = Next<proto::CubeContents>(p);
