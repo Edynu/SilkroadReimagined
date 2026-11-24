@@ -1262,7 +1262,8 @@ TEST_CASE("Game server: a job's suit: the league and alias kept, the state, leve
     CHECK(seen.level == 3);
     CHECK(seen.alias == "Merchant");
     CHECK(Next<proto::EntityJob>(a).state == 1);
-    for (int i = 0; i < 150; ++i) s.game.Poll(2ms); // past the job lock
+    // Past the job lock (0.2 s here), on the clock: a poll may return early.
+    for (const auto until = std::chrono::steady_clock::now() + 400ms; std::chrono::steady_clock::now() < until;) s.game.Poll(2ms);
     // Off again: no job (the alias gone with it).
     a.client->Send(proto::ItemMove{game::slot::kJobSuit, 13, 0});
     const auto off = Next<proto::EntityJob>(b);
