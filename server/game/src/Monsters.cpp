@@ -1458,8 +1458,10 @@ struct Monsters::State {
             const auto place = world.Where(m.entity);
             if (who != players.end() && who->second->alive && who->second->stats != nullptr && place &&
                 Distance(place->position, who->second->position) <= it->reach) {
-                out.hits.push_back({m.entity, it->target, game::RollHit(m.current, *who->second->stats, it->attack, {false, true, nullptr}, random),
-                                    it->skill, nests[m.nest].row != nullptr ? nests[m.nest].row->level : 1});
+                game::HitRoll roll{false, true, nullptr};
+                if (who->second->wall) roll.wall = &*who->second->wall;
+                out.hits.push_back({m.entity, it->target, game::RollHit(m.current, *who->second->stats, it->attack, roll, random), it->skill,
+                                    nests[m.nest].row != nullptr ? nests[m.nest].row->level : 1});
                 Rearm(m, now);
             }
             it = m.pending.erase(it);

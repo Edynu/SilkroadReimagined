@@ -149,6 +149,8 @@ public:
         int protectedLevel = 0;
         // Hidden from monsters (stealth, invisibility): it cannot be a target.
         bool hidden = false;
+        // Its wall (an Ice Wall, a Fire Wall: game::WallSpec; none: no wall): a monster's hit on it goes to the wall first.
+        std::optional<game::WallSpec> wall;
         // The jobs: its job state (a COS its owner's; game::kNoJob none), the other of the pair a
         // bandit goes between (a player's transport, a COS's owner; 0: none), whether it is a COS whose owner rides it
         // (a bandit's pick gives way to the owner), and whether only bandits go for it (a transport).

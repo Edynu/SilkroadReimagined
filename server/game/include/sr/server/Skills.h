@@ -65,6 +65,8 @@ struct SkillState {
         bool own = true;
     };
     std::vector<Buff> buffs;
+    // Its wall ('pw': an Ice Wall, a Fire Wall): what the wall buff of this token has taken of its HP (U3-11).
+    std::uint32_t wallToken = 0, wallTaken = 0;
     // Its links ('lnks'): the owner's side of each link skill it cast on
     // another, the copy there a buff of the skill on a player (its token), or on a monster only the
     // DOT's strikes ('lks2': its 'att' and states every 'puls' on that target alone); the hits a guard
@@ -406,6 +408,15 @@ public:
         return std::nullopt;
     }
     // A pick-up that waited in the action list, its turn come (Skills::HoldPickUp).
+    // A player target's wall (Skills::WallOf; none: no wall), and what it took of a hit (Skills::WallTook).
+    virtual std::optional<game::WallSpec> WallOf(std::uint32_t entity) const {
+        (void)entity;
+        return std::nullopt;
+    }
+    virtual void WallTook(std::uint32_t entity, std::uint32_t amount) {
+        (void)entity;
+        (void)amount;
+    }
     virtual void PickUpWaited(std::uint32_t player, std::uint32_t item) {
         (void)player;
         (void)item;
@@ -607,6 +618,10 @@ public:
     void EndUnfitBuffs(SkillCaster& caster);
     // The running buffs of these skills end at once, whoever gave them (a socket's skills as its item comes off).
     void EndBuffsOf(SkillCaster& holder, const std::vector<std::uint32_t>& skills);
+    // Its running wall ('pw' buff: an Ice Wall, a Fire Wall): its kinds, defence, absorption and HP left (none: no wall).
+    std::optional<game::WallSpec> WallOf(const SkillState& state) const;
+    // Its wall took `amount` of a hit: at its HP the wall ends (told to the holder); true when it ended.
+    bool WallTook(SkillCaster& holder, std::uint32_t amount);
     const assets::SkillRow* Imbue(const SkillState& state, Clock::time_point now) const;
     game::proto::BuffAdded BuffMessage(const SkillState::Buff& buff, Clock::time_point now) const;
     // The holder's numbers a buff takes a share of as it starts.

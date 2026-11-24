@@ -185,6 +185,19 @@ struct HitResult {
     bool critical = false;
     bool blocked = false;
     bool magical = false; // it had a magical part (the skill's, or an imbue's force): it breaks a root
+    // The target's wall (HitRoll::wall): what the wall took of it, and whether it covered every part (the holder
+    // untouched: no damage, no states, no knock, no block roll).
+    std::uint32_t wallTaken = 0;
+    bool wallOnly = false;
+};
+// A wall on the target (an Ice Wall's or a Fire Wall's 'pw' buff): the parts it covers (`kinds`: 4 physical, 8
+// magical), its own defence (word 2) and absorption percent (word 3), its HP left (word 1 less what it took; at 0 it
+// still covers its parts until it ends, but takes nothing more).
+struct WallSpec {
+    int kinds = 0;
+    int defence = 0;
+    int absorption = 0;
+    std::uint32_t hpLeft = 0;
 };
 // Who hits whom (a player's balance; ignoring defence is a player's on a monster), the attacker's
 // chance history (null: plain rolls), the target's share of the hit (an area's further targets get
@@ -200,6 +213,8 @@ struct HitRoll {
     // A target an imbue's area added (the lightning's jump): it takes the
     // magical parts only, the skill's and the imbue's.
     bool magicalOnly = false;
+    // Its wall (null: none).
+    const WallSpec* wall = nullptr;
 };
 // One hit (of a skill's `hits`) from `attacker` on `defender`, with the force of the attacker's imbue
 // (null: none; its own attack, the attacker's mastery level for it in its `mastery`). A hit that is

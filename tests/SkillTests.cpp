@@ -3130,3 +3130,48 @@ TEST_CASE("the action list: one running, one waiting (the newest wins); a skill 
     skills.Stop(c7, f.player.state.busyUntil + std::chrono::milliseconds(10));
     CHECK(f.player.state.attackTarget == 0u);
 }
+
+TEST_CASE("a wall's HP: its 'pw' words read from the running buff; what it takes adds up, at its HP the wall ends (game files; U3-11)") {
+    if (GameDir() == nullptr) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    assets::FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, GameDir(), error), error);
+    assets::SkillTable table;
+    REQUIRE_MESSAGE(table.Load(fs, error), error);
+    Field f;
+    server::Skills skills(f.host, &table, 7);
+    const assets::SkillRow* wall = table.Find(std::string_view("SKILL_CH_COLD_BINGBYEOK_A_01"));
+    REQUIRE(wall != nullptr);
+    const assets::SkillParam pw = assets::FindSkillParam(*wall, assets::SkillTag("pw"));
+    REQUIRE(pw);
+    const std::uint32_t hp = std::uint32_t(pw.Int(1));
+    REQUIRE(hp > 10);
+    CHECK_FALSE(skills.WallOf(f.player.state).has_value());
+    server::SkillState::Buff held;
+    held.token = 77;
+    held.skill = wall->id;
+    held.until = Clock::now() + std::chrono::seconds(60);
+    f.player.state.buffs.push_back(held);
+    std::optional<game::WallSpec> spec = skills.WallOf(f.player.state);
+    REQUIRE(spec.has_value());
+    CHECK(spec->kinds == pw.Int(0));
+    CHECK(spec->defence == pw.Int(2));
+    CHECK(spec->absorption == pw.Int(3));
+    CHECK(spec->hpLeft == hp);
+    // Part of it taken: still up, its HP less.
+    server::SkillCaster c0 = f.player.Caster();
+    CHECK_FALSE(skills.WallTook(c0, hp - 10));
+    spec = skills.WallOf(f.player.state);
+    REQUIRE(spec.has_value());
+    CHECK(spec->hpLeft == 10);
+    // The rest and more: the wall ends, told to its holder.
+    server::SkillCaster c1 = f.player.Caster();
+    CHECK(skills.WallTook(c1, 25));
+    CHECK(f.player.state.buffs.empty());
+    CHECK_FALSE(skills.WallOf(f.player.state).has_value());
+    REQUIRE_FALSE(f.host.All<proto::BuffRemoved>().empty());
+    CHECK(f.host.All<proto::BuffRemoved>().back().token == 77);
+}

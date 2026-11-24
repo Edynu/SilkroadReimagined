@@ -240,3 +240,58 @@ TEST_CASE("the chance history: the long-run rate is the chance, and streaks stay
     CHECK_FALSE(rolls.Roll(0, 'B', 7, random));
     CHECK(rolls.Roll(100, 'B', 7, random));
 }
+
+TEST_CASE("a wall ('pw'): it takes its kinds' parts of a hit by its own defence; covering every part the holder is untouched") {
+    std::mt19937 random(5);
+    // An Ice Wall's kinds 7 (physical), no defence of its own: a melee hit's 1000 all to the wall, nothing to the holder.
+    WallSpec ice{7, 0, 0, 10000};
+    HitRoll walled;
+    walled.wall = &ice;
+    HitResult hit = RollHit(Attacker(), Defender(), Melee(), walled, random);
+    CHECK(hit.wallOnly);
+    CHECK(hit.wallTaken == 1000);
+    CHECK(hit.damage == 0);
+    // A Fire Wall's kinds 11 (magical), defence 100, absorption 100: a magic hit's 1000 / 2 - 100 to the wall; a melee
+    // hit passes it whole to the holder.
+    WallSpec fire{11, 100, 100, 10000};
+    walled.wall = &fire;
+    AttackSpec magic = Melee();
+    magic.kind = 10;
+    magic.magical = true;
+    hit = RollHit(Attacker(), Defender(), magic, walled, random);
+    CHECK(hit.wallOnly);
+    CHECK(hit.wallTaken == 400);
+    hit = RollHit(Attacker(), Defender(), Melee(), walled, random);
+    CHECK_FALSE(hit.wallOnly);
+    CHECK(hit.wallTaken == 0);
+    CHECK(hit.damage == 400);
+    // A melee skill with a magical imbue at 50 % on the Ice Wall: the physical part to the wall and zeroed on the
+    // holder, the imbue's 400 at its share to the holder.
+    AttackSpec imbue;
+    imbue.skill = 4;
+    imbue.kind = 8;
+    imbue.magical = true;
+    AttackSpec half = Melee();
+    half.imbuePercent = 50;
+    walled.wall = &ice;
+    hit = RollHit(Attacker(), Defender(), half, walled, random, &imbue);
+    CHECK_FALSE(hit.wallOnly);
+    CHECK(hit.wallTaken == 1000);
+    CHECK(hit.damage == 200);
+    // Spent (no HP left): it takes nothing more but still zeroes its kinds' parts until it ends (a hit does at least 1).
+    WallSpec spent{7, 0, 0, 0};
+    walled.wall = &spent;
+    hit = RollHit(Attacker(), Defender(), Melee(), walled, random);
+    CHECK_FALSE(hit.wallOnly);
+    CHECK(hit.wallTaken == 0);
+    CHECK(hit.damage == 1);
+    // A life steal (and a skill of fixed damage) leaves the wall out.
+    AttackSpec steal;
+    steal.skill = 3;
+    steal.formula = false;
+    steal.lifeSteal = 500;
+    walled.wall = &ice;
+    hit = RollHit(Attacker(), Defender(), steal, walled, random);
+    CHECK(hit.wallTaken == 0);
+    CHECK(hit.damage == 500);
+}

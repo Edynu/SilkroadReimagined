@@ -323,6 +323,32 @@ std::uint32_t FormulaPart(const CombatStats& attacker, const CombatStats& defend
     return std::uint32_t(std::trunc(Clamp(damage, 0.0, 16777215.0)));
 }
 
+// What a target's wall takes of one part of a hit (the original's wall formulas, GS:0x40EBE0 physical, 0x40EEF0
+// magical): the attack's power rolled in its range (ours: evenly), divided by 1 + the wall's absorption / 100 less
+// its defence (ignoring the defence: the power), times the skill's power and the lane's damage; under 5 % of the power
+// 1 to 10 % of it; a physical critical's double; the attacker's final factor and the holder's taken one.
+std::uint32_t WallPart(const CombatStats& attacker, const CombatStats& holder, const AttackSpec& attack, const WallSpec& wall, bool critical,
+                       bool ignoreDefence, std::mt19937& random) {
+    const auto unit = [&] { return double(std::uniform_int_distribution<int>(0, 32767)(random)) / 32767.0; };
+    const int lane = attack.Lane();
+    const double scale = 1.0 + double(std::max(0, attack.mastery)) / 100.0;
+    const auto end = [&](double stat, int flat) { return Clamp((stat + double(flat)) * attacker.rangeFactor, 0.0, 999999.0) * scale; };
+    const double low = end(attack.magical ? attacker.magAttackMin : attacker.phyAttackMin, attack.flatMin);
+    const double high = std::max(low, end(attack.magical ? attacker.magAttackMax : attacker.phyAttackMax, attack.flatMax));
+    const double power = low + (high - low) * unit();
+    double damage = ignoreDefence ? power : std::max(0.0, power / (1.0 + double(wall.absorption) / 100.0) - double(wall.defence));
+    damage = damage * double(attack.power) / 100.0 * (1.0 + (lane >= 0 ? attacker.damagePercent[std::size_t(lane)] : 0.0) / 100.0);
+    if (damage < power * 0.05) {
+        const double most = std::max(1.0, std::trunc(power * 10.0 / 100.0));
+        damage = 1.0 + unit() * (most - 1.0);
+    }
+    if (critical && !attack.magical) damage *= 2.0;
+    const std::size_t part = attack.magical ? 1 : 0;
+    if (attacker.finalFactor[part] != 0.0) damage *= attacker.finalFactor[part];
+    if (holder.finalTakenFactor[part] != 0.0) damage *= holder.finalTakenFactor[part];
+    return std::uint32_t(std::trunc(Clamp(damage, 0.0, 16777215.0)));
+}
+
 // An amount less 2.5 % a level the target is above the attacker, and its tenth (the least it falls
 // to).
 std::uint32_t LevelReduced(int amount, int attackerLevel, int defenderLevel, double& least) {
@@ -363,6 +389,29 @@ HitResult RollHit(const CombatStats& attacker, const CombatStats& defender, cons
             hit.critical = roll(int(std::trunc(double(chance) / (1.0 + defender.criticalResist / 100.0))), 'C');
         }
         ignoreDefence = who.attackerPlayer && !who.defenderPlayer && roll(int(std::trunc(attacker.ignoreDefenceChance)), 'M');
+        // A wall on the target (the original's hit outcome, GS:0x58E5F0): before the block, for a plain 'att' (not a life
+        // steal nor one of fixed damage) and while it has HP, it takes its parts of the hit (each by its own formula, an
+        // imbue's at the skill's share); covering every part the hit has (the physical, the magical or an imbue's),
+        // the holder is untouched.
+        if (who.wall != nullptr) {
+            const WallSpec& wall = *who.wall;
+            const bool withImbue = imbue != nullptr && attack.imbuePercent > 0;
+            const bool coversPhysical = attack.magical || (wall.kinds & 4) != 0;
+            const bool coversMagical = (!attack.magical && !withImbue) || (wall.kinds & 8) != 0;
+            if (attack.lifeSteal <= 0 && attack.fixedDamage <= 0 && wall.hpLeft > 0) {
+                const auto take = [&](const AttackSpec& part) {
+                    const bool covered = (part.magical ? wall.kinds & 8 : wall.kinds & 4) != 0;
+                    return covered ? WallPart(attacker, defender, part, wall, hit.critical, ignoreDefence, random) : 0u;
+                };
+                std::uint64_t taken = take(attack);
+                if (withImbue) taken += std::uint64_t(std::trunc(double(take(*imbue)) * double(attack.imbuePercent) / 100.0));
+                hit.wallTaken = std::uint32_t(std::min<std::uint64_t>(taken, 0xFFFFFFFFu));
+                if (coversPhysical && coversMagical) {
+                    hit.wallOnly = true;
+                    return hit;
+                }
+            }
+        }
         // The block rate and its lane's bonus each truncated to a byte, summed as one, then over the attacker's ignore.
         const int lane = attack.Lane();
         const int bonus = lane >= 0 ? int(std::trunc(defender.blockBonus[std::size_t(lane)])) & 0xFF : 0;
@@ -379,16 +428,19 @@ HitResult RollHit(const CombatStats& attacker, const CombatStats& defender, cons
         if (!who.defenderDown || attack.downPercent <= 0) return std::int64_t(part);
         return std::int64_t(std::trunc(double(std::uint64_t(part) * std::uint64_t(attack.downPercent)) / 100.0));
     };
-    // On a target an imbue's jump added, the physical parts are 0.
+    // On a target an imbue's jump added, the physical parts are 0. A wall's kinds zero its parts of the holder's.
+    const auto walled = [&](const AttackSpec& part) {
+        return who.wall != nullptr && ((part.magical ? who.wall->kinds & 8 : who.wall->kinds & 4) != 0);
+    };
     std::int64_t damage = attack.formula ? down(FormulaPart(attacker, defender, attack, hit.critical, ignoreDefence, who.attackerPlayer, random, attack.Lane())) : 0;
-    if (who.magicalOnly && !attack.magical) damage = 0;
+    if ((who.magicalOnly && !attack.magical) || walled(attack)) damage = 0;
     hit.magical = attack.formula && attack.magical && damage > 0;
     if (imbue != nullptr && attack.formula && attack.imbuePercent > 0) {
         // The target's factor for the imbue's part: the imbue's physical / magical, the main skill's melee / ranged.
         const int mainLane = attack.Lane();
         const int imbueLane = mainLane < 0 ? -1 : (imbue->magical ? 2 : 0) + (mainLane & 1);
         std::int64_t force = down(FormulaPart(attacker, defender, *imbue, hit.critical, ignoreDefence, who.attackerPlayer, random, imbueLane));
-        if (who.magicalOnly && !imbue->magical) force = 0;
+        if ((who.magicalOnly && !imbue->magical) || walled(*imbue)) force = 0;
         hit.magical = hit.magical || (imbue->magical && force > 0);
         damage += std::int64_t(std::trunc(double(force) * double(attack.imbuePercent) / 100.0));
     }

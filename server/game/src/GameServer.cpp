@@ -2223,6 +2223,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     std::optional<proto::WorldPosition> NearestPointOf(std::uint32_t target, const proto::FlatPosition& from) const override {
         return fortresses ? fortresses->NearestPoint(target, from.x, from.z) : std::nullopt;
     }
+    std::optional<game::WallSpec> WallOf(std::uint32_t entity) const override {
+        const PlayerWorld* player = PlayerByEntity(entity);
+        return player != nullptr && skillUnit ? skillUnit->WallOf(player->combat) : std::nullopt;
+    }
+    void WallTook(std::uint32_t entity, std::uint32_t amount) override {
+        PlayerWorld* player = PlayerByEntity(entity);
+        if (player == nullptr || !skillUnit) return;
+        SkillCaster caster = CasterOf(*player);
+        if (skillUnit->WallTook(caster, amount)) StatsChanged(player->entity);
+    }
     std::optional<std::uint32_t> StructureDamage(std::uint32_t attacker, std::uint32_t target) override {
         if (!fortresses || !fortresses->IsStructure(target)) return std::nullopt;
         const PlayerWorld* player = PlayerByEntity(attacker);
@@ -6197,6 +6207,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 const Skills::Protection guard = skillUnit->ProtectionOf(player.combat);
                 list.back().protectedGrades = guard.grades;
                 list.back().protectedLevel = guard.level;
+                list.back().wall = skillUnit->WallOf(player.combat);
             }
             byEntity[player.entity] = peerId;
         }
@@ -6255,6 +6266,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 }
             }
             if (coses) coses->OwnerHurt(player.entity, h.monster); // its attack pet defends it
+            // Its wall (an Ice Wall, a Fire Wall) took its part first; covering the whole hit, nothing reaches the holder.
+            if (h.hit.wallTaken > 0) WallTook(player.entity, h.hit.wallTaken);
+            if (h.hit.wallOnly) {
+                player.combat.battleUntil = now + std::chrono::seconds(20);
+                continue;
+            }
             // Its Snow Shield and its reflection.
             Skills::Guarded guard{h.hit.damage};
             if (skillUnit && !h.hit.blocked) {

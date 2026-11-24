@@ -905,6 +905,42 @@ void Skills::EndUnfitBuffs(SkillCaster& caster) {
     }
 }
 
+std::optional<game::WallSpec> Skills::WallOf(const SkillState& state) const {
+    if (table_ == nullptr) return std::nullopt;
+    for (const SkillState::Buff& b : state.buffs) {
+        const assets::SkillRow* row = table_->Find(b.skill);
+        const assets::SkillParam pw = row != nullptr ? assets::FindSkillParam(*row, assets::SkillTag("pw")) : assets::SkillParam{};
+        if (!pw) continue;
+        game::WallSpec wall;
+        wall.kinds = pw.Int(0);
+        wall.defence = pw.Int(2);
+        wall.absorption = pw.Int(3);
+        const std::uint32_t hp = std::uint32_t(std::max(0, pw.Int(1)));
+        const std::uint32_t taken = state.wallToken == b.token ? state.wallTaken : 0u;
+        wall.hpLeft = hp > taken ? hp - taken : 0u;
+        return wall;
+    }
+    return std::nullopt;
+}
+
+bool Skills::WallTook(SkillCaster& holder, std::uint32_t amount) {
+    if (table_ == nullptr) return false;
+    for (std::size_t i = 0; i < holder.state.buffs.size(); ++i) {
+        const SkillState::Buff& b = holder.state.buffs[i];
+        const assets::SkillRow* row = table_->Find(b.skill);
+        const assets::SkillParam pw = row != nullptr ? assets::FindSkillParam(*row, assets::SkillTag("pw")) : assets::SkillParam{};
+        if (!pw) continue;
+        if (holder.state.wallToken != b.token) holder.state.wallToken = b.token, holder.state.wallTaken = 0;
+        holder.state.wallTaken = std::uint32_t(std::min<std::uint64_t>(std::uint64_t(holder.state.wallTaken) + amount, 0xFFFFFFFFu));
+        // Its HP reached: the wall's action ends (the original's at its next tick; ours at once).
+        if (holder.state.wallTaken < std::uint32_t(std::max(0, pw.Int(1)))) return false;
+        holder.state.wallToken = holder.state.wallTaken = 0;
+        EndBuff(holder, i);
+        return true;
+    }
+    return false;
+}
+
 void Skills::EndBuffsOf(SkillCaster& holder, const std::vector<std::uint32_t>& skills) {
     if (skills.empty()) return;
     std::vector<SkillState::Buff>& buffs = holder.state.buffs;
@@ -2363,6 +2399,9 @@ void Skills::LandHits(SkillCaster& caster, Clock::time_point now) {
             who.defenderDown = target->down;
         }
         who.magicalOnly = hit.magicalOnly;
+        // A player target's wall (an Ice Wall, a Fire Wall): it takes its parts of the hit first.
+        const std::optional<game::WallSpec> wall = host_.IsPlayer(hit.target) ? host_.WallOf(hit.target) : std::nullopt;
+        if (wall) who.wall = &*wall;
         // The imbue: the one running as the hit lands, else the one its swing began with
         // (over). It joins a hit whose 'att' takes a share of it (its
         // fifth word): its force at that share, and its states.
@@ -2388,6 +2427,9 @@ void Skills::LandHits(SkillCaster& caster, Clock::time_point now) {
         if (hit.companion != 0) spec.flatMin = spec.flatMax = 0;
         game::HitResult roll = statusOnly ? game::HitResult{}
                                           : game::RollHit(hit.companion != 0 ? companion : caster.stats, *them, spec, who, random_, imbued ? &force : nullptr);
+        // What the target's wall took; covering the whole hit, the holder takes nothing of it (no damage, states, knock).
+        if (roll.wallTaken > 0) host_.WallTook(hit.target, roll.wallTaken);
+        if (roll.wallOnly) continue;
         // In a monster's shape (msch 1) its own hit: 5 x its level and up to 5 x its level more, never a critical (the
         // block rolled first, as any hit's).
         if (!statusOnly && hit.companion == 0 && caster.state.transform.mode == 1 && !roll.blocked && caster.stats.level > 0) {
