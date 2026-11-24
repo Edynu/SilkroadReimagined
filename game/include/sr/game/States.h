@@ -162,6 +162,11 @@ struct StateTick {
 };
 
 // The states one entity is in (GCharAbnormalState): one slot a kind.
+class StateSet;
+// A recovery (a potion, its steps, a heal, natural recovery, a life steal, a rising) as its taker gets it: cut by its
+// parameters 0x8F (HP: panic's recovery cut) and 0x90 (MP: combustion's), trunc(amount x (1 - cut / 100)), at least 0.
+std::uint32_t RecoveryCut(const StateSet& states, std::uint32_t amount, bool hp);
+
 class StateSet {
 public:
     using Clock = ActiveState::Clock;

@@ -1664,8 +1664,10 @@ std::vector<Skills::Struck> Skills::FriendsOf(const SkillCaster& caster, const a
 }
 
 void Skills::Recover(SkillCaster& caster, std::uint32_t hp, std::uint32_t mp) {
-    // HP and MP back, to the most (ours: the original's recovery may be lessened by a state, K3).
+    // HP and MP back, to the most, each cut by its taker's recovery cut (panic's 0x8F, combustion's 0x90).
     if (caster.dead || (hp == 0 && mp == 0)) return;
+    hp = game::RecoveryCut(caster.state.states, hp, true);
+    mp = game::RecoveryCut(caster.state.states, mp, false);
     caster.hp = std::uint32_t(std::min<std::uint64_t>(std::uint64_t(caster.hp) + hp, caster.stats.maxHp));
     caster.mp = std::uint32_t(std::min<std::uint64_t>(std::uint64_t(caster.mp) + mp, caster.stats.maxMp));
     host_.VitalsChanged(caster.entity);

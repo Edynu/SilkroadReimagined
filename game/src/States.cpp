@@ -363,6 +363,12 @@ std::vector<ActiveState> StateSet::All() const {
     return out;
 }
 
+std::uint32_t RecoveryCut(const StateSet& states, std::uint32_t amount, bool hp) {
+    const ActiveState* s = states.Find(hp ? StateKind::Panic : StateKind::Combustion);
+    if (s == nullptr || s->value2 <= 0 || amount == 0) return amount;
+    return std::uint32_t(std::max(0.0, std::trunc(double(amount) * (1.0 - double(s->value2) / 100.0))));
+}
+
 bool StateSet::Locked() const { return In(StateKind::Freeze) || In(StateKind::Sleep) || In(StateKind::Stun) || In(StateKind::Stone); }
 bool StateSet::Rooted() const { return Locked() || In(StateKind::Root); }
 

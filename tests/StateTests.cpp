@@ -178,6 +178,26 @@ TEST_CASE("states: a roll keeps its history by kind; a stronger state replaces, 
     CHECK(set.Mask() == 0u);
 }
 
+TEST_CASE("states: panic cuts HP recovery and combustion MP recovery by their second number (params 0x8F, 0x90)") {
+    game::StateSet set;
+    CHECK(game::RecoveryCut(set, 1000, true) == 1000);
+    game::ActiveState panic;
+    panic.kind = game::StateKind::Panic;
+    panic.level = 1;
+    panic.durationMs = 10000;
+    panic.value2 = 50; // the recovery's cut, percent
+    panic.started = game::ActiveState::Clock::now();
+    REQUIRE(set.Apply(panic));
+    CHECK(game::RecoveryCut(set, 1000, true) == 500);  // HP halved
+    CHECK(game::RecoveryCut(set, 1000, false) == 1000); // MP untouched
+    CHECK(game::RecoveryCut(set, 3, true) == 1);        // cut toward 0
+    game::ActiveState combustion = panic;
+    combustion.kind = game::StateKind::Combustion;
+    combustion.value2 = 100;
+    REQUIRE(set.Apply(combustion));
+    CHECK(game::RecoveryCut(set, 1000, false) == 0); // all of it: none, never below 0
+}
+
 TEST_CASE("states: burn, poison and bleed tick every 2 s from the start; poison never takes the last point") {
     const auto t0 = Clock::now();
     game::StateSet set;

@@ -7227,8 +7227,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             const auto gain = [rate](std::uint32_t most) {
                 return std::min(most / 2, std::max(1u, std::uint32_t(double(most) * rate / 100.0)));
             };
-            player.hp = std::min(player.stats.maxHp, player.hp + gain(player.stats.maxHp));
-            player.mp = std::min(player.stats.maxMp, player.mp + gain(player.stats.maxMp));
+            player.hp = std::min(player.stats.maxHp, player.hp + game::RecoveryCut(player.combat.states, gain(player.stats.maxHp), true));
+            player.mp = std::min(player.stats.maxMp, player.mp + game::RecoveryCut(player.combat.states, gain(player.stats.maxMp), false));
             world->SetHp(player.entity, player.hp);
             world->SetVitals(player.entity, player.hp, player.stats.maxHp, player.mp, player.stats.maxMp);
             if (Peer* peer = peers->Find(peerId)) SendVitals(*peer, player);
@@ -8352,8 +8352,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 if (!pulse) continue;
                 const std::uint32_t hp = heal[0] + std::uint32_t(std::uint64_t(p.stats.maxHp) * heal[1] / 100);
                 const std::uint32_t mp = heal[2] + std::uint32_t(std::uint64_t(p.stats.maxMp) * heal[3] / 100);
-                p.hp = std::min(p.stats.maxHp, p.hp + hp);
-                p.mp = std::min(p.stats.maxMp, p.mp + mp);
+                p.hp = std::min(p.stats.maxHp, p.hp + game::RecoveryCut(p.combat.states, hp, true));
+                p.mp = std::min(p.stats.maxMp, p.mp + game::RecoveryCut(p.combat.states, mp, false));
                 world->SetHp(p.entity, p.hp);
                 world->SetVitals(p.entity, p.hp, p.stats.maxHp, p.mp, p.stats.maxMp);
                 if (Peer* peer = peers->Find(peerId)) SendVitals(*peer, p);
@@ -9014,9 +9014,22 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             const auto give = [&](std::uint32_t amount, std::uint32_t& value, std::uint32_t most, std::vector<PlayerWorld::PotionSteps>& steps, bool isHp) {
                 if (amount == 0) return;
                 if (!r.flat) {
-                    // A percent potion at once; one that fills the gauge drops what is queued.
-                    if (std::uint64_t(value) + amount >= most) steps.clear();
-                    value = std::uint32_t(std::min<std::uint64_t>(most, std::uint64_t(value) + amount));
+                    // A percent potion at once. One that overfills the gauge drops what is queued; else the queue is
+                    // walked adding each potion's steps to the room it leaves, the first that passes the most kept and
+                    // those after it dropped.
+                    if (std::uint64_t(value) + amount > most) {
+                        steps.clear();
+                    } else {
+                        std::uint64_t room = std::uint64_t(value) + amount;
+                        for (std::size_t i = 0; i < steps.size(); ++i) {
+                            room += std::uint64_t(steps[i].step) * std::uint64_t(std::max(0, steps[i].left));
+                            if (room > most) {
+                                steps.resize(i + 1);
+                                break;
+                            }
+                        }
+                    }
+                    value = std::uint32_t(std::min<std::uint64_t>(most, std::uint64_t(value) + game::RecoveryCut(player.combat.states, amount, isHp)));
                     vitals = true;
                     return;
                 }
@@ -9026,7 +9039,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 for (const auto& s : steps) queued += std::uint64_t(s.step) * std::uint64_t(s.left);
                 if (isHp ? queued > most : queued >= most) return;
                 const std::uint32_t step = game::PotionStep(amount);
-                value = std::uint32_t(std::min<std::uint64_t>(most, std::uint64_t(value) + step));
+                value = std::uint32_t(std::min<std::uint64_t>(most, std::uint64_t(value) + game::RecoveryCut(player.combat.states, step, isHp)));
+                // Queued behind the others of its kind: one potion's steps at a time (StepPotions).
                 steps.push_back({step, game::kPotionSteps - 1, now + kPotionStepPeriod});
                 vitals = true;
             };
@@ -9217,19 +9231,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 continue;
             }
             bool changed = false;
-            const auto run = [&](std::vector<PlayerWorld::PotionSteps>& steps, std::uint32_t& value, std::uint32_t most) {
-                for (auto& s : steps) {
-                    while (s.left > 0 && now >= s.next) {
-                        value = std::uint32_t(std::min<std::uint64_t>(most, std::uint64_t(value) + s.step));
-                        --s.left;
-                        s.next += kPotionStepPeriod;
-                        changed = true;
-                    }
+            // Each kind a queue: only its first potion steps (one step a tick), the next one's steps start on the tick
+            // after the first's last, as the original's.
+            const auto run = [&](std::vector<PlayerWorld::PotionSteps>& steps, std::uint32_t& value, std::uint32_t most, bool isHp) {
+                if (steps.empty()) return;
+                PlayerWorld::PotionSteps& s = steps.front();
+                if (s.left > 0 && now >= s.next) {
+                    value = std::uint32_t(std::min<std::uint64_t>(most, std::uint64_t(value) + game::RecoveryCut(player.combat.states, s.step, isHp)));
+                    --s.left;
+                    s.next = now + kPotionStepPeriod;
+                    changed = true;
                 }
-                std::erase_if(steps, [](const PlayerWorld::PotionSteps& s) { return s.left <= 0; });
+                if (s.left <= 0) {
+                    steps.erase(steps.begin());
+                    if (!steps.empty()) steps.front().next = std::max(steps.front().next, now + kPotionStepPeriod);
+                }
             };
-            run(player.hpSteps, player.hp, player.stats.maxHp);
-            run(player.mpSteps, player.mp, player.stats.maxMp);
+            run(player.hpSteps, player.hp, player.stats.maxHp, true);
+            run(player.mpSteps, player.mp, player.stats.maxMp, false);
             if (changed) {
                 if (Peer* peer = peers->Find(peerId)) Healed(*peer, player);
             }
