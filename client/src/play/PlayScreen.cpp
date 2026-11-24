@@ -882,6 +882,23 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         if (tables_ && tables_->Usable()) BuffEffects(buff->token, buff->skill, true);
     } else if (const auto* held = std::get_if<proto::ActionHeld>(&event)) {
         actionsHeld_ = held->count;
+    } else if (const auto* punished = std::get_if<proto::AccountRestricted>(&event)) {
+        // A GM's punishment stopped a request: when it ends, as the original's line words it (year, month, day, AM / PM
+        // (ours: the words), hour, minute; local time).
+        if (!replay_) {
+            const UiData& d = gui_.data();
+            const char* key = punished->kind == 0 ? "UIIT_MSG_GM_PUNISHMENT_CHAT_BLOCK" : "UIIT_MSG_GM_PUNISHMENT_TRADE_BLOCK";
+            std::string line = d.Text(key);
+            if (punished->until > 0) {
+                const std::time_t end = std::time_t(punished->until);
+                std::tm at{};
+                localtime_s(&at, &end);
+                const int hour = at.tm_hour % 12 == 0 ? 12 : at.tm_hour % 12;
+                line = FormatText(line, {std::to_string(at.tm_year + 1900), std::to_string(at.tm_mon + 1), std::to_string(at.tm_mday),
+                                         at.tm_hour < 12 ? "AM" : "PM", std::to_string(hour), std::to_string(at.tm_min)});
+            }
+            player_.Post(game::GameMessage::Kind::General, line, context.time);
+        }
     } else if (const auto* weather = std::get_if<proto::WeatherNow>(&event)) {
         // The weather where it stands (its region's climate); the world eases into it over 5 s. Kept for the next
         // place's world too (a teleport makes a new one).

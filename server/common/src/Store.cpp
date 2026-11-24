@@ -446,6 +446,22 @@ std::optional<std::pair<std::int64_t, std::string>> AccountBlock(Database& db, s
     return std::make_pair(r.Int(0, 0), r.Text(0, 1));
 }
 
+AccountRestrictions LoadRestrictions(Database& db, std::int64_t account) {
+    AccountRestrictions out;
+    QueryResult r = db.Query(std::format("SELECT b.type, CASE WHEN b.timeend >= '9999-01-01' THEN 0 ELSE {} END "
+                                         "FROM sro_vt_account._blockeduser b "
+                                         "WHERE b.userjid = $1 AND b.type IN (3, 4) AND b.timebegin <= localtimestamp AND b.timeend > localtimestamp",
+                                         Epoch("b.timeend")),
+                             {account});
+    for (int i = 0; r.Ok() && i < r.Rows(); ++i) {
+        std::optional<std::int64_t>& until = r.Int(i, 0) == 3 ? out.tradeUntil : out.chatUntil;
+        const std::int64_t end = r.Int(i, 1);
+        // The later of two rows of a kind (no end the latest).
+        if (!until || end == 0 || (*until != 0 && end > *until)) until = end;
+    }
+    return out;
+}
+
 bool SetBlock(Database& db, std::string_view name, std::string_view reason, std::int64_t seconds) {
     QueryResult who = db.Query("SELECT jid FROM sro_vt_account.tb_user WHERE lower(struserid) = $1", {Lower(name)});
     if (!who.Ok() || who.Rows() != 1) return false;

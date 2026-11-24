@@ -24,6 +24,8 @@
 #include "sr/game/NavMesh.h"
 #include "sr/game/NavPath.h"
 #include "sr/game/PlayerState.h"
+#include "sr/game/OpenMarket.h"
+#include "sr/game/OpenMarketProtocol.h"
 #include "sr/game/WorldProtocol.h"
 #include "sr/game/SupportProtocol.h"
 #include "sr/game/SimulationClock.h"
@@ -3198,4 +3200,75 @@ TEST_CASE("Game server: a bug report from the game becomes the website's support
     CHECK(taken == 4);
     CHECK(refused);
     game.Stop();
+}
+
+TEST_CASE("Game server: a GM's chat and trade punishments (_blockeduser types 4 and 3) stop their requests with the notice (U18-05)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    core::JobSystem jobs(2);
+    server::GameServer game;
+    server::GameServerConfig config;
+    config.listen = Local();
+    config.databaseUrl = t.Url();
+    config.rules = WorldRules();
+    config.reportInterval = 50ms;
+    config.jobs = &jobs;
+    net::NetService net(1);
+    const auto pump = [&] { game.Poll(2ms); };
+    REQUIRE_MESSAGE(game.Start(config, error), error);
+    REQUIRE(server::CreateAccount(t.Db(), "punished", "secret1", error) == server::CreateAccountResult::Created);
+    bool ok = false;
+    const std::int64_t id = server::FindAccount(t.Db(), "punished", ok)->id;
+    // Chat stopped until 2099, trade without end; and a login block's row (type 1) long over, which plays no part.
+    REQUIRE(t.Db().Query("INSERT INTO sro_vt_account._blockeduser (userjid, userid, type, serialno, timebegin, timeend) VALUES "
+                         "($1, 'punished', 4, 0, '2020-01-01', '2099-06-01 12:30:00'), ($1, 'punished', 3, 0, '2020-01-01', '9999-12-31 23:59:59')",
+                         {id})
+                .Ok());
+    auto c = std::make_unique<Client>(net, game.Port(), pump);
+    REQUIRE(c->Greet());
+    proto::LobbyEnter e;
+    e.ticket = server::IssueTicket(t.Db(), id, config.id, 30, error);
+    c->Send(e);
+    proto::LobbyEntered entered;
+    REQUIRE(c->Expect(entered));
+    proto::CharacterCreate m;
+    m.name = "Muted";
+    m.model = 100;
+    m.chest = 1;
+    m.legs = 2;
+    m.shoes = 3;
+    m.weapon = 10;
+    c->Send(m);
+    proto::LobbyResult r;
+    REQUIRE(c->Expect(r));
+    REQUIRE(r.status == proto::LobbyStatus::Ok);
+    c->Send(proto::CharacterSelect{"Muted"});
+    REQUIRE(c->Expect(r));
+    c->Send(proto::WorldEnter{});
+    proto::WorldEntered in;
+    REQUIRE(c->Expect(in));
+    REQUIRE(in.status == proto::WorldStatus::Ok);
+    // A chat line: the notice with the chat's end, no answer.
+    proto::ChatSend s;
+    s.kind = proto::ChatKind::All;
+    s.index = 1;
+    s.text = "hello";
+    c->Send(s);
+    proto::AccountRestricted notice;
+    REQUIRE(c->Expect(notice));
+    CHECK(notice.kind == 0);
+    CHECK(notice.until > 4'000'000'000LL); // 2099
+    // A drop: the trade's notice, no end.
+    c->Send(proto::DropItem{13});
+    REQUIRE(c->Expect(notice));
+    CHECK(notice.kind == 1);
+    CHECK(notice.until == 0);
+    // The Open Market's opening: the notice and its code.
+    c->Send(proto::OpenMarketOpen{0});
+    REQUIRE(c->Expect(notice));
+    CHECK(notice.kind == 1);
+    proto::OpenMarketAnswer answer;
+    REQUIRE(c->Expect(answer));
+    CHECK(answer.code == game::openmarket::code::kRestricted);
 }

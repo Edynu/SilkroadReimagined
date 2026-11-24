@@ -1432,6 +1432,19 @@ enum class SkillUseStatus : std::uint8_t {
 // queued skill, a ground click no stop.
 // The weather where the player stands (its region's climate, game::ClimateWeather): sent on
 // entering the world, on reaching a region of another weather and when its region's weather changes.
+// A GM's punishment of the account stopped a request (the original's 0x3405 notice; _BlockedUser type 4 chat, 3 trade):
+// `kind` 0 chat (UIIT_MSG_GM_PUNISHMENT_CHAT_BLOCK), 1 trade (UIIT_MSG_GM_PUNISHMENT_TRADE_BLOCK); its end in Unix seconds
+// (0: none).
+struct AccountRestricted {
+    static constexpr MessageId kId = 0x1006;
+    std::uint8_t kind = 0;
+    std::int64_t until = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("kind", kind);
+        v("until", until);
+    }
+};
 struct WeatherNow {
     static constexpr MessageId kId = 0x1005;
     std::uint8_t kind = 1; // game::WeatherKind: 1 clear, 2 rain, 3 snow

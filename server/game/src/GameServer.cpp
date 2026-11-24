@@ -223,6 +223,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         bool inTemples = false;
         // The weather it was last told (proto::WeatherNow, as game::ClimateWeather::Packed); 0 none yet.
         std::uint16_t weatherSent = 0;
+        // Its account's trade and chat punishments (loaded at the entry; RestrictionOf, Restricted).
+        AccountRestrictions restrictions;
         // The system menu's Restart / Exit: counting down until it leaves.
         bool loggingOut = false;
         proto::LogoutKind logoutKind = proto::LogoutKind::Restart;
@@ -11229,6 +11231,31 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         }
     }
 
+    // The requests a GM's punishment stops (the original's): 0 the chat's (chat, letters, the guild's and the academy's
+    // notices), 1 the trade's (an exchange's request, a stall's opening and its visit, the Open Market, a drop).
+    static std::optional<std::uint8_t> RestrictionOf(proto::MessageId id) {
+        switch (id) {
+        case proto::ChatSend::kId:
+        case proto::LetterWrite::kId:
+        case proto::LetterWriteMany::kId:
+        case proto::GuildNoticeEdit::kId:
+        case proto::AcademyNoticeWrite::kId: return 0;
+        case proto::ExchangeAsk::kId:
+        case proto::StallOpen::kId:
+        case proto::StallVisit::kId:
+        case proto::OpenMarketOpen::kId:
+        case proto::DropItem::kId: return 1;
+        default: return std::nullopt;
+        }
+    }
+    // Whether the account's punishment of that kind runs now (its end passed: lifted).
+    static bool Restricted(const PlayerWorld& player, std::uint8_t kind) {
+        const std::optional<std::int64_t>& until = kind == 0 ? player.restrictions.chatUntil : player.restrictions.tradeUntil;
+        if (!until) return false;
+        if (*until == 0) return true;
+        return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() < *until;
+    }
+
     void Handle(Peer& peer, const net::Message& m) {
         if (peer.account == 0) {
             if (m.id != proto::LobbyEnter::kId) {
@@ -11251,6 +11278,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         PlayerWorld& player = players[peer.id];
         if (player.moving) return; // on its way to another server: what it still sends here is too late
         if (player.entity != 0 || player.entering) {
+            // A GM's punishment of the account (its trade, its chat): the requests it stops are dropped after the notice
+            // (the original's 0x3405); the Open Market's opening answered its code.
+            if (player.entity != 0) {
+                if (const std::optional<std::uint8_t> kind = RestrictionOf(m.id); kind && Restricted(player, *kind)) {
+                    const std::optional<std::int64_t>& until = *kind == 0 ? player.restrictions.chatUntil : player.restrictions.tradeUntil;
+                    SendMessage(*peer.connection, proto::AccountRestricted{*kind, until.value_or(0)});
+                    if (m.id == proto::OpenMarketOpen::kId) SendMessage(*peer.connection, proto::OpenMarketAnswer{m.id, game::openmarket::code::kRestricted});
+                    return;
+                }
+            }
             // Guilds and unions (Guilds.h): a request that does not decode closes the connection.
             if (proto::IsGuildMessage(m.id)) {
                 if (player.entity != 0 && guilds && !guilds->Handle(GuildActorOf(peer.id, player), m.id, m.payload)) peer.connection->Close();
@@ -12095,11 +12132,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         auto load = [this, peerId = peer.id, account = peer.account, character = player.selected](Database& db) {
             bool ok = false;
             std::optional<CharacterRow> row = LoadCharacter(db, account, config.id, character, ok);
-            completions->Post([this, peerId, row = std::move(row), ok] {
+            const AccountRestrictions restrictions = LoadRestrictions(db, account); // a GM's trade and chat punishments
+            completions->Post([this, peerId, row = std::move(row), ok, restrictions] {
                 Peer* peer = peers->Find(peerId);
                 if (!peer) return;
                 PlayerWorld& player = players[peerId];
                 player.entering = false;
+                player.restrictions = restrictions;
                 // Replaced meanwhile by another connection's entry (ReplaceOtherConnections): it stays out.
                 if (ok && row && player.selected != row->id) return;
                 if (!ok || !row) {

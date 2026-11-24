@@ -80,6 +80,12 @@ void RecordLogin(Database& db, std::int64_t account);
 bool StorePasswordHash(Database& db, std::int64_t account, const std::string& phc, LegacyPasswords legacy);
 // The account's login block now: until when (Unix seconds, 0: no end) and why; none when not blocked.
 std::optional<std::pair<std::int64_t, std::string>> AccountBlock(Database& db, std::int64_t account);
+// An account's trade and chat punishments running now (_blockeduser type 3 trade, 4 chat): each one's end in Unix seconds
+// (0: no end); none: not punished.
+struct AccountRestrictions {
+    std::optional<std::int64_t> tradeUntil, chatUntil;
+};
+AccountRestrictions LoadRestrictions(Database& db, std::int64_t account);
 // Blocks an account (`seconds` 0: no end); an empty reason unblocks it.
 bool SetBlock(Database& db, std::string_view name, std::string_view reason, std::int64_t seconds);
 
