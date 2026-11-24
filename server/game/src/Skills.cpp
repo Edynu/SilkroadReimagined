@@ -175,7 +175,15 @@ void Skills::CastAround(SkillCaster& caster, const assets::SkillRow& skill, Cloc
 }
 
 void Skills::StartCooldown(SkillCaster& caster, const assets::SkillRow& skill, Clock::time_point now) {
-    const int ms = std::max(0, skill.cooldownMs);
+    int ms = std::max(0, skill.cooldownMs);
+    // Frostbite and slow (the caster's action-time percent p, the original's param 0x8C: 200, 125) stretch an action
+    // skill's life (its preparing, casting and duration: activity 2 with a duration) inside its reuse, the original's
+    // trunc(p x life / 100 + max(0, reuse - life)). At 100 the plain reuse (the original's max(reuse, life): its hold
+    // covers the rest).
+    if (const int p = caster.state.states.AttackTimePercent(); p != 100 && skill.activity == 2 && skill.durationMs > 0) {
+        const int life = std::max(0, skill.preparingMs) + std::max(0, skill.castingMs) + skill.durationMs;
+        ms = int(std::int64_t(p) * life / 100) + std::max(0, skill.cooldownMs - life);
+    }
     if (ms <= 0) return;
     caster.state.skillCooling[skill.group] = now + std::chrono::milliseconds(ms);
     if (skill.cooldownGroup != 0) caster.state.groupCooling[std::uint32_t(skill.cooldownGroup)] = now + std::chrono::milliseconds(ms);
@@ -1295,8 +1303,10 @@ void Skills::Fight(SkillCaster& caster, Clock::time_point now) {
     const int pace = basic ? std::max(holdMs, skill->cooldownMs) : holdMs + spare;
     s.nextSwing = due + ms(pace * s.states.AttackTimePercent() / 100);
     // Busy: a basic attack its hold (its reuse after it is between swings), a skill its whole hold (less its spare part
-    // when a command waits: the Fight's waiting check).
-    s.busyUntil = basic ? now + ms(holdMs) : now + ms(holdMs + spare);
+    // when a command waits: the Fight's waiting check); frostbite and slow stretch it as its pace (the original keeps
+    // the scaled life and holds a new action skill till it has passed).
+    const int stretch = s.states.AttackTimePercent();
+    s.busyUntil = basic ? now + ms(holdMs * stretch / 100) : now + ms((holdMs + spare) * stretch / 100);
     s.holdSpare = ms(spare);
 }
 

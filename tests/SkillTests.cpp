@@ -2010,6 +2010,52 @@ TEST_CASE("a swing goes on where it was cast: its target gone beyond its range, 
     CHECK(f.host.bodies[f.player.entity].position.x > here.x + 100.0f);
 }
 
+TEST_CASE("frostbite and slow stretch an action skill's life inside its reuse: p x life / 100 + max(0, reuse - life) (game files; U3-03)") {
+    if (GameDir() == nullptr) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    assets::FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, GameDir(), error), error);
+    assets::SkillTable table;
+    REQUIRE_MESSAGE(table.Load(fs, error), error);
+    // The reuse each state gives a cast (the Cooldown its caster is told).
+    const auto reuseUnder = [&](std::optional<game::StateKind> state) {
+        Field f;
+        server::Skills skills(f.host, &table, 7);
+        const assets::SkillRow* smash = Learn(f, table, "SKILL_CH_SWORD_SMASH_A_01");
+        REQUIRE(smash != nullptr);
+        if (state) {
+            game::ActiveState a;
+            a.kind = *state;
+            a.level = 1;
+            a.durationMs = 60'000;
+            a.started = a.nextTick = Clock::now();
+            REQUIRE(f.player.state.states.Apply(a));
+        }
+        const Clock::time_point t0 = Clock::now();
+        server::SkillCaster c = f.player.Caster();
+        REQUIRE(skills.Use(c, {smash->id, Field::kSelected}, t0));
+        for (int at = 0; at < 3000 && f.host.All<proto::Cooldown>().empty(); at += 50) { // walked into its reach, then cast
+            server::SkillCaster c1 = f.player.Caster();
+            skills.Fight(c1, t0 + std::chrono::milliseconds(at));
+        }
+        std::uint32_t ms = 0;
+        for (const proto::Cooldown& cd : f.host.All<proto::Cooldown>()) {
+            if (cd.id == smash->id) ms = cd.ms;
+        }
+        return std::make_pair(ms, smash);
+    };
+    const auto [plain, smash] = reuseUnder(std::nullopt);
+    REQUIRE(smash->activity == 2);
+    REQUIRE(smash->durationMs > 0);
+    const int life = std::max(0, smash->preparingMs) + std::max(0, smash->castingMs) + smash->durationMs;
+    CHECK(plain == std::uint32_t(smash->cooldownMs)); // 100: the plain reuse
+    CHECK(reuseUnder(game::StateKind::Frostbite).first == std::uint32_t(200 * life / 100 + std::max(0, smash->cooldownMs - life)));
+    CHECK(reuseUnder(game::StateKind::Slow).first == std::uint32_t(125 * life / 100 + std::max(0, smash->cooldownMs - life)));
+}
+
 TEST_CASE("a chain's rows: each cast at its time (the command's 500 ms budget), the hold its last row's; a target dead at a row's cast ends the chain (game files)") {
     if (GameDir() == nullptr) {
         MESSAGE("SR_GAME_DIR not set - skipped");
