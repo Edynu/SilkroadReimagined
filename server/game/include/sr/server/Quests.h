@@ -236,6 +236,13 @@ public:
         (void)at;
         return QuestWorldEnter(player, layer);
     }
+    // A way out of a quest's instance put at `at` (in its layer): its user taken to `to`, or with none back where it came in
+    // (QuestDef::UseRule::World::wayOut); its entity (0: none).
+    virtual std::uint32_t QuestWayOut(const game::proto::WorldPosition& at, const std::optional<game::proto::WorldPosition>& to) {
+        (void)at;
+        (void)to;
+        return 0;
+    }
 };
 
 class Quests {
@@ -386,17 +393,26 @@ private:
         const game::QuestDef::UseRule* rule = nullptr;
         std::set<std::uint32_t> inside;
         std::map<std::uint32_t, Clock::time_point> leaving; // out of the party: out at that time
-        enum class Phase : std::uint8_t { Waiting, Opening, Fighting, Ending } phase = Phase::Waiting;
+        // Done: the last one slain, its way out standing until the time's end (World::wayOut).
+        enum class Phase : std::uint8_t { Waiting, Opening, Fighting, Done, Ending } phase = Phase::Waiting;
         std::size_t line = 0;    // Opening: the `comes` lines said so far
         std::size_t general = 0; // the generals' turn (World::generals)
+        game::proto::WorldPosition uniqueAt; // where the unique (the general) came
         std::optional<Clock::time_point> ends; // the time's end, from the (first) battle's begin
         Clock::time_point next; // Waiting: the unique's coming; Fighting: the time's end; Ending: everyone out
         std::size_t unique = SIZE_MAX;
         std::set<std::uint32_t> warned; // the warnings said (minutes left)
     };
     std::vector<QuestWorld> worlds_;
-    // The instance's entry (the item handler's checks after the rule's own, then the party walker): true when opened.
+    // The instance's entry (the item handler's checks after the rule's own, then the party walker; a talk rule's members
+    // those holding the quest, taken to its start): true when opened.
     bool OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, Clock::time_point now);
+    // A talk rule of the quest at the NPC fitting the record's state (QuestDef::UseRule::npc; null: none); its question asked,
+    // or the checks' words (Talk); its row picked (HandIn).
+    const game::QuestDef::UseRule* TalkRule(const game::QuestDef& q, const QuestRecord& r, const std::string& npc) const;
+    void AskTalkRule(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, std::uint32_t npc);
+    bool PickTalkRule(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, std::uint32_t npc,
+                      Clock::time_point now);
     void TickWorlds(Clock::time_point now);
     // A quest's trial under way (QuestDef::Trial): its player, its layer, its phase and times.
     struct TrialRun {

@@ -28,7 +28,8 @@ constexpr int kScheduleSnakeGate = 2; // `_RefScheduleDefine` 2: `_Schedule` row
 constexpr std::array<std::uint32_t, 4> kDisappearMs{3'600'000, 1'800'000, 600'000, 300'000};
 // Until the gate shuts the copies have no end (ours: a day, moved to the last hour at the shut).
 constexpr std::int64_t kUntilShutMs = 86'400'000;
-// A portal's object (the runtime teleport INS_QUEST_TELEPORT, used as a gap; the original's RuntimePortal: inferred).
+// A portal's object: the runtime teleport INS_QUEST_TELEPORT (the original's triggered portal spawner makes one, facing a
+// random way, with no time of its own: it stands with its copy), used as a gap.
 constexpr std::uint32_t kPortalObject = 19556;
 
 struct Place {
@@ -203,7 +204,8 @@ struct QinTomb::State {
         if (s.started) return;
         s.started = true;
         for (const auto& [at, to] : list) {
-            const std::uint32_t portal = instances.AddPortal(LayerOf(floor), kPortalObject, On(floor, at), LayerOf(toFloor), On(toFloor, to));
+            const float yaw = std::uniform_real_distribution<float>(0.0f, 6.2831853f)(random);
+            const std::uint32_t portal = instances.AddPortal(LayerOf(floor), kPortalObject, On(floor, at), LayerOf(toFloor), On(toFloor, to), yaw);
             if (portal != 0) s.portals.push_back(portal);
         }
         core::LogInfo("qin tomb: {} ({} portals)", name, s.portals.size());

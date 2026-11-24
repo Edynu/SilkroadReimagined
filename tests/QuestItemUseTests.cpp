@@ -562,6 +562,7 @@ TEST_CASE("Quest item use: the other handlers' parts read and write back the sam
     CHECK(coin.keptIn == std::vector<std::uint8_t>{8});
     REQUIRE(q.onUse[4].instance);
     CHECK(q.onUse[4].instance->world == "INS_QNO_T");
+    CHECK(q.onUse[4].instance->near == 20.0f); // the default 20..100
     CHECK(q.onUse[4].instance->unique == "MOB_T_BOSS");
     CHECK(q.onUse[4].instance->comes.size() == 2);
     CHECK(q.onUse[4].instance->warnings.size() == 1);

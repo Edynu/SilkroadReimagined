@@ -917,6 +917,34 @@ talk NPC_CH_GENARAL middle @SN_TALK_QNO_TQ_GENERALORDER_1_06
 talk NPC_CH_GENARAL done @SN_TALK_QNO_TQ_GENERALORDER_1_08
 talk NPC_CH_GENARAL done-now @SN_TALK_QNO_TQ_GENERALORDER_1_10
 
+# The tomb's four guardian beasts in the quest's instance (INS_QNO_TQ_GENERALORDER_4, a copy of the tomb's 5th floor, its
+# start by the north guardian): a sharing party. Under way the general asks the party's master _27 with the row _28 "Enter
+# through the secret door" (a member _30, a transport out _25, no party the not-party _26); picked (no party again _26, a
+# member the middle slot's _21), every member holding the quest in the shared world goes in. Inside, ORNAMENT_4's timeline:
+# the North, South, West and East guardians in turn (says _06, _09, _12, _15; deaths _07, _10, _13, _16; last words _08,
+# _11, _14, _17), the first within a radius of 190..200 about the master, the next 90..100; the battle _24, 30 minutes (_22, _23 at 10 and 5
+# left); the East's death the goal and a way out to General Sonhyeon at Jangan (region 25255, (594, 233)).
+quest QNO_TQ_GENERALORDER_4
+start level 88-
+start after all QNO_TQ_GENERALORDER_3
+start party
+repeat 1
+giver NPC_CH_GENARAL
+npc NPC_CH_GENARAL
+finish NPC_CH_GENARAL
+goal kill 1 MOB_QT_TQ_EASTGUARDIAN text @SN_CON_QNO_TQ_GENERALORDER_4_01
+on talk NPC_CH_GENARAL row @SN_TALK_QNO_TQ_GENERALORDER_4_28 ask @SN_TALK_QNO_TQ_GENERALORDER_4_27 start -32765 -116 -17 15035 instance INS_QNO_TQ_GENERALORDER_4 after 30 minutes 30 master @SN_TALK_QNO_TQ_GENERALORDER_4_30 transport @SN_TALK_QNO_TQ_GENERALORDER_4_25 begun @SN_TALK_QNO_TQ_GENERALORDER_4_24 warn 10 @SN_TALK_QNO_TQ_GENERALORDER_4_22 warn 5 @SN_TALK_QNO_TQ_GENERALORDER_4_23 general MOB_QT_TQ_NORTHGUARDIAN says @SN_TALK_QNO_TQ_GENERALORDER_4_06 dies @SN_TALK_QNO_TQ_GENERALORDER_4_07 last @SN_TALK_QNO_TQ_GENERALORDER_4_08 general MOB_QT_TQ_SOUTHGUARDIAN says @SN_TALK_QNO_TQ_GENERALORDER_4_09 dies @SN_TALK_QNO_TQ_GENERALORDER_4_10 last @SN_TALK_QNO_TQ_GENERALORDER_4_11 general MOB_QT_TQ_WESTGUARDIAN says @SN_TALK_QNO_TQ_GENERALORDER_4_12 dies @SN_TALK_QNO_TQ_GENERALORDER_4_13 last @SN_TALK_QNO_TQ_GENERALORDER_4_14 general MOB_QT_TQ_EASTGUARDIAN says @SN_TALK_QNO_TQ_GENERALORDER_4_15 dies @SN_TALK_QNO_TQ_GENERALORDER_4_16 last @SN_TALK_QNO_TQ_GENERALORDER_4_17 next 10 near 90 100 first-near 190 200 way-out 25255 594 0 233
+talk NPC_CH_GENARAL greeting @SN_NPC_CH_GENARAL_QS
+talk NPC_CH_GENARAL offer @SN_TALK_QNO_TQ_GENERALORDER_4_01
+talk NPC_CH_GENARAL accepted @SN_TALK_QNO_TQ_GENERALORDER_4_02
+talk NPC_CH_GENARAL denied @SN_TALK_QNO_TQ_GENERALORDER_4_03
+talk NPC_CH_GENARAL not-done @SN_TALK_QNO_TQ_GENERALORDER_4_04
+talk NPC_CH_GENARAL bag-full @SN_TALK_QNO_TQ_GENERALORDER_4_05
+talk NPC_CH_GENARAL done @SN_TALK_QNO_TQ_GENERALORDER_4_18
+talk NPC_CH_GENARAL done-now @SN_TALK_QNO_TQ_GENERALORDER_4_19
+talk NPC_CH_GENARAL middle @SN_TALK_QNO_TQ_GENERALORDER_4_21
+talk NPC_CH_GENARAL not-party @SN_TALK_QNO_TQ_GENERALORDER_4_26
+
 # --- Conversions by kill, and the viper chain's delivery ---------------------------------------------------------------
 
 # Each champion Wing Tribe its hidden kill goal counts changes one tool into a result (kind 10: the tool, the result); a

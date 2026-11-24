@@ -138,6 +138,15 @@ struct TrialHost : server::QuestHost {
         return true;
     }
     void QuestWorldLeave(std::uint32_t entity) override { layers[entity] = 0; }
+    struct Way {
+        proto::WorldPosition at;
+        std::optional<proto::WorldPosition> to;
+    };
+    std::vector<Way> ways;
+    std::uint32_t QuestWayOut(const proto::WorldPosition& at, const std::optional<proto::WorldPosition>& to) override {
+        ways.push_back({at, to});
+        return std::uint32_t(ways.size());
+    }
 
     bool Told(std::uint32_t entity, const std::string& key) const { return std::find(told.begin(), told.end(), std::pair{entity, key}) != told.end(); }
     std::size_t Count(const std::string& monster) const {
@@ -183,6 +192,8 @@ TEST_CASE("Quest trial: the trial line, a berserk kill and the new use parts rea
         "on use ITEM_T_HORN status 1 7 8 party @SN_T_PARTY site 27237 1057 218 634 1000 ITEM_T_SIGN MOB_T_KEEPER radius 20 100 life 300 away @SN_T_AWAY\n"
         "on use ITEM_T_BLOOD room need ITEM_T_A ITEM_T_B give ITEM_T_KEY\n"
         "on use ITEM_T_KEY status 1 7 8 place-first party at 25183 1882 -169 632 600 instance INS_QNO_T2 unique MOB_T_U\n"
+        "on talk NPC_T_GENERAL row @SN_T_ROW2 ask @SN_T_ASK start -32765 -116 -17 15035 instance INS_QNO_T3 general MOB_T_G1 says @SN_T_G1 "
+        "general MOB_T_G2 dies @SN_T_G2 next 10 near 90 100 first-near 190 200 way-out 25255 594 0 233\n"
         "goal kill 1 MOB_T_BOSS class champion berserk text @SN_T_GOAL\n"
         "talk NPC_T_GENERAL trial @SN_T_SAYS\n");
     REQUIRE(q.trial);
@@ -198,7 +209,7 @@ TEST_CASE("Quest trial: the trial line, a berserk kill and the new use parts rea
     CHECK(q.trial->berserk);
     CHECK(q.trial->out == 10);
     CHECK(q.goals[0].berserk);
-    REQUIRE(q.onUse.size() == 3);
+    REQUIRE(q.onUse.size() == 4);
     REQUIRE(q.onUse[0].sites.size() == 1);
     CHECK(q.onUse[0].sites[0].item == "ITEM_T_SIGN");
     CHECK(q.onUse[0].sites[0].spawn.monster == "MOB_T_KEEPER");
@@ -206,12 +217,31 @@ TEST_CASE("Quest trial: the trial line, a berserk kill and the new use parts rea
     CHECK(q.onUse[1].room);
     CHECK(q.onUse[1].need == std::vector<std::string>{"ITEM_T_A", "ITEM_T_B"});
     CHECK(q.onUse[2].placeFirst);
+    // The talk rule: its NPC, row, question and start; its instance's two distances and its way out.
+    const game::QuestDef::UseRule& door = q.onUse[3];
+    CHECK(door.item.empty());
+    CHECK(door.npc == "NPC_T_GENERAL");
+    CHECK(door.row.key == "SN_T_ROW2");
+    CHECK(door.ask.key == "SN_T_ASK");
+    REQUIRE(door.start);
+    CHECK(door.start->region == 0x8003);
+    REQUIRE(door.instance);
+    CHECK(door.instance->generals.size() == 2);
+    CHECK(door.instance->firstNear == 190.0f);
+    CHECK(door.instance->firstFar == 200.0f);
+    CHECK(door.instance->near == 90.0f);
+    CHECK(door.instance->far == 100.0f);
+    CHECK(door.instance->wayOut);
+    REQUIRE(door.instance->out);
+    CHECK(door.instance->out->region == 25255);
     game::QuestDef again;
     std::string error;
     REQUIRE_MESSAGE(game::ParseQuest(game::WriteQuest(q), again, error), error);
     CHECK(again == q);
-    // A trial without its boss or its NPC is no trial.
+    // A trial without its boss or its NPC is no trial; a talk rule without its instance, row or start is none either.
     CHECK_FALSE(game::ParseQuest("quest QNO_T\ntrial INS_QNO_T at NPC_T\n", again, error));
+    CHECK_FALSE(game::ParseQuest("quest QNO_T\non talk NPC_T row @SN_T_ROW start 1 2 3 4\n", again, error));
+    CHECK_FALSE(game::ParseQuest("quest QNO_T\non use ITEM_T row @SN_T_ROW instance INS_QNO_T\n", again, error));
 
     // The eight hwan tests (their teleports, their worlds' updates; _RefInstance_World_Start_Pos).
     const auto coded = Coded();
@@ -582,7 +612,7 @@ TEST_CASE("Quest item use: ORNAMENT_4's stone takes its party to the four snake 
     CHECK(host.Told(1, "SN_TALK_QNO_TQ_ORNAMENT_4_26"));
     CHECK(quests.Gauge(1, ornament) > 1700);
 
-    SUBCASE("each slain: its words, the next 10 s on; the fourth's death ends it") {
+    SUBCASE("each slain: its words, the next 10 s on; the fourth's death raises its way out, the time's end puts them out") {
         auto at = start + 40s;
         const char* generals[] = {"MOB_QT_TQ_SNAKEGENERAL1", "MOB_QT_TQ_SNAKEGENERAL2", "MOB_QT_TQ_SNAKEGENERAL3", "MOB_QT_TQ_SNAKEGENERAL4"};
         const char* dies[] = {"SN_TALK_QNO_TQ_ORNAMENT_4_07", "SN_TALK_QNO_TQ_ORNAMENT_4_10", "SN_TALK_QNO_TQ_ORNAMENT_4_13", "SN_TALK_QNO_TQ_ORNAMENT_4_16"};
@@ -602,7 +632,23 @@ TEST_CASE("Quest item use: ORNAMENT_4's stone takes its party to the four snake 
             at += 20s;
         }
         CHECK(host.told.end() == std::find(host.told.begin(), host.told.end(), std::pair<std::uint32_t, std::string>{1, "SN_TALK_QNO_TQ_ORNAMENT_4_08"}));
+        // Its way out where the fourth came, 20..100 added to its x and its z, back where they came in (its link empty);
+        // they stay meanwhile.
+        REQUIRE(host.ways.size() == 1);
+        CHECK_FALSE(host.ways[0].to.has_value());
+        const double dx = host.ways[0].at.x - host.raised.back().at.x, dz = host.ways[0].at.z - host.raised.back().at.z;
+        CHECK(dx >= 19.9);
+        CHECK(dx <= 100.1);
+        CHECK(dz >= 19.9);
+        CHECK(dz <= 100.1);
+        CHECK(host.ways[0].at.layer == host.layers[1]);
         quests.Tick(at + 1s);
+        CHECK(host.layers[1] != 0);
+        CHECK(quests.Worlds().size() == 1);
+        // The time's end (30 minutes from the first battle): everyone left out 10 s later.
+        quests.Tick(start + 38s + 30min + 1s);
+        CHECK(host.layers[1] != 0);
+        quests.Tick(start + 38s + 30min + 12s);
         CHECK(host.layers[1] == 0);
         CHECK(host.layers[2] == 0);
         CHECK(quests.Worlds().empty());
@@ -619,6 +665,97 @@ TEST_CASE("Quest item use: ORNAMENT_4's stone takes its party to the four snake 
         CHECK(host.layers[1] == 0);
         CHECK(quests.Worlds().empty());
     }
+}
+
+TEST_CASE("Quest talk rule: GENERALORDER_4's secret door takes the party holding the quest to the four guardians; the way out to Jangan (a made-up host)") {
+    const auto coded = Coded();
+    TrialHost host;
+    host.who.race = "china";
+    host.who.position = {25255, 590.0f, 0.0f, 290.0f, 0};
+    server::QuestHost::Player member = host.who;
+    member.peer = 2;
+    member.name = "Member";
+    host.others[2] = member;
+    host.others[3] = member; // a third without the quest
+    host.others[3].peer = 3;
+    server::Quests quests(host, {});
+    quests.Load(Numbered(coded));
+    const std::uint32_t order = quests.Find("QNO_TQ_GENERALORDER_4")->id;
+    quests.Enter(1, {Record(order, proto::QuestStatus::Achieving)});
+    quests.Enter(2, {Record(order, proto::QuestStatus::Achieving)});
+    quests.Enter(3, {});
+    const auto says = [&] { return host.Last<proto::QuestSays>(); };
+    // No party sharing both: the quest's not-party (_26).
+    host.who.sharedParty = false;
+    REQUIRE(Ask(quests, proto::QuestTalk{7, order}));
+    CHECK(says().moment == "not-party");
+    // A member: _30; the master with a transport out: _25.
+    host.who.sharedParty = true;
+    host.party = {1, 2, 3};
+    host.master = false;
+    REQUIRE(Ask(quests, proto::QuestTalk{7, order}));
+    CHECK(says().text == "SN_TALK_QNO_TQ_GENERALORDER_4_30");
+    host.master = true;
+    host.transport = true;
+    REQUIRE(Ask(quests, proto::QuestTalk{7, order}));
+    CHECK(says().text == "SN_TALK_QNO_TQ_GENERALORDER_4_25");
+    host.transport = false;
+    // The master: the question _27 with its rows (_28, then the deny).
+    REQUIRE(Ask(quests, proto::QuestTalk{7, order}));
+    const proto::QuestSays ask = says();
+    CHECK(ask.text == "SN_TALK_QNO_TQ_GENERALORDER_4_27");
+    CHECK(ask.choice == proto::QuestChoice::Rows);
+    REQUIRE(ask.rows.size() == 2);
+    CHECK(ask.rows[0] == "SN_TALK_QNO_TQ_GENERALORDER_4_28");
+    CHECK(ask.rows[1] == "SN_TALK_COMMON_DENY");
+    // Denied: nothing opens.
+    REQUIRE(Ask(quests, proto::QuestHandIn{7, order, {1}}));
+    CHECK(quests.Worlds().empty());
+    // The row: the master and the member holding the quest in, at the world's start (the tomb's 5th floor by its north
+    // guardian); the third (no quest) stays.
+    REQUIRE(Ask(quests, proto::QuestHandIn{7, order, {0}}));
+    REQUIRE(quests.Worlds().size() == 1);
+    CHECK(host.layers[1] != 0);
+    CHECK(host.layers[2] == host.layers[1]);
+    CHECK(host.layers[3] == 0);
+    REQUIRE(host.enteredAt.has_value());
+    CHECK(host.enteredAt->region == 0x8003);
+    CHECK(host.enteredAt->z == doctest::Approx(15035.0f));
+    // The first guardian 30 s on, within 190..200 of the master (the quest service's banded spawn: its radius drawn there,
+    // its distance banded in it); the next ones within 90..100.
+    const auto start = std::chrono::steady_clock::now();
+    host.who.position = {0x8003, -116.0f, -17.0f, 15035.0f, 0};
+    quests.Tick(start + 31s);
+    REQUIRE(host.Count("MOB_QT_TQ_NORTHGUARDIAN") == 1);
+    const double first = Flat(host.raised.back().at, host.who.position);
+    CHECK(first <= 200.1);
+    quests.Tick(start + 33s);
+    CHECK(host.Told(2, "SN_TALK_QNO_TQ_GENERALORDER_4_06"));
+    quests.Tick(start + 38s);
+    CHECK(host.Told(1, "SN_TALK_QNO_TQ_GENERALORDER_4_24"));
+    auto at = start + 40s;
+    const char* guardians[] = {"MOB_QT_TQ_NORTHGUARDIAN", "MOB_QT_TQ_SOUTHGUARDIAN", "MOB_QT_TQ_WESTGUARDIAN", "MOB_QT_TQ_EASTGUARDIAN"};
+    const char* dies[] = {"SN_TALK_QNO_TQ_GENERALORDER_4_07", "SN_TALK_QNO_TQ_GENERALORDER_4_10", "SN_TALK_QNO_TQ_GENERALORDER_4_13",
+                          "SN_TALK_QNO_TQ_GENERALORDER_4_16"};
+    for (int g = 0; g < 4; ++g) {
+        CAPTURE(g);
+        REQUIRE(host.Count(guardians[g]) == 1);
+        if (g > 0) CHECK(Flat(host.raised.back().at, host.who.position) <= 100.1);
+        host.raised.back().standing = false;
+        quests.Tick(at);
+        CHECK(host.Told(1, dies[g]));
+        if (g == 3) break;
+        quests.Tick(at + 10s);
+        quests.Tick(at + 12s);
+        quests.Tick(at + 17s);
+        at += 20s;
+    }
+    // The East's death: its way out to General Sonhyeon at Jangan.
+    REQUIRE(host.ways.size() == 1);
+    REQUIRE(host.ways[0].to.has_value());
+    CHECK(host.ways[0].to->region == 25255);
+    CHECK(host.ways[0].to->x == doctest::Approx(594.0f));
+    CHECK(host.ways[0].to->z == doctest::Approx(233.0f));
 }
 
 namespace {

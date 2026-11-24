@@ -320,7 +320,8 @@ const std::vector<OriginalUseRule> kRules = {
     // after the one before dies (MobKillTime); 2 s on its line (_06, _09, _12, _15), 5 s on its battle; from the first one's
     // battle _26, the gauge's 30 minutes and EVENT_TIMER 1200000 then 300000 twice: _24, _25, at 30 minutes the
     // general's last words (_08, _11, _14, _17) and everyone out 10 s later; a general's death
-    // its words (_07, _10, _13); the fourth's _16, everyone out.
+    // its words (_07, _10, _13); the fourth's _16 and a way out 20..100 from it (the runtime teleport, its link empty: back
+    // where its user came in), everyone left out at the time's end.
     {"QNO_TQ_ORNAMENT_4",
      "on use ITEM_QNO_TQ_ORNAMENT_4_04 status 1 7 8 need ITEM_QNO_TQ_ORNAMENT_4_01 ITEM_QNO_TQ_ORNAMENT_4_04 place-first party @SN_TALK_QNO_TQ_ORNAMENT_4_21 "
      "at -32763 184 72 157 2000 away @SN_TALK_QNO_TQ_ORNAMENT_4_23 instance INS_QNO_TQ_ORNAMENT_4 after 30 minutes 30 "
@@ -329,11 +330,12 @@ const std::vector<OriginalUseRule> kRules = {
      "general MOB_QT_TQ_SNAKEGENERAL1 says @SN_TALK_QNO_TQ_ORNAMENT_4_06 dies @SN_TALK_QNO_TQ_ORNAMENT_4_07 last @SN_TALK_QNO_TQ_ORNAMENT_4_08 "
      "general MOB_QT_TQ_SNAKEGENERAL2 says @SN_TALK_QNO_TQ_ORNAMENT_4_09 dies @SN_TALK_QNO_TQ_ORNAMENT_4_10 last @SN_TALK_QNO_TQ_ORNAMENT_4_11 "
      "general MOB_QT_TQ_SNAKEGENERAL3 says @SN_TALK_QNO_TQ_ORNAMENT_4_12 dies @SN_TALK_QNO_TQ_ORNAMENT_4_13 last @SN_TALK_QNO_TQ_ORNAMENT_4_14 "
-     "general MOB_QT_TQ_SNAKEGENERAL4 says @SN_TALK_QNO_TQ_ORNAMENT_4_15 dies @SN_TALK_QNO_TQ_ORNAMENT_4_16 last @SN_TALK_QNO_TQ_ORNAMENT_4_17 next 10"},
+     "general MOB_QT_TQ_SNAKEGENERAL4 says @SN_TALK_QNO_TQ_ORNAMENT_4_15 dies @SN_TALK_QNO_TQ_ORNAMENT_4_16 last @SN_TALK_QNO_TQ_ORNAMENT_4_17 next 10 "
+     "way-out"},
     // the same with the tablet (_01) and the head held, two places of the tomb's
     // floor 0x8007 within 600 ((-3, 11, 674), (2, 11, 1090); _25), the party (_23), its master (_24); the walker (_29).
     // Its tick MOB_QT_TQ_TOMBGENERAL1..4, lines _08, _11, _14, _17, deaths _09, _12, _15 and _18, the battle _28, _26,
-    // _27, the last words _10, _13, _16, _19.
+    // _27, the last words _10, _13, _16, _19; the fourth's death a way out as ORNAMENT_4's.
     {"QNO_TQ_STONEBOARD_4",
      "on use ITEM_QNO_TQ_STONEBOARD_4_03 status 1 7 8 need ITEM_QNO_TQ_STONEBOARD_4_01 ITEM_QNO_TQ_STONEBOARD_4_03 place-first "
      "party @SN_TALK_QNO_TQ_STONEBOARD_4_23 at -32761 -3 11 674 600 at -32761 2 11 1090 600 away @SN_TALK_QNO_TQ_STONEBOARD_4_25 "
@@ -342,7 +344,8 @@ const std::vector<OriginalUseRule> kRules = {
      "general MOB_QT_TQ_TOMBGENERAL1 says @SN_TALK_QNO_TQ_STONEBOARD_4_08 dies @SN_TALK_QNO_TQ_STONEBOARD_4_09 last @SN_TALK_QNO_TQ_STONEBOARD_4_10 "
      "general MOB_QT_TQ_TOMBGENERAL2 says @SN_TALK_QNO_TQ_STONEBOARD_4_11 dies @SN_TALK_QNO_TQ_STONEBOARD_4_12 last @SN_TALK_QNO_TQ_STONEBOARD_4_13 "
      "general MOB_QT_TQ_TOMBGENERAL3 says @SN_TALK_QNO_TQ_STONEBOARD_4_14 dies @SN_TALK_QNO_TQ_STONEBOARD_4_15 last @SN_TALK_QNO_TQ_STONEBOARD_4_16 "
-     "general MOB_QT_TQ_TOMBGENERAL4 says @SN_TALK_QNO_TQ_STONEBOARD_4_17 dies @SN_TALK_QNO_TQ_STONEBOARD_4_18 last @SN_TALK_QNO_TQ_STONEBOARD_4_19 next 10"},
+     "general MOB_QT_TQ_TOMBGENERAL4 says @SN_TALK_QNO_TQ_STONEBOARD_4_17 dies @SN_TALK_QNO_TQ_STONEBOARD_4_18 last @SN_TALK_QNO_TQ_STONEBOARD_4_19 next 10 "
+     "way-out"},
     // The same handler's Horn Trumpet (_01): states 1/7/8, the auto-share party (_26), then the three
     // sites in turn (their table on the stack,region, x, y, z, radius; the sign; its keeper): the first
     // the player stands at without its sign raises the keeper 20 + 80 x rand away, its five-minute timer (0x493E0, the
@@ -438,10 +441,11 @@ SpawnOffset QuestSpawnOffset(float near, float far, std::mt19937& random) {
 }
 
 std::uint32_t QuestWorldId(std::string_view codename) {
-    // _RefGame_World (the 1.188 database's rows 10..17).
+    // _RefGame_World (the 1.188 database's rows 10..39).
     constexpr std::pair<std::string_view, std::uint32_t> kWorlds[] = {
         {"INS_QNO_RM_OLDWOMAN_6", 10}, {"INS_QNO_EU_EASTEU_21", 11},    {"INS_QNO_EU_IVY_3", 12},
         {"INS_QNO_CA_GORIA_7", 13},    {"INS_QNO_TQ_STONEBOARD_4", 16}, {"INS_QNO_TQ_ORNAMENT_4", 17},
+        {"INS_QNO_TQ_GENERALORDER_4", 18},
         {"INS_QNO_CH_HWAN_1_5", 32},   {"INS_QNO_EU_HWAN_1_5", 33},     {"INS_QNO_CH_HWAN_2_5", 34},
         {"INS_QNO_EU_HWAN_2_5", 35},   {"INS_QNO_CH_HWAN_1_1", 36},     {"INS_QNO_CH_HWAN_2_1", 37},
         {"INS_QNO_EU_HWAN_1_1", 38},   {"INS_QNO_EU_HWAN_2_1", 39},

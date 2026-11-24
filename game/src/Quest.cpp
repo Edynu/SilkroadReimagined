@@ -78,7 +78,10 @@ public:
 // on use ITEM [status S...] [first-time] [one-at-a-time [TEXT]] [refuse TEXT] [cap-first] [at REGION X Y Z R]... [away TEXT]
 // [cap N ITEM [TEXT]] [full TEXT] [wait S] [chance N of M] [give ITEM] [failed TEXT] [got TEXT]
 std::string UseLine(const QuestDef::UseRule& u) {
-    std::string s = "on use " + u.item;
+    std::string s = u.npc.empty() ? "on use " + u.item : "on talk " + u.npc;
+    if (!u.row.Empty()) s += " row " + Text(u.row);
+    if (!u.ask.Empty()) s += " ask " + Text(u.ask);
+    if (u.start) s += std::format(" start {} {} {} {}", static_cast<std::int16_t>(u.start->region), Number(u.start->x), Number(u.start->y), Number(u.start->z));
     if (u.trap) s += " trap";
     if (!u.statuses.empty()) {
         s += " status";
@@ -165,6 +168,12 @@ std::string UseLine(const QuestDef::UseRule& u) {
             if (!g.last.Empty()) s += " last " + Text(g.last);
         }
         if (!w.generals.empty()) s += std::format(" next {}", w.next);
+        if (w.near != 20 || w.far != 100) s += std::format(" near {} {}", Number(w.near), Number(w.far));
+        if (w.firstNear != w.near || w.firstFar != w.far) s += std::format(" first-near {} {}", Number(w.firstNear), Number(w.firstFar));
+        if (w.wayOut) {
+            s += " way-out";
+            if (w.out) s += std::format(" {} {} {} {}", static_cast<std::int16_t>(w.out->region), Number(w.out->x), Number(w.out->y), Number(w.out->z));
+        }
     }
     return s;
 }
@@ -608,10 +617,16 @@ bool ParseStart(Reader& r, QuestDef& q) {
                               what));
 }
 
-// on use ITEM ... (UseLine's words, in any order).
-bool ParseUse(Reader& r, QuestDef& q) {
+// on use ITEM ... / on talk NPC ... (UseLine's words, in any order).
+bool ParseUse(Reader& r, QuestDef& q, bool talk) {
     QuestDef::UseRule u;
-    if (!r.Word(u.item, "the item used")) return false;
+    if (!r.Word(talk ? u.npc : u.item, talk ? "the NPC talked to" : "the item used")) return false;
+    const auto place = [&](QuestDef::UseRule::Place& p) {
+        int region = 0;
+        const bool ok = r.Integer(region, "the region") && r.Real(p.x, "x") && r.Real(p.y, "y") && r.Real(p.z, "z");
+        p.region = static_cast<std::uint16_t>(region);
+        return ok;
+    };
     while (!r.Done()) {
         std::string what;
         if (!r.Word(what, "a part of the use")) return false;
@@ -779,6 +794,38 @@ bool ParseUse(Reader& r, QuestDef& q) {
             u.room = true;
         } else if (what == "place-first") {
             u.placeFirst = true;
+        } else if (what == "row" || what == "ask" || what == "start") {
+            // A talk rule's (`on talk`): its row, its question, where its members go in.
+            if (!talk) {
+                ok = r.Fail(std::format("'{}' belongs to 'on talk'", what));
+            } else if (what == "start") {
+                u.start = QuestDef::UseRule::Place{};
+                ok = place(*u.start);
+            } else {
+                ok = r.Text(what == "row" ? u.row : u.ask, what == "row" ? "the row's words" : "the question");
+            }
+        } else if (u.instance && (what == "near" || what == "first-near")) {
+            float a = 0, b = 0;
+            ok = r.Real(a, "the nearest") && r.Real(b, "the farthest");
+            if (ok && (a < 0 || b < a)) ok = r.Fail(std::format("'{}' takes 0 <= A <= B", what));
+            if (ok && what == "near") {
+                // The next ones' and, unless `first-near` says otherwise, the first one's.
+                if (u.instance->firstNear == u.instance->near && u.instance->firstFar == u.instance->far) {
+                    u.instance->firstNear = a;
+                    u.instance->firstFar = b;
+                }
+                u.instance->near = a;
+                u.instance->far = b;
+            } else if (ok) {
+                u.instance->firstNear = a;
+                u.instance->firstFar = b;
+            }
+        } else if (u.instance && what == "way-out") {
+            u.instance->wayOut = true;
+            if (r.IsNumber()) {
+                u.instance->out = QuestDef::UseRule::Place{};
+                ok = place(*u.instance->out);
+            }
         } else if (what == "instance") {
             u.instance = QuestDef::UseRule::World{};
             ok = r.Word(u.instance->world, "the instance world");
@@ -830,11 +877,12 @@ bool ParseUse(Reader& r, QuestDef& q) {
         } else {
             ok = r.Fail(std::format("'{}' is no part of 'on use' (status, first-time, one-at-a-time, refuse, cap-first, at, away, cap, full, wait, "
                                     "chance, give, failed, got, met, party, target, within, none, far, wrong, take, or-give, limit, kept-in, spawn, "
-                                    "capture, capture-item, trap, stage, site, need, room, place-first, instance)",
+                                    "capture, capture-item, trap, stage, site, need, room, place-first, instance; on talk: row, ask, start)",
                                     what));
         }
         if (!ok) return false;
     }
+    if (talk && (!u.instance || u.row.Empty() || !u.start)) return r.Fail("'on talk' opens an 'instance' through its 'row', its members taken to 'start'");
     q.onUse.push_back(std::move(u));
     return true;
 }
@@ -1123,7 +1171,9 @@ bool ParseQuest(std::string_view text, QuestDef& out, std::string& error) {
             out.disabled = true;
             ok = r.End();
         } else if (head == "on" && r.Take("use")) {
-            ok = ParseUse(r, out);
+            ok = ParseUse(r, out, false);
+        } else if (head == "on" && r.Take("talk")) {
+            ok = ParseUse(r, out, true);
         } else if (head == "on" && r.Take("kill")) {
             // on kill MOB [need ITEM] [take ITEM] [clear ITEM...] [give ITEM] [cap N] [full TEXT]
             QuestDef::KillRule k;

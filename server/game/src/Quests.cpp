@@ -627,6 +627,8 @@ void Quests::Talk(std::uint32_t entity, const proto::QuestTalk& t) {
             BagChanged(entity);
             return Say(entity, t.npc, q->id, "resupply", proto::QuestChoice::None);
         }
+        // A talk rule's NPC (the secret door): its question with its row, or the checks' words.
+        if (const QuestDef::UseRule* door = TalkRule(*q, r, npc)) return AskTalkRule(entity, *who, *q, *door, t.npc);
         // A trial's NPC with its goals not met: its words and its row (_04 and the
         // row _05 "Enter the Test Arena"); ours the `trial` talk with the hand-in's answer, which sends the player in.
         if (q->trial && q->trial->npc == npc && r.status == proto::QuestStatus::Achieving) return Say(entity, t.npc, q->id, "trial", proto::QuestChoice::HandIn);
@@ -754,6 +756,12 @@ void Quests::HandIn(std::uint32_t entity, const proto::QuestHandIn& h) {
     const auto it = q != nullptr ? p->records.find(q->id) : p->records.end();
     if (it == p->records.end() || !UnderWay(it->second)) return Answer(entity, h.quest, proto::QuestCode::NotUnderWay);
     QuestRecord& r = it->second;
+    // A talk rule's rows (the question's row, then SN_TALK_COMMON_DENY): the first picked opens its instance.
+    if (const QuestDef::UseRule* door = TalkRule(*q, r, npc); door != nullptr && h.choices.size() == 1) {
+        if (h.choices[0] != 0) return Answer(entity, q->id, proto::QuestCode::Ok); // denied: the talk ends
+        Answer(entity, q->id, PickTalkRule(entity, *who, *q, *door, h.npc, Clock::now()) ? proto::QuestCode::Ok : proto::QuestCode::Busy);
+        return;
+    }
     bool changed = false;
     if (const auto due = DueAt(entity, *q, r, npc)) {
         const QuestGoal& g = q->goals[*due];
@@ -1997,7 +2005,7 @@ bool Quests::OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const
         return false;
     }
     const std::uint32_t layer = host_.QuestWorldOpen(entity, w.world);
-    if (layer == 0 || !host_.QuestWorldEnter(entity, layer)) return false;
+    if (layer == 0 || !(u.start ? host_.QuestWorldEnterAt(entity, layer, proto::WorldPosition{u.start->region, u.start->x, u.start->y, u.start->z, 0}) : host_.QuestWorldEnter(entity, layer))) return false;
     QuestWorld world;
     world.quest = q.id;
     world.layer = layer;
@@ -2006,7 +2014,8 @@ bool Quests::OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const
     world.next = now + std::chrono::seconds(w.after);
     world.inside.insert(entity);
     // The members this server holds (one elsewhere is not found):
-    // no transport out (else its words to it), finished the quest before or holding the item.
+    // no transport out (else its words to it), finished the quest before or holding the item (a talk rule's: holding the
+    // quest, taken to its start).
     for (const std::uint32_t member : party) {
         if (member == entity) continue;
         const PlayerQuests* m = Of(member);
@@ -2016,11 +2025,15 @@ bool Quests::OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const
             continue;
         }
         const auto rec = m->records.find(q.id);
-        const bool finished = rec != m->records.end() && rec->second.times > 0;
-        if (!finished && host_.QuestItemCount(member, u.item) == 0) continue;
+        if (!u.npc.empty()) {
+            if (rec == m->records.end() || !UnderWay(rec->second)) continue;
+        } else {
+            const bool finished = rec != m->records.end() && rec->second.times > 0;
+            if (!finished && host_.QuestItemCount(member, u.item) == 0) continue;
+        }
         const auto at = host_.QuestPlayer(member);
         if (!at || at->position.layer != 0) continue; // in the same world as its master
-        if (host_.QuestWorldEnter(member, layer)) world.inside.insert(member);
+        if (u.start ? host_.QuestWorldEnterAt(member, layer, proto::WorldPosition{u.start->region, u.start->x, u.start->y, u.start->z, 0}) : host_.QuestWorldEnter(member, layer)) world.inside.insert(member);
     }
     worlds_.push_back(std::move(world));
     return true;
@@ -2065,7 +2078,8 @@ void Quests::TickWorlds(Clock::time_point now) {
             const std::uint32_t by = w.inside.contains(w.master) ? w.master : *w.inside.begin();
             const auto who = host_.QuestPlayer(by);
             if (!who) break;
-            const game::SpawnOffset o = game::QuestSpawnOffset(20.0f, 100.0f, random_);
+            const bool first = spec.generals.empty() || w.general == 0;
+            const game::SpawnOffset o = game::QuestSpawnOffset(first ? spec.firstNear : spec.near, first ? spec.firstFar : spec.far, random_);
             proto::WorldPosition at = who->position;
             if ((at.region & 0x8000) != 0) {
                 at.x += o.dx;
@@ -2079,6 +2093,7 @@ void Quests::TickWorlds(Clock::time_point now) {
             const auto nest = host_.QuestSpawn(by, unique, at);
             if (!nest) break; // its ground not in yet: the next second
             w.unique = *nest;
+            w.uniqueAt = at;
             // The opening: 2 s on its first line, each next 5 s on, the battle begun 5 s after the last (IVY_3's tick
             // EVENT_TIMER 2000, 5000 between Ivy's _11, the player's _12, Ivy's _13, the
             // begin; EASTEU_21's _14 then _21 alike; a general's line,
@@ -2102,6 +2117,27 @@ void Quests::TickWorlds(Clock::time_point now) {
                     break;
                 }
                 all(chain ? spec.generals[w.general].dies : spec.slain);
+                if (spec.wayOut) {
+                    // Its way out where it came, 20..100 added to its x and to its z (the original's rand / 32767 x 80 + 20
+                    // each); the members leave by it, the time's end puts out the rest.
+                    std::uniform_real_distribution<float> step(20.0f, 100.0f);
+                    const float dx = step(random_), dz = step(random_);
+                    proto::WorldPosition at = w.uniqueAt;
+                    if ((at.region & 0x8000) != 0) {
+                        at.x += dx;
+                        at.z += dz;
+                    } else {
+                        const proto::FlatPosition c = proto::ToFlat(w.uniqueAt);
+                        at = proto::FromFlat({c.x + dx, c.z + dz}, w.uniqueAt.y);
+                        at.layer = w.uniqueAt.layer;
+                    }
+                    std::optional<proto::WorldPosition> to;
+                    if (spec.out) to = proto::WorldPosition{spec.out->region, spec.out->x, spec.out->y, spec.out->z};
+                    host_.QuestWayOut(at, to);
+                    w.phase = QuestWorld::Phase::Done;
+                    if (!w.ends) w.ends = now + std::chrono::minutes(spec.minutes);
+                    break;
+                }
                 w.phase = QuestWorld::Phase::Ending;
                 w.next = now;
                 break;
@@ -2138,6 +2174,13 @@ void Quests::TickWorlds(Clock::time_point now) {
             }
             break;
         }
+        case QuestWorld::Phase::Done:
+            // The way out stands; the time's end: everyone left out 10 s later.
+            if (w.ends && now >= *w.ends) {
+                w.phase = QuestWorld::Phase::Ending;
+                w.next = now + std::chrono::seconds(10);
+            }
+            break;
         case QuestWorld::Phase::Ending:
             if (now < w.next) break;
             for (const std::uint32_t m : w.inside) {
@@ -2149,6 +2192,55 @@ void Quests::TickWorlds(Clock::time_point now) {
         }
     }
     std::erase_if(worlds_, [](const QuestWorld& w) { return w.inside.empty(); });
+}
+
+// --- A talk rule (QuestDef::UseRule::npc; the original's GENERALORDER_4 secret door) ------------------
+
+const QuestDef::UseRule* Quests::TalkRule(const QuestDef& q, const QuestRecord& r, const std::string& npc) const {
+    if (!UnderWay(r)) return nullptr;
+    const std::uint8_t state = OriginalState(r, &q);
+    for (const QuestDef::UseRule& u : q.onUse) {
+        if (u.npc.empty() || u.npc != npc || !u.instance) continue;
+        const bool fits = u.statuses.empty() ? (state == 1 || state == 7) : std::find(u.statuses.begin(), u.statuses.end(), state) != u.statuses.end();
+        if (fits) return &u;
+    }
+    return nullptr;
+}
+
+// The party's master asked its question with its row (the original's talk: a member `master`, no party sharing both the
+// quest's `not-party`, a transport out `transport`).
+void Quests::AskTalkRule(std::uint32_t entity, const QuestHost::Player& who, const QuestDef& q, const QuestDef::UseRule& u, std::uint32_t npc) {
+    const QuestDef::UseRule::World& w = *u.instance;
+    const auto line = [&](const game::QuestText& t) {
+        proto::QuestSays s{npc, q.id, {}, 0, proto::QuestChoice::None};
+        s.text = t.key.empty() ? t.literal : t.key;
+        Send(entity, s);
+    };
+    if (host_.QuestPartyHere(entity).empty() || !who.sharedParty) return Say(entity, npc, q.id, "not-party", proto::QuestChoice::None);
+    if (!host_.QuestPartyMaster(entity)) return line(w.notMaster);
+    if (host_.QuestTransportOut(entity)) return line(w.transport);
+    proto::QuestSays s{npc, q.id, {}, 0, proto::QuestChoice::Rows};
+    s.text = u.ask.key.empty() ? u.ask.literal : u.ask.key;
+    s.rows = {u.row.key.empty() ? u.row.literal : u.row.key, "SN_TALK_COMMON_DENY"};
+    Send(entity, s);
+}
+
+// The row picked: the party and the master asked again (the original's row: the quest's `not-party`, its `middle`), then
+// the instance opened.
+bool Quests::PickTalkRule(std::uint32_t entity, const QuestHost::Player& who, const QuestDef& q, const QuestDef::UseRule& u, std::uint32_t npc,
+                          Clock::time_point now) {
+    if (host_.QuestPartyHere(entity).empty() || !who.sharedParty) {
+        Say(entity, npc, q.id, "not-party", proto::QuestChoice::None);
+        return false;
+    }
+    if (!host_.QuestPartyMaster(entity)) {
+        Say(entity, npc, q.id, "middle", proto::QuestChoice::None);
+        return false;
+    }
+    if (std::any_of(worlds_.begin(), worlds_.end(), [&](const QuestWorld& w) { return w.quest == q.id && w.inside.contains(entity); })) return false;
+    if (!OpenWorld(entity, who, q, u, now)) return false;
+    core::LogInfo("quests: {} opens {} for {}", who.name, u.instance->world, q.codename);
+    return true;
 }
 
 // --- A quest's trial (QuestDef::Trial; the hwan army tests) ---------------------------------

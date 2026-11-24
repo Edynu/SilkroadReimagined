@@ -280,11 +280,13 @@ public:
     void CloseWorld(std::uint32_t layer);
     std::vector<std::uint32_t> PlayersIn(std::uint32_t layer) const;
     std::uint32_t AddExit(std::uint32_t layer, std::uint32_t refObjId, const game::proto::WorldPosition& at, float yaw = 0.0f);
-    // A portal put in an instance (an object the client uses as a gap: INS_QUEST_TELEPORT): EnterGap on it within reach takes
-    // its user to `to` in the layer `toLayer` (this instance's, or another standing one's, which it joins keeping where it
-    // first came in from; refused when that one is full); its entity (0: none). Gone with its instance.
+    // A portal put in an instance (an object the client uses as a gap: INS_QUEST_TELEPORT, the original's runtime teleport),
+    // facing `yaw`: EnterGap on it within reach takes its user to `to` in the layer `toLayer` (this instance's, or another
+    // standing one's, which it joins keeping where it first came in from; refused when that one is full; 0: out of the
+    // instance, to `to` or with its region 0 back where it came in); its entity (0: none). It stands until its instance
+    // ends.
     std::uint32_t AddPortal(std::uint32_t layer, std::uint32_t refObjId, const game::proto::WorldPosition& at, std::uint32_t toLayer,
-                            const game::proto::WorldPosition& to);
+                            const game::proto::WorldPosition& to, float yaw = 0.0f);
     // An instance's end moved to `ends`, its warnings (GameWorldSpec::warnMs) told again from there on; false: none.
     bool EndAt(std::uint32_t layer, Clock::time_point ends);
     // A player in an instance taken on into another (Seth's temple from Haroeris's), keeping where it came from at first;

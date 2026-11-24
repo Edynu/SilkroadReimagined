@@ -712,6 +712,14 @@ struct Instances::State {
         const auto p = host.InstancePlayer(entity);
         const auto place = world.Where(entity), there = world.Where(portal.entity);
         if (!p || !place || !there || p->dead || Distance(place->position, there->position) > proto::kGapReach) return;
+        if (portal.toLayer == 0) {
+            // A way out: to its place, or back where the user came in.
+            core::LogInfo("instances: {} out of {} (layer {}) by its way out", p->name, in.spec->codename, in.layer);
+            if (portal.to.region == 0) return Exit(entity, false);
+            Exit(entity, true);
+            host.InstanceTeleport(entity, portal.to);
+            return;
+        }
         if (portal.toLayer == in.layer) {
             core::LogInfo("instances: {} through a portal of {} (layer {})", p->name, in.spec->codename, in.layer);
             host.InstanceTeleport(entity, InLayer(portal.to, in.layer));
@@ -1209,10 +1217,10 @@ std::uint32_t Instances::AddExit(std::uint32_t layer, std::uint32_t refObjId, co
 }
 
 std::uint32_t Instances::AddPortal(std::uint32_t layer, std::uint32_t refObjId, const proto::WorldPosition& at, std::uint32_t toLayer,
-                                   const proto::WorldPosition& to) {
+                                   const proto::WorldPosition& to, float yaw) {
     State::Instance* inst = s_->Of(layer);
     if (inst == nullptr) return 0;
-    const std::uint32_t entity = s_->world.AddNpc(refObjId, State::InLayer(at, layer), 0.0f);
+    const std::uint32_t entity = s_->world.AddNpc(refObjId, State::InLayer(at, layer), yaw);
     if (entity == 0) return 0;
     inst->npcs.push_back(entity);
     proto::WorldPosition there = to;

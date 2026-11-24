@@ -420,9 +420,28 @@ struct QuestDef {
             };
             std::vector<General> generals;
             std::uint32_t next = 10;
+            // Where each comes about the master (or the first one inside): the quest service's banded spawn, its radius drawn
+            // in `firstNear`..`firstFar` for the first, `near`..`far` for the next ones (20..100; GENERALORDER_4's first
+            // 190..200, the next 90..100: the original's rand / 32767 x 10 + 190, + 90).
+            float firstNear = 20, firstFar = 100, near = 20, far = 100;
+            // The last one slain raises a way out instead of everyone going out (the original's runtime teleport,
+            // INS_QUEST_TELEPORT, where it came with 20..100 added to its x and its z, facing a random way): to `out`, or
+            // with none back where its user came in (ORNAMENT_4's and STONEBOARD_4's empty link); the members leave by it,
+            // the time's end puts out the rest.
+            bool wayOut = false;
+            std::optional<Place> out;
             bool operator==(const World&) const = default;
         };
         std::optional<World> instance;
+        // A talk rule instead of an item's (`on talk NPC`, ours: the original's GENERALORDER_4 secret door, a talk row): the
+        // quest under way (its `statuses`; `item` empty) at `npc`, the party's master is asked `ask` with the rows `row` and
+        // SN_TALK_COMMON_DENY (no party sharing both: the quest's `not-party`; a member: `instance->notMaster`; a transport
+        // out: `instance->transport`); the row picked, the party and the master asked again (the quest's `not-party`,
+        // `middle`: the original's slots), then its `instance` opens as an item's would, its members those holding the quest
+        // in the shared world, taken to `start`.
+        std::string npc;
+        QuestText row, ask;
+        std::optional<Place> start;
         bool operator==(const UseRule&) const = default;
     };
     std::vector<UseRule> onUse;

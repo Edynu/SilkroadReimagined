@@ -15,8 +15,8 @@
 // - Floor 6: the Black Snake (east), the snake generals (south), a crowd of the tomb's monsters (west), the White Snake
 //   (north) from the start; a side cleared, its portal up to the summit stands, and the first raises the summit's portal
 //   down to the north. The summit's gates (STORE_TQ_6FGATE1..4) lead down by their own links.
-// A portal is a runtime teleport object (`INS_QUEST_TELEPORT`, used as a gap: Instances::AddPortal). The original's
-// spawners, places and numbers are in QinTomb.cpp.
+// A portal is the original's runtime teleport object (`INS_QUEST_TELEPORT`, used as a gap: Instances::AddPortal). The
+// original's spawners, places and numbers are in QinTomb.cpp.
 
 #include <chrono>
 #include <cstdint>
