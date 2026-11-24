@@ -1540,7 +1540,13 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         else if (-gap >= 7) scale = 1.0 - 0.15 * double(-gap - 3);
         else if (-gap >= 4) scale = 0.9;
         scale = std::clamp(scale, 0.1, 1.0);
-        const double bonus = gap > -3 ? 1.0 + 0.03 * double(std::min(13, gap + 3)) : 1.0;
+        double bonus = gap > -3 ? 1.0 + 0.03 * double(std::min(13, gap + 3)) : 1.0;
+        // In a party sharing experience, a monster 5, 7 or 9 levels above: 0.15, 0.3 or 0.45 more (twice that for a
+        // monster of Country 1); the bonus held within 1 and 4.
+        if (parties && (parties->SettingsOf(player.entity) & game::kPartyExpShare) != 0 && gap > 4) {
+            const double extra = gap >= 9 ? 0.45 : gap >= 7 ? 0.3 : 0.15;
+            bonus = std::clamp(bonus + extra * (row.country == 1 ? 2.0 : 1.0), 1.0, 4.0);
+        }
         const double base = double(row.experience) * kind * share * scale * bonus;
         int highestMastery = 0;
         for (const auto& [mastery, level] : player.book.masteries) highestMastery = std::max(highestMastery, int(level));
