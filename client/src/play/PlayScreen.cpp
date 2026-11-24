@@ -2158,6 +2158,13 @@ void PlayScreen::Gates(ScreenContext& context) {
         std::find_if(links.begin(), links.end(), [&](const assets::TeleportLink* l) { return gateTo_ == 0 || l->to == gateTo_; });
     pendingGate_ = 0;
     if (chosen == links.end()) {
+        // No link there: a destination the server may have opened for it at run time (the snake gate's), asked as it is.
+        if (gateTo_ != 0) {
+            core::LogInfo("game: through {} to point {} (no link of the game files)", gate->codename, gateTo_);
+            shared_->session->UseGate(gate->refObjId, gateTo_);
+            waitingForGate_ = true;
+            return;
+        }
         core::LogWarning("game: {} does not lead there", gate->codename);
         return;
     }
@@ -2917,7 +2924,7 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
         hudScreen_ = screen;
     }
     if (gateMenu_) {
-        if (auto* npc = dynamic_cast<NpcWindow*>(hud_.Show(hud::kNpc))) npc->ShowGate(gateMenu_->gate, gateMenu_->services);
+        if (auto* npc = dynamic_cast<NpcWindow*>(hud_.Show(hud::kNpc))) npc->ShowGate(gateMenu_->gate, gateMenu_->services, gateMenu_->opened);
         gateMenu_.reset();
     }
     if (goldBox_) {

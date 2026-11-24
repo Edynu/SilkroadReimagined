@@ -34,6 +34,7 @@
 #include "sr/server/Fortress.h"
 #include "sr/server/FlagWorld.h"
 #include "sr/server/Arena.h"
+#include "sr/server/QinTomb.h"
 #include "sr/server/Roc.h"
 #include "sr/server/Temples.h"
 #include "sr/server/Monsters.h"
@@ -152,6 +153,9 @@ struct GameServerConfig {
     // The Roc: its switch (the shard's event-roc, on), its schedule (`_Schedule` of SCHEDULE_DEF_MEET_ROC,
     // or --roc-cycle O,P), the Peak's times sped up for tries (--roc-time-scale).
     RocConfig roc;
+    // The Qin-Shi tomb's snake gate and upper floors: its switch (the shard's event-qin-tomb, on), its schedule (`_Schedule`
+    // of define 2, or --qin-cycle O,P), the copies' last hour sped up for tries (--qin-time-scale).
+    QinTombConfig qinTomb;
     // The job temples: their switch (the shard's event-temples, on), their schedule (`_Schedule` 9..11,
     // or --temple-cycle P).
     TempleConfig temples;

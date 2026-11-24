@@ -995,8 +995,9 @@ public:
     NpcWindow(const assets::UiLayoutNode& node, HudContext& context) : MainFrame(node), context_(context) {}
     void Created(ui::Interface& ui) override;
     bool OnNotice(const ui::Notice& notice) override;
-    // A gate's menu by the services the server offers (proto::kGate*).
-    void ShowGate(std::uint32_t gate, std::uint32_t services);
+    // A gate's menu by the services the server offers (proto::kGate*), and the destinations it opened at run time (the
+    // snake gate's floor 5: proto::GateMenu::opened).
+    void ShowGate(std::uint32_t gate, std::uint32_t services, std::vector<std::uint32_t> opened = {});
     // An NPC's: its name, its greeting (npcchat.txt by codename), what it offers (proto::kNpc*).
     void ShowNpc(std::uint32_t entity, const std::string& codename, const std::string& nameKey, std::uint32_t services);
     std::uint32_t gate() const { return gate_; }
@@ -1062,6 +1063,7 @@ private:
     ui::TextBox* box_ = nullptr;
     std::map<int, Choice> choices_; // by the box's paragraph
     std::uint32_t gate_ = 0;
+    std::vector<std::uint32_t> opened_; // the gate's destinations opened at run time
     std::uint32_t npc_ = 0; // the NPC talked to (its entity)
     std::string npcCodename_, npcNameKey_;
     std::uint32_t services_ = 0; // what it offers (proto::kNpc*)

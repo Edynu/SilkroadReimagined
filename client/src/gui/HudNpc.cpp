@@ -228,8 +228,9 @@ void NpcWindow::AddChoice(const std::string& text, Choice choice, bool red) {
     box_->AddParagraph(std::to_string(number) + ". " + text, red ? kChoiceRed : kChoice, ui::kTextShadow, kChoiceHover);
 }
 
-void NpcWindow::ShowGate(std::uint32_t gate, std::uint32_t services) {
+void NpcWindow::ShowGate(std::uint32_t gate, std::uint32_t services, std::vector<std::uint32_t> opened) {
     gate_ = gate;
+    opened_ = std::move(opened);
     const assets::TeleportGate* g = context_.teleports != nullptr ? context_.teleports->Gate(gate) : nullptr;
     Begin(g != nullptr ? context_.Text(g->nameKey) : std::string(), g != nullptr && context_.npcGreeting ? context_.npcGreeting(g->codename) : "");
     AddTaxLine();
@@ -244,6 +245,7 @@ void NpcWindow::ShowGate(std::uint32_t gate, std::uint32_t services) {
 void NpcWindow::ShowNpc(std::uint32_t entity, const std::string& codename, const std::string& nameKey, std::uint32_t services) {
     npc_ = entity;
     gate_ = 0;
+    opened_.clear();
     npcCodename_ = codename;
     npcNameKey_ = nameKey;
     Begin(context_.Text(nameKey), context_.npcGreeting ? context_.npcGreeting(codename) : "");
@@ -638,6 +640,11 @@ void NpcWindow::ShowDestinations() {
         const std::string text = link->fee > 0 ? FormatText(context_.Text("UIIT_CTL_TELEPORT_RESULT"), {place, GoldText(context_.TaxedBuy(link->fee))})
                                                : FormatText(context_.Text("UIIT_CTL_TELEPORT_FREE_RESULT"), {place});
         AddChoice(text, {Choice::Kind::Destination, link->to});
+    }
+    // Then those the server opened for the gate at run time, free (the snake gate's into the tomb's 5th floor).
+    for (const std::uint32_t id : g != nullptr ? opened_ : std::vector<std::uint32_t>{}) {
+        const assets::TeleportPoint* to = context_.teleports->Point(id);
+        if (to != nullptr) AddChoice(FormatText(context_.Text("UIIT_CTL_TELEPORT_FREE_RESULT"), {context_.Text(to->nameKey)}), {Choice::Kind::Destination, id});
     }
     AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
 }

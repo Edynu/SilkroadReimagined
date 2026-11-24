@@ -131,6 +131,11 @@ struct Instances::State {
         std::vector<std::uint32_t> npcs; // entities
         std::vector<std::uint32_t> exits;
         std::vector<std::uint32_t> pillars; // the party recall pillars
+        struct Portal {
+            std::uint32_t entity = 0, toLayer = 0;
+            proto::WorldPosition to;
+        };
+        std::vector<Portal> portals; // Instances::AddPortal's
         std::vector<bool> fired;
         std::vector<Delayed> delayed;
         std::size_t warned = 0; // its end's warnings told (GameWorldSpec::warnMs)
@@ -665,11 +670,14 @@ struct Instances::State {
     static constexpr float kNpcReach = 300.0f; // an NPC's reach in the original's range check: the recall pillar, the exit
     void EnterGap(std::uint32_t entity, std::uint32_t gap) {
         Instance* inst = ByGap(gap);
-        // A gap's model put in an instance as its exit (the Roc's INS_QUEST_TELEPORT): the way out.
+        // A gap's model put in an instance as its exit (the Roc's INS_QUEST_TELEPORT): the way out; as a portal: its way on.
         if (inst == nullptr) {
             if (const auto me = players.find(entity); me != players.end() && me->second.layer != 0) {
-                if (Instance* in = Of(me->second.layer); in != nullptr && std::find(in->exits.begin(), in->exits.end(), gap) != in->exits.end()) {
-                    return LeaveBy(entity, gap);
+                if (Instance* in = Of(me->second.layer); in != nullptr) {
+                    if (std::find(in->exits.begin(), in->exits.end(), gap) != in->exits.end()) return LeaveBy(entity, gap);
+                    for (const Instance::Portal& portal : in->portals) {
+                        if (portal.entity == gap) return UsePortal(entity, me->second, *in, Instance::Portal(portal));
+                    }
                 }
             }
         }
@@ -696,6 +704,27 @@ struct Instances::State {
         if (Limited(me->second, inst->key)) return Refuse(entity, "UIIT_MGS_ERR_GOD_LIMIT_TIME", "the re-entry limit");
         core::LogInfo("instances: {} enters {} (layer {})", p->name, inst->spec->codename, inst->layer);
         Admit(entity, me->second, *inst, place->position);
+    }
+
+    // A portal within reach, its user alive: on in its own layer, or into the other instance (joined as a transfer: it keeps
+    // where it first came in from).
+    void UsePortal(std::uint32_t entity, Player& me, Instance& in, const Instance::Portal portal) {
+        const auto p = host.InstancePlayer(entity);
+        const auto place = world.Where(entity), there = world.Where(portal.entity);
+        if (!p || !place || !there || p->dead || Distance(place->position, there->position) > proto::kGapReach) return;
+        if (portal.toLayer == in.layer) {
+            core::LogInfo("instances: {} through a portal of {} (layer {})", p->name, in.spec->codename, in.layer);
+            host.InstanceTeleport(entity, InLayer(portal.to, in.layer));
+            return;
+        }
+        Instance* to = Of(portal.toLayer);
+        if (to == nullptr) return;
+        if (to->inside.size() >= to->spec->maxUsers && !p->gm) return Refuse(entity, "UIIT_MSG_INTERACTION_FAIL_OUT_OF_REQUIRED_NUMBER_FOR_TELEPORT", "full");
+        in.inside.erase(entity);
+        if (in.inside.empty()) in.emptySince = Clock::now();
+        core::LogInfo("instances: {} through a portal from {} into {} (layer {})", p->name, in.spec->codename, to->spec->codename, to->layer);
+        const proto::WorldPosition back = me.back;
+        Admit(entity, me, *to, back, &portal.to);
     }
 
     // --- The party recall pillar ----------------------------------------------------------------
@@ -1179,6 +1208,27 @@ std::uint32_t Instances::AddExit(std::uint32_t layer, std::uint32_t refObjId, co
     return entity;
 }
 
+std::uint32_t Instances::AddPortal(std::uint32_t layer, std::uint32_t refObjId, const proto::WorldPosition& at, std::uint32_t toLayer,
+                                   const proto::WorldPosition& to) {
+    State::Instance* inst = s_->Of(layer);
+    if (inst == nullptr) return 0;
+    const std::uint32_t entity = s_->world.AddNpc(refObjId, State::InLayer(at, layer), 0.0f);
+    if (entity == 0) return 0;
+    inst->npcs.push_back(entity);
+    proto::WorldPosition there = to;
+    there.layer = 0;
+    inst->portals.push_back({entity, toLayer, there});
+    return entity;
+}
+
+bool Instances::EndAt(std::uint32_t layer, Clock::time_point ends) {
+    State::Instance* inst = s_->Of(layer);
+    if (inst == nullptr) return false;
+    inst->ends = ends;
+    inst->warned = 0;
+    return true;
+}
+
 bool Instances::Transfer(std::uint32_t entity, std::uint32_t layer, const proto::WorldPosition& at) {
     State& s = *s_;
     const auto it = s.players.find(entity);
@@ -1257,7 +1307,7 @@ std::optional<proto::WorldPosition> Instances::StartOf(std::uint32_t entity) con
     const auto it = s_->players.find(entity);
     if (it == s_->players.end() || it->second.layer == 0) return std::nullopt;
     const auto inst = s_->instances.find(it->second.layer);
-    if (inst == s_->instances.end()) return std::nullopt;
+    if (inst == s_->instances.end() || inst->second.spec->start.region == 0) return std::nullopt;
     return State::InLayer(inst->second.spec->start, inst->first);
 }
 

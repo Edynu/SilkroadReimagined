@@ -81,7 +81,7 @@ sr_copy_postgresql_runtime(SroWeb)
 add_library(sr_gameserver STATIC game/src/GameServer.cpp game/src/Guilds.cpp game/src/World.cpp game/src/Monsters.cpp game/src/Skills.cpp game/src/Drops.cpp game/src/ReferenceData.cpp game/src/DatabaseText.cpp
     game/src/Parties.cpp game/src/Fortress.cpp game/src/Community.cpp game/src/Academies.cpp game/src/OpenMarket.cpp game/src/Exchanges.cpp game/src/Coses.cpp game/src/Alchemy.cpp game/src/Stalls.cpp game/src/Quests.cpp game/src/Leagues.cpp game/src/Mall.cpp game/src/MagicPop.cpp game/src/Trades.cpp game/src/Bandits.cpp
     game/src/Instances.cpp game/src/InstanceData.cpp game/src/FlagWorld.cpp game/src/Arena.cpp game/src/SummonEvents.cpp
-    game/src/Roc.cpp game/src/Temples.cpp)
+    game/src/Roc.cpp game/src/QinTomb.cpp game/src/Temples.cpp)
 add_library(sr::gameserver ALIAS sr_gameserver)
 target_include_directories(sr_gameserver PUBLIC game/include)
 target_link_libraries(sr_gameserver PUBLIC sr::server sr::game sr::assets PRIVATE sr_compile_options)

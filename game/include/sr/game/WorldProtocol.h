@@ -495,11 +495,15 @@ struct GateMenu {
     std::uint32_t gate = 0;
     std::uint32_t services = 0;
     NpcTax tax;
+    // The destinations (teleport points) the server opened for it at run time, free, after its links' (the Qin-Shi tomb's
+    // snake gate into floor 5 while its gate is open: the original sets the structure's link when the schedule opens it).
+    std::vector<std::uint32_t> opened;
     template <typename V>
     void Visit(V& v) {
         v("gate", gate);
         v("services", services);
         v("tax", tax);
+        v("opened", opened);
     }
 };
 

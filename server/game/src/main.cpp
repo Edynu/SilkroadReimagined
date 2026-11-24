@@ -52,6 +52,9 @@
 //   tries (random mode: R s of registration, P s of play); --dev-commands also takes ArenaDev (/ARENA OPEN [MODE]|START|END|CANCEL)
 // The Roc: --event-roc (on: SCHEDULE_DEF_MEET_ROC), --roc-cycle O,P ours for tries (the gate open O s every
 //   P s), --roc-time-scale N (the Peak's times N times faster); --dev-commands also takes /ROC OPEN|SHUT|END|BREAK
+// The Qin-Shi tomb's snake gate: --event-qin-tomb (on: `_Schedule` define 2, daily 10:59 and 13:59 for 10 minutes),
+//   --qin-cycle O,P ours for tries (the gate open O s every P s), --qin-time-scale N (the copies' last hour N times
+//   shorter); --dev-commands also takes /QIN OPEN|SHUT|END
 // The job temples: --event-temples (on: `_Schedule` 9..11), --temple-cycle P ours for tries (each pair's
 //   period P s, the opening a quarter in); --dev-commands also takes /TEMPLE OPEN|CLOSE 9|10|11, /TEMPLE REP ANUBIS|HAROERIS TRADER|THIEF N
 //   --seed-teams "Guild:Name,Name;Guild:Name,Name" [--seed-level N] [--seed-gold N] [--seed-sp N] [--password P] [--seed-kit archer] [--seed-woman]
@@ -1077,6 +1080,18 @@ int main(int argc, char** argv) {
         }
     }
     if (const std::string scale = c.GetString("roc-time-scale", ""); !scale.empty()) config.roc.timeScale = std::max(0.01, std::atof(scale.c_str()));
+    // The Qin-Shi tomb's snake gate: event-qin-tomb (on) runs `_Schedule` define 2 (daily 10:59:12 and 13:59:12, 10 minutes);
+    // --qin-cycle O,P for tries (ours: the gate open O s every P s), --qin-time-scale N (the copies' last hour N times shorter).
+    config.qinTomb.enabled = c.GetBool("event-qin-tomb", true);
+    if (const std::string cycle = c.GetString("qin-cycle", ""); !cycle.empty()) {
+        int o = 0, p = 0;
+        if (std::sscanf(cycle.c_str(), "%d,%d", &o, &p) == 2 && o > 0 && p > o) {
+            config.qinTomb.enabled = true;
+            config.qinTomb.cycleOpen = o;
+            config.qinTomb.cyclePeriod = p;
+        }
+    }
+    if (const std::string scale = c.GetString("qin-time-scale", ""); !scale.empty()) config.qinTomb.timeScale = std::max(0.01, std::atof(scale.c_str()));
     // The job temples: event-temples (on) runs `_Schedule` 9..11; --temple-cycle P for tries (ours: every
     // pair's period P seconds, the opening a quarter in).
     config.temples.enabled = c.GetBool("event-temples", true);

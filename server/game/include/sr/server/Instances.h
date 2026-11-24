@@ -232,7 +232,8 @@ public:
 
     // Where a player in an instance comes back to (its saved place, an exit's end); none: not in one.
     std::optional<game::proto::WorldPosition> ReturnPlace(std::uint32_t entity) const;
-    // The instance's start (a resurrection there); none: not in one.
+    // The instance's start (a resurrection there); none: not in one, or its world has no start of its own (the
+    // quests' worlds, the Qin-Shi tomb's floors: a resurrection in town, out of it).
     std::optional<game::proto::WorldPosition> StartOf(std::uint32_t entity) const;
     bool ThemeComplete(std::uint32_t entity, std::string_view theme) const;
     std::uint32_t WorldOf(std::uint32_t entity) const; // 0: not in an instance
@@ -279,6 +280,13 @@ public:
     void CloseWorld(std::uint32_t layer);
     std::vector<std::uint32_t> PlayersIn(std::uint32_t layer) const;
     std::uint32_t AddExit(std::uint32_t layer, std::uint32_t refObjId, const game::proto::WorldPosition& at, float yaw = 0.0f);
+    // A portal put in an instance (an object the client uses as a gap: INS_QUEST_TELEPORT): EnterGap on it within reach takes
+    // its user to `to` in the layer `toLayer` (this instance's, or another standing one's, which it joins keeping where it
+    // first came in from; refused when that one is full); its entity (0: none). Gone with its instance.
+    std::uint32_t AddPortal(std::uint32_t layer, std::uint32_t refObjId, const game::proto::WorldPosition& at, std::uint32_t toLayer,
+                            const game::proto::WorldPosition& to);
+    // An instance's end moved to `ends`, its warnings (GameWorldSpec::warnMs) told again from there on; false: none.
+    bool EndAt(std::uint32_t layer, Clock::time_point ends);
     // A player in an instance taken on into another (Seth's temple from Haroeris's), keeping where it came from at first;
     // false when it is in none, or the other is gone.
     bool Transfer(std::uint32_t entity, std::uint32_t layer, const game::proto::WorldPosition& at);

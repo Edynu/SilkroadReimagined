@@ -195,7 +195,8 @@ WorldPlayer StartPlace(game::CreationRules::Race race) {
 } // namespace
 
 struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, CommunityHost, AcademyHost, ExchangeHost, StallHost, QuestHost, InstanceHost, AlchemyHost, CosHost, BanditHost,
-                           LeagueHost, TradeHost, MallHost, PopHost, FlagWorldHost, ArenaHost, SummonHost, OpenMarketHost, RocHost, TempleHost {
+                           LeagueHost, TradeHost, MallHost, PopHost, FlagWorldHost, ArenaHost, SummonHost, OpenMarketHost, RocHost, TempleHost,
+                           QinTombHost {
     GameServerConfig config;
     std::unique_ptr<net::NetService> net;
     std::unique_ptr<net::Listener> listener;
@@ -5343,7 +5344,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void RocBusMessage(const std::string& payload) {
         if (payload.size() >= 3 && payload[0] == 'C' && payload[1] == '	') return RocDev(payload.substr(2));
         if (payload.size() < 3 || payload[0] != 'N' || payload[1] != '	') return;
-        proto::InstanceNotice n{payload.substr(2)};
+        NoticeToPlayers(payload.substr(2));
+    }
+    // A text key's notice to every player of this server: a chat line and the warning banner.
+    void NoticeToPlayers(const std::string& key) {
+        proto::InstanceNotice n{key};
         n.system = true;
         n.warning = true;
         const std::vector<std::byte> bytes = proto::Encode(n);
@@ -5351,6 +5356,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (p.entity == 0) continue;
             if (Peer* peer = peers->Find(peerId)) peer->connection->Send(proto::InstanceNotice::kId, bytes);
         }
+    }
+    // --- The Qin-Shi tomb's snake gate and upper floors (QinTomb.h): run by the server holding the 4th floor; its
+    // shard-wide notices (the original's 0x300C 0x0C10 / 0x0C11) and a developer's switches on sr_qin_<shard>.
+    std::unique_ptr<QinTomb> qinTomb;
+    std::string qinChannel;
+    void QinShardNotice(const std::string& key) override {
+        database.Submit([channel = qinChannel, key](Database& db) { Notify(db, channel, "N	" + key); });
+    }
+    std::optional<proto::WorldPosition> QinPoint(std::uint32_t point) override { return RocPoint(point); }
+    void QinDev(const std::string& what) {
+        if (!qinTomb) return;
+        if (what == "OPEN") qinTomb->Open(Clock::now());
+        else if (what == "SHUT") qinTomb->Shut(Clock::now());
+        else if (what == "END") qinTomb->End();
+    }
+    void QinBusMessage(const std::string& payload) {
+        if (payload.size() >= 3 && payload[0] == 'C' && payload[1] == '	') return QinDev(payload.substr(2));
+        if (payload.size() >= 3 && payload[0] == 'N' && payload[1] == '	') NoticeToPlayers(payload.substr(2));
     }
     // --- The Battle Arena (Arena.h) -------------------------------------------------------
     std::unique_ptr<Arenas> arenas;
@@ -9523,6 +9546,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (const auto status = AtGate(player, talk.gate, point); status != proto::GateStatus::Ok) return RefuseGate(peer, talk.gate, "talk", status);
         proto::GateMenu menu{talk.gate, 0};
         if (!config.teleports->LinksFrom(point->id).empty()) menu.services |= proto::kGateTeleport;
+        // The snake gate (no link of its own): into floor 5's copy while the tomb's gate is open (QinTomb.h).
+        if (point->id == QinTomb::kSnakeGate && qinTomb && qinTomb->GateOpen()) {
+            menu.services |= proto::kGateTeleport;
+            menu.opened.push_back(QinTomb::kFloor5Gate);
+        }
         if (point->recall) menu.services |= proto::kGateRecallPoint;
         menu.tax = NpcTaxFor(point->ownerRefObjId, player);
         SendMessage(*peer.connection, menu);
@@ -9565,6 +9593,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                     }
                 }
             }
+        }
+        // Through the snake gate into floor 5's copy (the link the tomb's opening gives it): no transport out (as the tomb's
+        // other links), then the copy's admission.
+        if (from->id == QinTomb::kSnakeGate && use.destination == QinTomb::kFloor5Gate) {
+            if (!qinTomb || !qinTomb->GateOpen()) return refuse(proto::GateStatus::NoSuchLink);
+            if (TransportOut(player)) return refuse(proto::GateStatus::Transport);
+            if (const proto::GateStatus status = qinTomb->Admit(player.entity); status != proto::GateStatus::Ok) return refuse(status);
+            core::LogInfo("{}: {} goes through the snake gate into the tomb's 5th floor", config.name, player.name);
+            return;
         }
         const auto links = config.teleports->LinksFrom(from->id);
         const auto link = std::find_if(links.begin(), links.end(), [&](const assets::TeleportLink* l) { return l->to == use.destination; });
@@ -10852,7 +10889,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (command == "/help" || command == "/?") {
             return "commands: /notice TEXT, /kick NAME, /online, /where NAME, /give CODENAME [COUNT] [NAME], /quest done CODENAME [NAME], /academy rank, "
                    "/siege STARTREQ|ENDREQ|STARTWAR|ENDWAR|STARTTAX|ENDTAX, /flagworld OPEN|START|END|CANCEL, /arena OPEN [MODE]|START|END|CANCEL, "
-                   "/roc OPEN|SHUT|END|BREAK, /temple OPEN|CLOSE 9|10|11, /temple REP ANUBIS|HAROERIS TRADER|THIEF N";
+                   "/roc OPEN|SHUT|END|BREAK, /qin OPEN|SHUT|END, /temple OPEN|CLOSE 9|10|11, /temple REP ANUBIS|HAROERIS TRADER|THIEF N";
         }
         if (command == "/temple") {
             // The job temples' developer switches (ours): OPEN|CLOSE 9|10|11, REP ANUBIS|HAROERIS TRADER|THIEF N.
@@ -10884,6 +10921,19 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 database.Submit([channel = rocChannel, what](Database& db) { Notify(db, channel, "C	" + what); });
             }
             return "roc " + what;
+        }
+        if (command == "/qin") {
+            // The Qin-Shi tomb's developer switches (ours): the server holding the 4th floor acts (from another, over the bus).
+            std::string what = rest;
+            for (char& c : what) c = char(std::toupper(static_cast<unsigned char>(c)));
+            if (what != "OPEN" && what != "SHUT" && what != "END") return "/qin OPEN|SHUT|END";
+            core::LogInfo("{}: {} switches the Qin-Shi tomb's gate: {}", config.name, by, what);
+            if (qinTomb) {
+                QinDev(what);
+            } else {
+                database.Submit([channel = qinChannel, what](Database& db) { Notify(db, channel, "C	" + what); });
+            }
+            return "qin " + what;
         }
         if (command == "/arena") {
             // The Battle Arena's developer switches (ours; ArenaDev): every game server of the shard follows. MODE 0 random,
@@ -13082,6 +13132,21 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
             state->roc = std::make_unique<Roc>(*state, *state->instances, *state->monsters, *config.characters, config.skills.get(), std::move(rocConfig),
                                                std::random_device{}());
         }
+        // The Qin-Shi tomb's snake gate (QinTomb.h): on the server holding the 4th floor, its schedule define 2.
+        if (state->instances && state->monsters && config.characters && config.qinTomb.enabled && state->OwnerOf(QinTomb::kFloor4) == config.id) {
+            QinTombConfig qinConfig = config.qinTomb;
+            if (qinConfig.schedule.empty() && qinConfig.cycleOpen == 0 && !LoadSchedules(*db, {2}, qinConfig.schedule, error)) {
+                core::LogWarning("{}: the Qin-Shi tomb's schedule: {}", config.name, error);
+                error.clear();
+            }
+            if (state->OwnerOf(QinTomb::kFloor5) != config.id || state->OwnerOf(QinTomb::kFloor6) != config.id) {
+                core::LogWarning("{}: the Qin-Shi tomb's upper floors are another server's area: their copies are this one's", config.name);
+            }
+            core::LogInfo("{}: the Qin-Shi tomb: the snake gate is here ({} schedule rows{})", config.name, qinConfig.schedule.size(),
+                          qinConfig.cycleOpen > 0 ? std::format(", ours: the gate {} s every {} s", qinConfig.cycleOpen, qinConfig.cyclePeriod) : std::string());
+            state->qinTomb = std::make_unique<QinTomb>(*state, *state->instances, *state->monsters, *config.characters, std::move(qinConfig),
+                                                       std::random_device{}());
+        }
         // The reverse return scroll's map points.
         {
             std::vector<OptionalTeleportRow> points;
@@ -13183,6 +13248,7 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
             state->adminChannel = "sr_admin_" + config.shardSchema;
             state->uniqueChannel = "sr_uniques_" + config.shardSchema;
             state->rocChannel = "sr_roc_" + config.shardSchema;
+            state->qinChannel = "sr_qin_" + config.shardSchema;
             state->templeChannel = "sr_temples_" + config.shardSchema;
             if (state->stalls) state->stallChannel = "sr_stalls_" + config.shardSchema;
             if (state->flagWorlds) {
@@ -13199,7 +13265,8 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
                 (!state->openMarketChannel.empty() && !state->busListener->Listen(state->openMarketChannel)) ||
                 (!state->instanceChannel.empty() && !state->busListener->Listen(state->instanceChannel)) ||
                 !state->busListener->Listen(state->adminChannel) || !state->busListener->Listen(state->uniqueChannel) ||
-                !state->busListener->Listen(state->rocChannel) || !state->busListener->Listen(state->templeChannel)) {
+                !state->busListener->Listen(state->rocChannel) || !state->busListener->Listen(state->templeChannel) ||
+                !state->busListener->Listen(state->qinChannel)) {
                 error = "database: the shard's bus: LISTEN refused";
                 return false;
             }
@@ -13297,6 +13364,7 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
             if (n.channel == s.adminChannel) s.AdminNotice(n.payload);
             if (n.channel == s.uniqueChannel) s.UniqueBusMessage(n.payload);
             if (n.channel == s.rocChannel) s.RocBusMessage(n.payload);
+            if (n.channel == s.qinChannel) s.QinBusMessage(n.payload);
             if (n.channel == s.templeChannel) s.TempleBusMessage(n.payload);
             if (n.channel == s.fortressChannel && s.fortresses) s.fortresses->BusMessage(n.payload);
             if (n.channel == s.silkChannel && s.mall) s.mall->BusMessage(n.payload);
@@ -13330,6 +13398,7 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
         if (s.flagWorlds) s.flagWorlds->Tick(Clock::now());
         if (s.arenas) s.arenas->Tick(Clock::now());
         if (s.roc) s.roc->Tick(Clock::now());
+        if (s.qinTomb) s.qinTomb->Tick(Clock::now());
         if (s.temples) s.temples->Tick(Clock::now());
         s.TempleTick(Clock::now());
         if (s.fortresses) {
