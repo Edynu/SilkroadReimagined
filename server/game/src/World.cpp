@@ -1398,6 +1398,11 @@ std::optional<World::Place> World::Where(std::uint32_t entity) const {
     return Place{it->second.position, it->second.yaw};
 }
 
+std::uint32_t World::ModelOf(std::uint32_t entity) const {
+    const auto it = s_->entities.find(entity);
+    return it != s_->entities.end() ? it->second.summary.model : 0u;
+}
+
 bool World::Moving(std::uint32_t entity) const {
     const auto it = s_->entities.find(entity);
     return it != s_->entities.end() && it->second.moving;

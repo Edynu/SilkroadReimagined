@@ -196,6 +196,8 @@ public:
     };
     // Where it is now (none: not in the world, or not placed yet).
     std::optional<Place> Where(std::uint32_t entity) const;
+    // Its characterdata model (0: not in the world).
+    std::uint32_t ModelOf(std::uint32_t entity) const;
     bool Moving(std::uint32_t entity) const;
     // Where a walking entity's leg ends (none when it stands): a chaser's aim.
     std::optional<game::proto::WorldPosition> Heading(std::uint32_t entity) const;

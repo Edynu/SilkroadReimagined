@@ -158,6 +158,47 @@ TEST_CASE("Fortress war: the original's rules (applying, cancelling, who may hit
     CHECK(std::string(game::FortressErrorKey(0x283A)).empty());
 }
 
+TEST_CASE("Fortress war: the entry through a fortress gate (the original's war entry: the job suit, the guilds, the places, the five minutes)") {
+    game::FortressEntryFacts f;
+    // A job suit at any time; outside the war anyone else.
+    f.jobSuit = true;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryJobSuit);
+    f.jobSuit = false;
+    CHECK(game::EntryRefusal(f) == FortressError::None);
+    // In the war: a guild of the war only.
+    f.warOn = true;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryNotParticipant);
+    f.guild = 7;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryNotParticipant);
+    f.participant = true;
+    CHECK(game::EntryRefusal(f) == FortressError::None);
+    // MaxAdmission 300: nobody holding it, the attackers have all of it; once held, half; the holder's side half.
+    f.maxAdmission = 300;
+    f.attackersInside = 299;
+    CHECK(game::EntryRefusal(f) == FortressError::None);
+    f.attackersInside = 300;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryFull);
+    f.held = true;
+    f.attackersInside = 149;
+    CHECK(game::EntryRefusal(f) == FortressError::None);
+    f.attackersInside = 150;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryFull);
+    f.holderSide = true;
+    f.defendersInside = 149;
+    CHECK(game::EntryRefusal(f) == FortressError::None);
+    f.defendersInside = 150;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryFull);
+    // The capture's five minutes: the attackers wait, the holder's side does not.
+    f.defendersInside = 0;
+    f.closed = true;
+    CHECK(game::EntryRefusal(f) == FortressError::None);
+    f.holderSide = false;
+    f.attackersInside = 0;
+    CHECK(game::EntryRefusal(f) == FortressError::EntryClosed);
+    CHECK(std::string(game::FortressErrorKey(std::uint16_t(FortressError::EntryClosed))) == "UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE");
+    CHECK(std::string(game::FortressErrorKey(std::uint16_t(FortressError::EntryFull))) == "UIIT_MSG_FORT_PORTALSTONE_FAIL_04");
+}
+
 TEST_CASE("Fortress war: a weapon's kind and what it does to a structure") {
     // Followed through the binary's own arithmetic (some kinds multiply the same factor twice).
     CHECK(game::StructureWeaponOf(2).factor == doctest::Approx(0.30));
@@ -636,6 +677,8 @@ TEST_CASE("Fortress war over the wire: apply at the official, the war, the tower
     CHECK(info.rows[0].fee == 1'000'000);
     CHECK(info.applied == 1);
     CHECK(info.requestsOpen);
+    // The applications' rows (written with the fee by the payment, which the fortresses' writes do not wait for).
+    for (int i = 0; i < 500 && t.Db().Query("SELECT guildid FROM _siegefortressrequest WHERE fortressid = 1").Rows() != 2; ++i) rig.pump();
     rig.Settle();
     CHECK(t.Db().Query("SELECT guildid FROM _siegefortressrequest WHERE fortressid = 1 ORDER BY guildid").Rows() == 2);
     CHECK(t.Db().Query("SELECT remaingold FROM _char WHERE charid = $1", {a.character}).Int(0, 0) == 1'000'000);
@@ -655,6 +698,13 @@ TEST_CASE("Fortress war over the wire: apply at the official, the war, the tower
     CHECK(forts->MayEnter(a.character, r));
     CHECK_FALSE(forts->MayEnter(d.character, r));
     CHECK(forts->MayEnter(d.character, assets::RegionId(169, 98)));
+    // Through a fortress gate: the war's guilds (0x1C1C for the others), never in a job suit (0x1C1A); its inner gates
+    // only for the holder's side (nobody holds it yet: 0x1C1D).
+    CHECK(forts->EntryRefusal(a.character, r, true, false) == FortressError::None);
+    CHECK(forts->EntryRefusal(d.character, r, true, false) == FortressError::EntryNotParticipant);
+    CHECK(forts->EntryRefusal(a.character, r, true, true) == FortressError::EntryJobSuit);
+    CHECK(forts->EntryRefusal(a.character, r, false, false) == FortressError::EntryNotMember);
+    CHECK(forts->EntryRefusal(d.character, assets::RegionId(169, 98), true, false) == FortressError::None);
     // Over the wire the game server's hostility takes the war's word (a developer's strike goes through
     // Hostile()): the Keepers' master is hit, the Raiders' own member is not.
     a.c->Send(proto::DevStrike{e.entity, 1});
@@ -682,6 +732,11 @@ TEST_CASE("Fortress war over the wire: apply at the official, the war, the tower
     CHECK(held.guild == "Raiders");
     CHECK(held.fortress == 1);
     CHECK(forts->Holder(1) == 101);
+    // For five minutes only the new holder's side comes in (an attacker 0x1C1E); its inner gates are the Raiders' now.
+    CHECK(forts->EntryRefusal(a.character, r, true, false) == FortressError::None);
+    CHECK(forts->EntryRefusal(b.character, r, true, false) == FortressError::EntryClosed);
+    CHECK(forts->EntryRefusal(a.character, r, false, false) == FortressError::None);
+    CHECK(forts->EntryRefusal(b.character, r, false, false) == FortressError::EntryNotMember);
     rig.Settle();
     CHECK(t.Db().Query("SELECT tempguildid FROM _siegefortress WHERE fortressid = 1").Int(0, 0) == 101);
     // Its structures are theirs now, standing again: the Raiders may not hit them, the Keepers may.
@@ -1146,6 +1201,7 @@ TEST_CASE("Fortress manager: hiring, the war's schedule, the introduction, the G
     constexpr std::uint32_t kBlessSkill = 32088; // SKILL_FORT_BUFF_PHYSICAL_DMG_UP_01 (Jangan's BlessID 1)
     Rig rig(t, characters, skills);
     rig.config.fortress.blesses.push_back({1, 1, kBlessSkill, 700'000, 1'800});
+    rig.config.fortress.blesses.push_back({2, 1, kBlessSkill + 1, 700'000, 1'800}); // SKILL_FORT_BUFF_MAGIC_DMG_UP_01
     {
         Player helper = rig.Join("Helper");
         (void)helper;
@@ -1187,11 +1243,11 @@ TEST_CASE("Fortress manager: hiring, the war's schedule, the introduction, the G
     rig.Settle();
     CHECK(t.Db().Query("SELECT npchired FROM _siegefortress WHERE fortressid = 1").Int(0, 0) == 2);
     CHECK(t.Db().Query("SELECT remaingold FROM _char WHERE charname16 = 'Keeper'").Int(0, 0) == 3'000'000 - 30'000);
-    // The war's schedule: the Raiders applied, the Keepers not.
+    // The war's schedule: a guild applied to attack this fortress (the Raiders), as the holder sees it too.
     manage(b, proto::FortressAction::Schedule);
     CHECK(Next<proto::FortressSchedule>(b).applied);
     manage(a, proto::FortressAction::Schedule);
-    CHECK_FALSE(Next<proto::FortressSchedule>(a).applied);
+    CHECK(Next<proto::FortressSchedule>(a).applied);
     // The introduction: 121 letters refused (0x283F), the member may not write (0x2807), the master writes it; it is in the
     // list, and read back by a member; the Raiders may not read it (0x2806).
     CHECK(answer(a, proto::FortressAction::Introduce, 0, std::string(121, 'x')).error == std::uint16_t(FortressError::IntroLength));
@@ -1203,14 +1259,17 @@ TEST_CASE("Fortress manager: hiring, the war's schedule, the introduction, the G
     manage(h, proto::FortressAction::Introduction);
     CHECK(Next<proto::FortressIntroduction>(h).text == "Keepers keep Jangan");
     CHECK(answer(b, proto::FortressAction::Introduction).error == std::uint16_t(FortressError::NotHolder));
-    // The blessing: the Raiders refused (0x283D); its buff on the master, its GP written; again at once 0x284A.
-    CHECK(answer(b, proto::FortressAction::Bless, 1).error == std::uint16_t(FortressError::NotUnion));
+    // The blessing: its buff on the master, its GP written; again at once 0x284A; another of the fortress's blessings
+    // while one is on him 0x300C. The Raiders, of no union like the Keepers, pass the union test (the original compares
+    // the two union ids with no test for none) and take theirs with their own guild's GP.
     CHECK(answer(a, proto::FortressAction::Bless, 9).error == std::uint16_t(FortressError::NoBless));
     CHECK(answer(a, proto::FortressAction::Bless, 1).ok);
     proto::BuffAdded buff;
     do REQUIRE(a.c->Expect(buff));
     while (buff.skill != kBlessSkill);
-    CHECK(answer(a, proto::FortressAction::Bless, 1).error == std::uint16_t(FortressError::BlessWait));
+    CHECK(answer(a, proto::FortressAction::Bless, 2).error == std::uint16_t(FortressError::BlessOverlap));
+    CHECK(answer(a, proto::FortressAction::Bless, 1).error == std::uint16_t(FortressError::BlessOverlap));
+    CHECK(answer(b, proto::FortressAction::Bless, 2).ok);
     // The GP history: the hire's and the blessing's rows (reasons 2 and 0).
     rig.Settle();
     for (int i = 0; i < 50; ++i) rig.pump();
@@ -1264,8 +1323,11 @@ TEST_CASE("Fortress smith: three repair kits made at 0.85 with a Production admi
         return Answer(p, action);
     };
     const std::int64_t points = t.Db().Query("SELECT gatheredsp FROM _guild WHERE id = 201").Int(0, 0);
-    // The Raiders may not (0x2806); 21 refused (0x2816); 3 begun: 29,750 gold and 543 GP (x 0.85).
+    // The Raiders may not (0x2806), but they are told the work (the query needs only the fortress); 21 refused (0x2816);
+    // 3 begun: 29,750 gold and 543 GP (x 0.85).
     CHECK(forge(b, proto::FortressAction::ForgeStart, kKit, 3).error == std::uint16_t(FortressError::NotHolder));
+    b.c->Send(proto::FortressManage{b.smith, proto::FortressAction::ForgeQuery, 1});
+    CHECK_FALSE(Next<proto::FortressForge>(b).has);
     CHECK(forge(a, proto::FortressAction::ForgeStart, kKit, 21).error == std::uint16_t(FortressError::ForgeCount));
     CHECK(forge(a, proto::FortressAction::ForgeCollect).error == std::uint16_t(FortressError::ForgeNone));
     const auto begun = forge(a, proto::FortressAction::ForgeStart, kKit, 3);
@@ -1276,15 +1338,19 @@ TEST_CASE("Fortress smith: three repair kits made at 0.85 with a Production admi
     CHECK_FALSE(work.done);
     // A second work at the smith (0x280A); not done yet (0x281A).
     CHECK(forge(a, proto::FortressAction::ForgeStart, kKit, 1).error == std::uint16_t(FortressError::ForgeBusy));
-    CHECK(forge(a, proto::FortressAction::ForgeCollect).error == std::uint16_t(FortressError::ForgeNotDone));
+    CHECK(forge(a, proto::FortressAction::ForgeCollect, kKit, 3).error == std::uint16_t(FortressError::ForgeNotDone));
+    // Cancel and collect: the holder's (0x2806), the work's own item named (3).
+    CHECK(forge(b, proto::FortressAction::ForgeCancel, kKit).error == std::uint16_t(FortressError::NotHolder));
+    CHECK(forge(a, proto::FortressAction::ForgeCancel, kKit + 1).error == std::uint16_t(FortressError::NoFortress));
     rig.Settle();
     CHECK(t.Db().Query("SELECT remaingold FROM _char WHERE charname16 = 'Keeper'").Int(0, 0) == 3'000'000 - 29'750);
     CHECK(t.Db().Query("SELECT amount FROM _siegefortressitemforge WHERE fortressid = 1 AND itemrefid = $1", {std::int64_t(kKit)}).Int(0, 0) == 3);
     // Its time (612 s of the game's at 0.85): the guild told it is done, then collected: 4 too many (0x281B), 3 into the bag.
     proto::FortressNotice done = Notice(a, proto::FortressNoticeKind::ForgeDone, 20s);
     CHECK(done.value == kKit);
-    CHECK(forge(a, proto::FortressAction::ForgeCollect, 0, 4).error == std::uint16_t(FortressError::ForgeTooMany));
-    CHECK(forge(a, proto::FortressAction::ForgeCollect, 0, 3).ok);
+    CHECK(forge(a, proto::FortressAction::ForgeCollect, kKit, 4).error == std::uint16_t(FortressError::ForgeTooMany));
+    CHECK(forge(a, proto::FortressAction::ForgeCollect, kKit, 0).error == std::uint16_t(FortressError::ForgeTooMany));
+    CHECK(forge(a, proto::FortressAction::ForgeCollect, kKit, 3).ok);
     rig.Settle();
     for (int i = 0; i < 50; ++i) rig.pump();
     CHECK(t.Db().Query("SELECT coalesce(sum(i.data), 0) FROM _inventory v JOIN _items i ON i.id64 = v.itemid WHERE v.charid = $1 AND i.refitemid = $2",
@@ -1336,7 +1402,7 @@ TEST_CASE("Fortress war: siege quests' SP experience and items, the war's reward
     do REQUIRE(b.c->Expect(sp, 30s));
     while (sp.skillExperience != 15 * kMobExp);
     // A player's kill: the quest's item and 10 x 777; his rank 1.
-    forts->PlayerKilled(b.character, a.character);
+    forts->PlayerKilled(b.character, a.character, kStart.region);
     do REQUIRE(b.c->Expect(sp));
     while (sp.skillExperience != 10 * kMobExp);
     proto::FortressScore score = Next<proto::FortressScore>(b);
@@ -1359,7 +1425,8 @@ TEST_CASE("Fortress war: siege quests' SP experience and items, the war's reward
     forts = const_cast<server::Fortresses*>(rig.game->GetFortresses());
     a.c->Send(proto::FortressDev{proto::FortressDevAction::StartWar});
     Notice(a, proto::FortressNoticeKind::WarBegin);
-    forts->PlayerKilled(b.character, a.character);
+    forts->PlayerKilled(b.character, a.character, assets::RegionId(169, 98)); // out of the fortress's area: no record's kill
+    forts->PlayerKilled(b.character, a.character, kStart.region);
     do score = Next<proto::FortressScore>(b);
     while (score.kills == 0);
     CHECK(score.kills == 2);
@@ -1406,6 +1473,8 @@ TEST_CASE("Fortress manager: the Cave of Discipline: made by the holder twice a 
     rig.config.files = &fs;
     rig.config.fortress.dungeons.push_back({1, 61, 2, 600'000, 3'000});
     rig.config.fortress.dungeonSeconds = 10;
+    // The Cave's teleporter, its own NPC inside; the leave is taken at it.
+    constexpr std::uint32_t kCaveTeleporter = 36031; // NPC_SIEGE_DUNGEON_TELEPORT
     auto [a, b] = TwoGuilds(rig, t, {}, {});
     const auto act = [&](Player& p, proto::FortressAction action) {
         p.c->Send(proto::FortressManage{p.manager, action, 1});
@@ -1433,7 +1502,15 @@ TEST_CASE("Fortress manager: the Cave of Discipline: made by the holder twice a 
     // Entering made the place he entered from his recall point; the leave (0x20) takes him there, and his latest
     // instance entry being this layer, he enters again free.
     CHECK(t.Db().Query("SELECT telregion FROM _char WHERE charname16 = 'Keeper'").Int(0, 0) != 0);
-    CHECK(act(a, proto::FortressAction::DungeonLeave).ok);
+    proto::EntityAppeared seen;
+    do REQUIRE(a.c->Expect(seen, 20s));
+    while (seen.character.model != kCaveTeleporter);
+    const std::uint32_t teleporter = seen.entity;
+    // Not at the teleporter (the manager, far outside): 3.
+    CHECK(act(a, proto::FortressAction::DungeonLeave).error == std::uint16_t(FortressError::NoFortress));
+    a.c->Send(proto::FortressManage{teleporter, proto::FortressAction::DungeonLeave, 1});
+    const proto::FortressAnswer left = Answer(a, proto::FortressAction::DungeonLeave);
+    CHECK_MESSAGE(left.ok, "code " << left.error);
     proto::WorldEntered outside;
     REQUIRE(a.c->Expect(outside, 20s));
     rig.Settle();

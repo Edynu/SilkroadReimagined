@@ -157,6 +157,14 @@ enum class FortressError : std::uint16_t {
     ReturnUniform = 0x7C06,  // UIIT_MSG_FORT_PORTALSTONE_FAIL_02
     ReturnNotHolder = 0x7C07, // UIIT_MSG_FORT_PORTALSTONE_FAIL_03
     ReturnWaiting = 0x7C08,  // UIIT_MSG_FORT_PORTALSTONE_FAIL_01
+    ReturnArena = 0x7C09,    // in a Battle Arena world (the 1.188 client's line not traced; ours: FAIL_01's)
+    // A teleport into a fortress's world (the original's teleport errors): through a fortress gate (TID 4/1/1/1) the
+    // war's entry, through any other gate there the holder's side only.
+    EntryJobSuit = 0x1C1A,   // UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_01: a job suit on
+    EntryFull = 0x1C1B,      // UIIT_MSG_FORT_PORTALSTONE_FAIL_04: the side's places inside taken
+    EntryNotParticipant = 0x1C1C, // UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02: no guild, or one out of the war
+    EntryNotMember = 0x1C1D, // UIIT_MSG_FORT_NOT_POSSESS_FORTRESS_MEMBER: an inner gate, not the holder's side
+    EntryClosed = 0x1C1E,    // UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE: an attacker in the capture's five minutes
     // Ours, for a structure the player may not hit (the original answers with skill refusals; the
     // 1.188 client's texts):
     StructureOutOfWar = 0x2F01,  // UIIT_MSG_FORT_BATTLE_ERR_CAN_ONLYPERIODFORT
@@ -167,6 +175,23 @@ enum class FortressError : std::uint16_t {
     NotParticipant = 0x2F06,     // UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02 (ours: only the war's guilds hit its structures)
     GateOpen = 0x2F07,           // an open gate is not hit (the original's skill refusal 0x3042; the client's line not traced: none)
 };
+
+// What a fortress gate's entry into a fortress's world looks at (the original's war entry): a job suit
+// refused at any time; in the war only its guilds (the holder's, the owner's, the applied); the holder's side
+// (its guild and union) within half the fortress's MaxAdmission inside; an attacker not in the five minutes after
+// a capture, within all of it while nobody holds the fortress, half once one does.
+struct FortressEntryFacts {
+    bool jobSuit = false;
+    bool warOn = false;
+    std::uint32_t guild = 0;
+    bool participant = false;
+    bool holderSide = false; // the holder's guild, or a guild of its union
+    bool held = false;       // a guild holds the fortress
+    bool closed = false;     // the capture's five minutes (kCaptureEntrySeconds)
+    int maxAdmission = 0;    // `_RefSiegeFortress.MaxAdmission` (ours: 0 no cap, the tests')
+    std::size_t defendersInside = 0, attackersInside = 0;
+};
+FortressError EntryRefusal(const FortressEntryFacts& f);
 
 // What an application's checks look at, in the original's order.
 struct FortressApplyFacts {
@@ -233,8 +258,8 @@ bool PlayersHostileInWar(bool warOn, WarSide a, WarSide b);
 // first of the highest (0: none).
 std::uint32_t TopDamager(const std::vector<std::pair<std::uint32_t, std::uint64_t>>& damage);
 
-// The war's times: a temporary holder's guild may enter five minutes after the capture
-// (300 s; UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE); the
+// The war's times: for five minutes after a capture only the new holder's side may enter the fortress, its attackers
+// after them (300 s; UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE); the
 // losers are taken out of the fortress 180 s after the war; the heart opens 180 s after the last guard tower fell (the
 // client's "in a minute" is wrong); the war begins 30 minutes into its `_Schedule` period (the shard manager's: the
 // period's start + 1,800 s; its end warnings at its end - 1800, 1200, 600 and 60 s).

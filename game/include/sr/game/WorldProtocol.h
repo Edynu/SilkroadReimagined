@@ -422,6 +422,12 @@ enum class GateStatus : std::uint8_t {
     ShrineNoRight = 23, // _ERROR_02: "Has no right to move on." (the reputation's alliance, a shut temple)
     ShrineJobSuit = 24, // _ERROR_03: no job suit on
     ShrineRatio = 25,   // _ERROR_04: the alliances' share
+    // Into a fortress's world (0x1C1A..0x1C1E; game::FortressError::Entry*):
+    FortressJobSuit = 26,        // UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_01
+    FortressFull = 27,           // UIIT_MSG_FORT_PORTALSTONE_FAIL_04
+    FortressNotParticipant = 28, // UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02
+    FortressNotMember = 29,      // UIIT_MSG_FORT_NOT_POSSESS_FORTRESS_MEMBER
+    FortressClosed = 30,         // UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE
 };
 
 // The world goes on on another game server of the shard: connect there and show

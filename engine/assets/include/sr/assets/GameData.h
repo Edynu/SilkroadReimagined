@@ -261,6 +261,8 @@ struct TeleportGate {
     float x = 0, y = 0, z = 0;     // cols 43..45, in that region
     float height = 0, radius = 0;  // cols 49, 50: the box a click picks
     std::string model;             // col 52: its model (a gate spawned as an object, the Forgotten World's gap)
+    std::array<std::uint8_t, 4> typeId{}; // cols 9..12: TypeID1..4 (4/1/1/1 a fortress's gate, 4/1/1/2 its revival gate)
+    bool FortressGate() const { return typeId == std::array<std::uint8_t, 4>{4, 1, 1, 1}; }
 };
 struct TeleportPoint {
     std::uint32_t id = 0;

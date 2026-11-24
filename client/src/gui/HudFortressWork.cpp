@@ -34,6 +34,7 @@
 #include "sr/assets/UiLayout2dt.h"
 #include "sr/game/Fortress.h"
 #include "sr/game/Guild.h"
+#include "sr/game/Items.h"
 
 namespace sr::client {
 
@@ -438,11 +439,14 @@ public:
             });
         }
     }
-    // Complete: the work collected into the bag, all of it (inferred: no box asks a count).
+    // Complete: the work collected into the bag, a stack at a time (inferred: no box asks a count; the server takes no more
+    // than the item's MaxStack into one empty place, 0x281B).
     void Collect() {
         if (!work_.has || !work_.done || !Permitted() || !c_.fortressRequest) return;
         const proto::FortressAction collect = side_ == 0 ? proto::FortressAction::ForgeCollect : proto::FortressAction::TrainCollect;
-        c_.fortressRequest(proto::FortressManage::kId, proto::Encode(proto::FortressManage{npc_, collect, fortress_, work_.item, work_.count}));
+        const assets::ItemRow* row = c_.items != nullptr ? c_.items->Find(work_.item) : nullptr;
+        const std::uint32_t stack = row != nullptr ? std::uint32_t(std::max(1, game::MaxStack(*row))) : std::uint32_t(work_.count);
+        c_.fortressRequest(proto::FortressManage::kId, proto::Encode(proto::FortressManage{npc_, collect, fortress_, work_.item, std::min<std::uint32_t>(work_.count, stack)}));
     }
     bool AnswerBox(bool yes, int count) {
         if (ui_ == nullptr) return false;

@@ -24,6 +24,21 @@ FortressError ApplyRefusal(const FortressApplyFacts& f) {
     return FortressError::None;
 }
 
+FortressError EntryRefusal(const FortressEntryFacts& f) {
+    // The original's checks, in their order.
+    if (f.jobSuit) return FortressError::EntryJobSuit;
+    if (!f.warOn) return FortressError::None;
+    if (f.guild == 0 || !f.participant) return FortressError::EntryNotParticipant;
+    if (f.holderSide) {
+        if (f.maxAdmission > 0 && f.defendersInside >= std::size_t(f.maxAdmission / 2)) return FortressError::EntryFull;
+        return FortressError::None;
+    }
+    if (f.closed) return FortressError::EntryClosed;
+    const int most = f.held ? f.maxAdmission / 2 : f.maxAdmission;
+    if (f.maxAdmission > 0 && f.attackersInside >= std::size_t(most)) return FortressError::EntryFull;
+    return FortressError::None;
+}
+
 FortressError CancelRefusal(const FortressCancelFacts& f) {
     // The original's checks, in their order.
     if (!f.requestsOpen) return FortressError::NotApplyPeriod;
@@ -341,7 +356,13 @@ const char* FortressErrorKey(std::uint16_t code) {
     case FortressError::UpgradeNotWhole: return "UIIT_MSG_FORT_BATTLEAIDE_UPGRADE_FAIL4";
     case FortressError::ReturnUniform: return "UIIT_MSG_FORT_PORTALSTONE_FAIL_02";
     case FortressError::ReturnNotHolder: return "UIIT_MSG_FORT_PORTALSTONE_FAIL_03";
-    case FortressError::ReturnWaiting: return "UIIT_MSG_FORT_PORTALSTONE_FAIL_01";
+    case FortressError::ReturnWaiting:
+    case FortressError::ReturnArena: return "UIIT_MSG_FORT_PORTALSTONE_FAIL_01";
+    case FortressError::EntryJobSuit: return "UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_01";
+    case FortressError::EntryFull: return "UIIT_MSG_FORT_PORTALSTONE_FAIL_04";
+    case FortressError::EntryNotParticipant: return "UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02";
+    case FortressError::EntryNotMember: return "UIIT_MSG_FORT_NOT_POSSESS_FORTRESS_MEMBER";
+    case FortressError::EntryClosed: return "UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE";
     case FortressError::OnlyMaster: return "UIIT_MSG_FORT_ETC_ERROR_ONLYGUILDMASTER_ACTION";
     // The fortress manager's tax (1.188's table, group 0x1E).
     case FortressError::NotHolder: return "UIIT_MSG_FORT_POSITION_GRANT_FAIL_05";

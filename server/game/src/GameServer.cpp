@@ -6389,7 +6389,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (arenas) arenas->Died(player.entity, killer != nullptr ? killer->entity : 0u); // the gate's revival in 10 s, the points
         core::LogInfo("{}: {} dies ({} experience lost){}", config.name, player.name, player.deathLoss, killer != nullptr ? ", killed by " + killer->name : "");
         if (killer != nullptr && guilds) guilds->PlayerKilled(killer->selected, player.selected, strikerLevel > 0 ? strikerLevel : killer->level, player.level);
-        if (killer != nullptr && fortresses) fortresses->PlayerKilled(killer->selected, player.selected);
+        if (killer != nullptr && fortresses) {
+            if (const auto at = world->Where(player.entity)) fortresses->PlayerKilled(killer->selected, player.selected, at->position.region);
+        }
         // The temple quests' kill-player goals: the victim's level, region and job.
         if (killer != nullptr && quests) {
             const auto at = world->Where(player.entity);
@@ -7780,7 +7782,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // --- The fortress war (FortressHost) --------------------------------
 
     FortressActor FortressActorOf(std::uint64_t peerId, const PlayerWorld& player) const {
-        return {peerId, player.entity, player.selected, player.level, player.name, player.inventory.gold};
+        return {peerId, player.entity, player.selected, player.level, player.name, player.inventory.gold, player.dead};
     }
     static std::optional<FortressGuild> AsFortressGuild(const std::optional<Guilds::Facts>& f) {
         if (!f) return std::nullopt;
@@ -7801,7 +7803,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
     std::string FortressNpc(std::uint32_t entity) const override {
         const auto it = npcs.find(entity);
-        return it != npcs.end() ? it->second->codename : std::string();
+        if (it != npcs.end()) return it->second->codename;
+        // An instance's own NPC (the Cave's teleporter: TID 1/2/2).
+        const std::uint32_t ref = world->ModelOf(entity);
+        const assets::ObjectRow* row = ref != 0 && config.characters ? config.characters->Find(ref) : nullptr;
+        return row != nullptr && row->typeId[0] == 1 && row->typeId[1] == 2 && row->typeId[2] == 2 ? row->codename : std::string();
     }
     double FortressDistance(std::uint32_t a, std::uint32_t b) const override { return GuildDistance(a, b); }
     bool FortressTakeGold(std::uint64_t peerId, std::uint64_t amount) override { return TakeGold(peerId, amount); }
@@ -7930,6 +7936,23 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         core::LogInfo("fortress war: {} goes to {}", it->second.name, teleportCode);
         TravelTo(peerId, it->second, {to->region, to->x, to->y, to->z});
         return true;
+    }
+    std::size_t FortressCountIn(const std::vector<std::uint16_t>& regions, const std::function<bool(std::int64_t)>& counts) const override {
+        std::size_t n = 0;
+        for (const auto& [peerId, player] : players) {
+            if (player.entity == 0) continue;
+            const auto place = world->Where(player.entity);
+            if (place && std::find(regions.begin(), regions.end(), place->position.region) != regions.end() && counts(player.selected)) ++n;
+        }
+        return n;
+    }
+    bool FortressJobSuit(std::uint64_t peerId) const override {
+        const auto it = players.find(peerId);
+        return it != players.end() && it->second.entity != 0 && ActivityOf(it->second).jobSuit;
+    }
+    bool FortressInArena(std::uint64_t peerId) const override {
+        const auto it = players.find(peerId);
+        return it != players.end() && it->second.entity != 0 && arenas && arenas->InMatch(it->second.entity);
     }
     void FortressEvacuate(const std::vector<std::uint16_t>& regions, const std::string& teleportCode, const std::function<bool(std::int64_t)>& stays) override {
         const assets::TeleportPoint* to = config.teleports ? config.teleports->PointNamed(teleportCode) : nullptr;
@@ -8185,13 +8208,37 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (it == players.end() || row == nullptr || it->second.entity == 0) return false;
         return QuestGive(it->second.entity, {{row->codename, count}});
     }
+    std::uint32_t FortressItemMaxStack(std::uint32_t item) const override {
+        const assets::ItemRow* row = config.rules->items ? config.rules->items->Find(item) : nullptr;
+        return row != nullptr ? std::uint32_t(std::max(1, game::MaxStack(*row))) : 0u;
+    }
+    bool FortressGiveStack(std::uint64_t peerId, std::uint32_t item, std::uint32_t count) override {
+        const auto it = players.find(peerId);
+        const assets::ItemRow* row = config.rules->items ? config.rules->items->Find(item) : nullptr;
+        if (it == players.end() || row == nullptr || it->second.entity == 0 || count == 0) return false;
+        PlayerWorld& p = it->second;
+        const int place = p.inventory.FreeBagPlace();
+        if (place < 0) return false;
+        const auto ids = freeItemIds;
+        if (!Put(p, place, NewItem(*row, count))) {
+            freeItemIds = ids;
+            return false;
+        }
+        TellBag(p, {std::uint8_t(place)}, {});
+        if (quests) quests->BagChanged(p.entity);
+        return true;
+    }
     FortressHost::BlessCheck FortressBlessCheck(std::uint64_t peerId, std::uint32_t skillId) const override {
         const auto it = players.find(peerId);
         const assets::SkillRow* skill = config.skills ? config.skills->Find(skillId) : nullptr;
         if (it == players.end() || skill == nullptr) return {};
         std::vector<const assets::SkillRow*> running;
-        for (const SkillState::Buff& b : it->second.combat.buffs) running.push_back(config.skills->Find(b.skill));
-        return {true, game::AdmitBuff(*skill, running).admitted, skill->cooldownMs};
+        std::vector<std::uint32_t> skills;
+        for (const SkillState::Buff& b : it->second.combat.buffs) {
+            running.push_back(config.skills->Find(b.skill));
+            skills.push_back(b.skill);
+        }
+        return {true, game::AdmitBuff(*skill, running).admitted, skill->cooldownMs, std::move(skills)};
     }
     void FortressBlessGive(std::uint64_t peerId, std::uint32_t skillId) override {
         const auto it = players.find(peerId);
@@ -9302,10 +9349,26 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (link == links.end()) return refuse(proto::GateStatus::NoSuchLink);
         const assets::TeleportPoint* to = config.teleports->Point(use.destination);
         if (!to || !to->HasArrival()) return refuse(proto::GateStatus::Nowhere);
+        // Into a fortress's world (the original's world check): through one of its fortress gates (TID 4/1/1/1) the war's
+        // entry, through any other gate there (its revival, charge and glory gates) the holder's side only; the murderer's
+        // check is not made there.
+        const bool intoFortress = fortresses && fortresses->FortressArea(to->region);
+        if (intoFortress) {
+            const assets::TeleportGate* building = config.teleports->Gate(from->ownerRefObjId);
+            const game::FortressError e = fortresses->EntryRefusal(player.selected, to->region, building != nullptr && building->FortressGate(), ActivityOf(player).jobSuit);
+            switch (e) {
+            case game::FortressError::None: break;
+            case game::FortressError::EntryJobSuit: return refuse(proto::GateStatus::FortressJobSuit);
+            case game::FortressError::EntryFull: return refuse(proto::GateStatus::FortressFull);
+            case game::FortressError::EntryNotMember: return refuse(proto::GateStatus::FortressNotMember);
+            case game::FortressError::EntryClosed: return refuse(proto::GateStatus::FortressClosed);
+            default: return refuse(proto::GateStatus::FortressNotParticipant);
+            }
+        }
         // A murderer through a gate structure (0x1C16): every gate of ours is one
         // (teleportbuilding's), within the main world or into the Tomb of Qin's 6th floor (region 0x8002); not into an
-        // instance world (ours: none is reached through a gate yet).
-        if (player.pvpState == std::uint8_t(game::PvpState::Murderer) &&
+        // instance world (ours: none is reached through a gate yet), nor into a fortress's world.
+        if (!intoFortress && player.pvpState == std::uint8_t(game::PvpState::Murderer) &&
             (places.Of(to->region) == game::PlaceKind::Field || to->region == 0x8002)) {
             return refuse(proto::GateStatus::Murderer);
         }
@@ -9337,12 +9400,6 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             if (!roc->Admit(player.entity)) return refuse(proto::GateStatus::Nowhere);
             core::LogInfo("{}: {} goes up to the Roc's Peak", config.name, player.name);
             return;
-        }
-        // Into a fortress at war: only its war's guilds.
-        if (fortresses && !fortresses->MayEnter(player.selected, to->region)) {
-            SendMessage(*peer.connection, proto::FortressAnswer{proto::FortressAction::Attack, false, std::uint16_t(game::FortressError::NotParticipant), 0,
-                                                                proto::FortressSide::Attack});
-            return refuse(proto::GateStatus::Nowhere);
         }
         if (!CanTravelTo(to->region)) return refuse(proto::GateStatus::ServerDown);
         // The fare and the fortress tax of the gate's town.

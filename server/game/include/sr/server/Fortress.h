@@ -78,6 +78,7 @@ struct FortressActor {
     int level = 0;
     std::string name;
     std::uint64_t gold = 0;
+    bool dead = false;
 };
 // A structure's size from its model (ours; the database's radius for structures is 0).
 struct StructureShape {
@@ -166,6 +167,21 @@ public:
         (void)key;
         (void)name;
         (void)blocks;
+    }
+    // How many players stand in `regions` for whom `counts` is true (a side inside: the war's MaxAdmission).
+    virtual std::size_t FortressCountIn(const std::vector<std::uint16_t>& regions, const std::function<bool(std::int64_t)>& counts) const {
+        (void)regions;
+        (void)counts;
+        return 0;
+    }
+    // A player in a job suit (the job's state not 4), and one in a Battle Arena match.
+    virtual bool FortressJobSuit(std::uint64_t peer) const {
+        (void)peer;
+        return false;
+    }
+    virtual bool FortressInArena(std::uint64_t peer) const {
+        (void)peer;
+        return false;
     }
     // Every player in `regions` for whom `stays` is false goes to the teleport point of that codename.
     virtual void FortressEvacuate(const std::vector<std::uint16_t>& regions, const std::string& teleportCode, const std::function<bool(std::int64_t)>& stays) {
@@ -315,6 +331,7 @@ public:
     struct BlessCheck {
         bool known = false, admitted = false;
         int reuseMs = 0;
+        std::vector<std::uint32_t> running; // the skills of the player's buffs
     };
     virtual BlessCheck FortressBlessCheck(std::uint64_t peer, std::uint32_t skill) const {
         (void)peer;
@@ -417,6 +434,17 @@ public:
     }
     // Items into a player's bag (false: they do not fit, nothing given).
     virtual bool FortressGiveItem(std::uint64_t peer, std::uint32_t item, std::uint32_t count) {
+        (void)peer;
+        (void)item;
+        (void)count;
+        return false;
+    }
+    // An item's MaxStack (0: no such item), and one stack of `count` of it into an empty bag place (false: none free).
+    virtual std::uint32_t FortressItemMaxStack(std::uint32_t item) const {
+        (void)item;
+        return 0;
+    }
+    virtual bool FortressGiveStack(std::uint64_t peer, std::uint32_t item, std::uint32_t count) {
         (void)peer;
         (void)item;
         (void)count;
@@ -549,11 +577,16 @@ public:
     // war's guilds ("The fortress-owning guild member or the guild
     // members applied for the fortress war are only allowed to enter the fortress during the fortress war.").
     bool MayEnter(std::int64_t character, std::uint16_t region) const;
+    // Why a teleport into a fortress's world (`region` its arrival) refuses a player (None: it goes): through one of
+    // its fortress gates (TID 4/1/1/1) the war's entry (game::EntryRefusal: the job suit, the war's guilds, the sides'
+    // places inside, the capture's five minutes); through any other gate there the holder's guild and union only
+    // (0x1C1D, at any time). None for a region of no fortress.
+    game::FortressError EntryRefusal(std::int64_t character, std::uint16_t region, bool fortressGate, bool jobSuit) const;
     // One who may not be in the area of a fortress at war (a login there) goes to its linked gate.
     void SendOut(const FortressActor& actor, std::uint16_t region);
-    // A player killed by another in a war (the game server's kill hook): its battle record (ours: in
-    // memory, the record's table comes with the battle ranks).
-    void PlayerKilled(std::int64_t killer, std::int64_t victim);
+    // A player killed by another (the game server's kill hook) where he stood (`region`): in the area of a fortress at
+    // war (the original's fortress of the victim's world), its battle records, ranks and the siege quest's kill.
+    void PlayerKilled(std::int64_t killer, std::int64_t victim, std::uint16_t region);
     // A guild owns a fortress (a guild holding one may not disband; 0x2811 for applying).
     bool GuildHoldsFortress(std::uint32_t guild) const;
     // A guild owns or holds a fortress, or applied to the war over one.

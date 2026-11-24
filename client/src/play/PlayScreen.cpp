@@ -627,6 +627,12 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                           : refused->status == proto::GateStatus::ShrineNoRight ? "UIIT_MSG_EGYPT_SHRINE_ENTRANCE_CONDITION_ERROR_02"
                           : refused->status == proto::GateStatus::ShrineJobSuit ? "UIIT_MSG_EGYPT_SHRINE_ENTRANCE_CONDITION_ERROR_03"
                           : refused->status == proto::GateStatus::ShrineRatio   ? "UIIT_MSG_EGYPT_SHRINE_ENTRANCE_CONDITION_ERROR_04"
+                          // Into a fortress's world (0x1C1A..0x1C1E).
+                          : refused->status == proto::GateStatus::FortressJobSuit        ? "UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_01"
+                          : refused->status == proto::GateStatus::FortressFull           ? "UIIT_MSG_FORT_PORTALSTONE_FAIL_04"
+                          : refused->status == proto::GateStatus::FortressNotParticipant ? "UIIT_MSG_FORT_ENTRANCE_FORTRESS_FAIL_02"
+                          : refused->status == proto::GateStatus::FortressNotMember      ? "UIIT_MSG_FORT_NOT_POSSESS_FORTRESS_MEMBER"
+                          : refused->status == proto::GateStatus::FortressClosed         ? "UIIT_MSG_FORT_ETC_ERR_CANT_ENTER_5MINBEFORE"
                                                                            : "UIIT_MSG_STATE_TELEPORT_FAIL";
         if (!replay_ && refused->status == proto::GateStatus::Murderer) player_.Notify(game::Banner::Kind::Warning, gui_.data().Text(key), context.time);
         if (!replay_) player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);

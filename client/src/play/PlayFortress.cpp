@@ -14,6 +14,7 @@
 #include "play/PlayScreen.h"
 #include "sr/core/Log.h"
 #include "sr/game/Skills.h"
+#include "sr/game/Items.h"
 
 namespace sr::client {
 
@@ -633,18 +634,27 @@ void PlayScreen::FortressScript(ScreenContext& context) {
             const std::size_t comma = arg.find(',');
             m.value2 = comma == std::string::npos ? 1u : std::uint32_t(std::strtoul(arg.c_str() + comma + 1, nullptr, 10));
         } else if (op == 3) {
+            // The work's item, and the count asked (else one stack of what is left).
+            const proto::FortressForge& w = fortress_.Forge();
+            m.value = w.item;
             const std::size_t comma = arg.rfind(',');
-            m.value2 = comma == std::string::npos ? 0u : std::uint32_t(std::strtoul(arg.c_str() + comma + 1, nullptr, 10));
+            const assets::ItemRow* row = tables_ && tables_->Usable() ? tables_->items.Find(w.item) : nullptr;
+            const std::uint32_t stack = row != nullptr ? std::uint32_t(std::max(1, game::MaxStack(*row))) : std::uint32_t(w.count);
+            m.value2 = comma == std::string::npos ? std::min<std::uint32_t>(w.count, stack) : std::uint32_t(std::strtoul(arg.c_str() + comma + 1, nullptr, 10));
+        } else if (op == 2) {
+            m.value = fortress_.Forge().item; // the work named
         }
         send(m);
     } else if (verb == "dungeon") {
-        // dungeon:query|create|enter|leave (the Cave of Discipline at the nearest fortress manager; leave anywhere inside).
+        // dungeon:query|create|enter|leave (the Cave of Discipline at the nearest fortress manager; leave at the Cave's
+        // teleporter inside, NPC_SIEGE_DUNGEON_TELEPORT).
         std::uint32_t npc = 0;
+        const char* npcPart = arg == "leave" ? "SIEGE_DUNGEON_TELEPORT" : "_FORTRESS_MANAGER";
         if (const game::WorldView::Entity* self = view_.Find(view_.Self()); self != nullptr && tables_ && tables_->Usable()) {
             double nearest = 1e18;
             for (const auto& [id, e] : view_.Entities()) {
                 const assets::ObjectRow* row = e.kind == proto::EntityKind::Character ? tables_->characters.Find(e.look.model) : nullptr;
-                if (row == nullptr || row->codename.find("_FORTRESS_MANAGER") == std::string::npos) continue;
+                if (row == nullptr || row->codename.find(npcPart) == std::string::npos) continue;
                 const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat(e.position);
                 if (const double d = std::hypot(a.x - b.x, a.z - b.z); d < nearest) {
                     nearest = d;

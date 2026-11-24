@@ -1041,6 +1041,7 @@ bool DecodeTeleportGates(std::string_view text, std::vector<TeleportGate>& out) 
         g.refObjId = U32Of(c[1]);
         g.codename = std::string(c[2]);
         g.nameKey = std::string(c[5]);
+        for (int i = 0; i < 4; ++i) g.typeId[std::size_t(i)] = static_cast<std::uint8_t>(U32Of(c[std::size_t(9 + i)]));
         if (c.size() > 45) {
             g.region = static_cast<std::uint16_t>(std::strtol(std::string(c[41]).c_str(), nullptr, 10));
             g.x = FloatOf(c[43]);

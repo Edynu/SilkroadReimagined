@@ -181,6 +181,7 @@ struct Fortresses::State {
         bool atWar = false;
         std::optional<Clock::time_point> heartOpenAt; // the seal lifts then (none: sealed, or open)
         std::optional<Clock::time_point> evacuateAt;  // those who may not be here go then (5 s into the war)
+        std::optional<Clock::time_point> openAgainAt; // a capture's five minutes: its attackers enter again then
         bool heartOpenTold = false;
         struct Record {
             int kills = 0, deaths = 0, rank = 0;
@@ -212,6 +213,14 @@ struct Fortresses::State {
         const FortressSpec::Structure& Spot(const Structure& s) const { return spec.structures[s.spot]; }
         bool InArea(std::uint16_t region) const { return std::find(spec.regions.begin(), spec.regions.end(), region) != spec.regions.end(); }
     };
+    // A guild of the holder's side (the holder's guild, or one of its union; none while nobody holds the fortress).
+    bool HolderSide(const Fortress& f, const std::optional<FortressGuild>& g) const {
+        const std::uint32_t holder = f.Controller();
+        if (!g || holder == 0) return false;
+        if (g->id == holder) return true;
+        const std::uint32_t holderUnion = AllianceOf(holder);
+        return holderUnion != 0 && g->alliance == holderUnion;
+    }
     std::vector<Fortress> forts;
     std::minstd_rand random{std::random_device{}()};
     std::unordered_map<std::uint32_t, std::pair<std::size_t, std::size_t>> byEntity; // entity -> fortress, structure
@@ -244,6 +253,7 @@ struct Fortresses::State {
         PublishPeriods();
     }
     std::int64_t cycleStart = 0;
+    bool restored = false; // the start's unfinished wars looked at (Tick)
     Clock::time_point now{};
     std::int64_t unixNow = 0;
     Clock::time_point nextFlush{};
@@ -563,8 +573,12 @@ struct Fortresses::State {
             k.rank = rank;
             const auto [name, buff] = host.FortressRankBuff(character, old != nullptr ? old->skill : 0u, next != nullptr ? next->skill : 0u);
             const std::vector<std::byte> notice = Bytes(proto::FortressNotice{proto::FortressNoticeKind::RankUp, f.spec.id, std::uint32_t(rank), name, buff});
-            host.FortressSendCharacter(character, proto::FortressNotice::kId, notice);
-            if (const std::optional<FortressGuild> g = host.FortressGuildOf(character); rank >= 6 && g) SendGuild(g->id, proto::FortressNotice::kId, notice);
+            // Ranks 1..5 to the player; the last (6) once, to his union if he has one, else his guild (he among them).
+            if (const std::optional<FortressGuild> g = host.FortressGuildOf(character); rank >= 6 && g) {
+                SendGuild(g->id, proto::FortressNotice::kId, notice);
+            } else {
+                host.FortressSendCharacter(character, proto::FortressNotice::kId, notice);
+            }
             core::LogInfo("fortress war: {} reaches battle rank {} ({} kills)", name, rank, k.kills);
         }
         const std::uint32_t id = f.spec.id;
@@ -725,6 +739,7 @@ struct Fortresses::State {
         f.records.clear();
         f.heartOpenAt.reset();
         f.evacuateAt.reset();
+        f.openAgainAt.reset();
         // The barricades go, the war camps are foundations again (`_SiegeFortressFinished`); the flags and the summoned
         // monsters go, and with a new owner the guards too.
         for (Structure& s : f.structures) {
@@ -768,6 +783,16 @@ struct Fortresses::State {
 
         f.heartOpenTold = false;
         f.heartOpenAt = TowersStanding(f) == 0 ? std::optional<Clock::time_point>(now) : std::nullopt;
+        // For five minutes only the new holder's side comes in (EntryRefusal); every attacker in its area, the old owner's
+        // guild among them, is sent to its first inner gate (the original's teleport of the attackers' set at the capture).
+        f.openAgainAt = now + std::chrono::seconds(game::kCaptureEntrySeconds);
+        if (const auto gate = std::find_if(f.spec.insideGates.begin(), f.spec.insideGates.end(), [&](const std::string& g) { return host.FortressHasPoint(g); });
+            gate != f.spec.insideGates.end()) {
+            host.FortressEvacuate(f.spec.regions, *gate, [this, &f](std::int64_t character) {
+                const std::optional<FortressGuild> g = host.FortressGuildOf(character);
+                return !g || !Participant(f, g->id) || HolderSide(f, g);
+            });
+        }
         core::LogInfo("fortress war: {} held by guild {} for now", f.spec.codename, holder);
         // The original tells its holder's change as kind 8, the client's only "occupied" line.
         Notice(proto::FortressNoticeKind::Conquer, id, 0, GuildName(holder));
@@ -930,7 +955,7 @@ struct Fortresses::State {
         if (!TaxPeriod()) return FortressError::NotTaxPeriod;
         if (f == nullptr) return FortressError::NoFortress;
         const auto guild = host.FortressGuildOf(a.character);
-        if (!guild || guild->id != f->row.guild) return FortressError::NotHolder;
+        if (!guild || guild->id != f->Controller()) return FortressError::NotHolder;
         if (!guild->master) return FortressError::OnlyMaster;
         return FortressError::None;
     }
@@ -994,6 +1019,9 @@ struct Fortresses::State {
         if (f == nullptr) return; // silent, as the original's 1
         const std::optional<FortressGuild> g = host.FortressGuildOf(a.character);
         if (!g || g->id != f->Controller()) return Answer(a, proto::FortressAction::Return, FortressError::ReturnNotHolder, fortress, proto::FortressSide::Attack);
+        // Not in a job suit (0x7C06), not in a Battle Arena match (0x7C09), in the original's order.
+        if (host.FortressJobSuit(a.peer)) return Answer(a, proto::FortressAction::Return, FortressError::ReturnUniform, fortress, proto::FortressSide::Attack);
+        if (host.FortressInArena(a.peer)) return Answer(a, proto::FortressAction::Return, FortressError::ReturnArena, fortress, proto::FortressSide::Attack);
         const std::shared_ptr<bool> taken = std::make_shared<bool>(false);
         host.FortressSubmit([taken, character = a.character](Database& db) { *taken = TakeFortressReturn(db, character, 600); },
                             [this, a, fortress, taken, gate = f->spec.revivalGate] {
@@ -1560,7 +1588,7 @@ struct Fortresses::State {
             });
     }
     // The war's schedule (action 5): the last and the next war's month, day, weekday, hour and minute, and whether
-    // the player's guild applied.
+    // any guild applied to attack this fortress.
     static std::array<std::uint8_t, 5> DateOf(std::int64_t t) {
         if (t <= 0) return {};
         std::time_t tt = std::time_t(t);
@@ -1587,7 +1615,8 @@ struct Fortresses::State {
         s.fortress = f.spec.id;
         s.last = DateOf(lastWarStart);
         s.next = DateOf(manual ? 0 : NextWarStart());
-        s.applied = g && RequestOf(g->id) != nullptr;
+        (void)g;
+        s.applied = std::any_of(f.requests.begin(), f.requests.end(), [](const FortressRequestRow& r) { return r.type == std::uint8_t(proto::FortressSide::Attack); });
         host.FortressSend(a.peer, proto::FortressSchedule::kId, Bytes(s));
     }
     // The introduction written (action 0x1A): the holder's master (0x2806, 0x2807), allowed
@@ -1607,8 +1636,10 @@ struct Fortresses::State {
         core::LogInfo("fortress war: {} writes {}'s introduction", a.name, f.spec.codename);
         ManageAnswer(a, proto::FortressAction::Introduce, FortressError::None, id);
     }
-    // A blessing (action 0x1C, in its order): the holder's guild or its union (0x283D), the fortress's row (0x2840),
-    // its reuse (0x284A), a buff that may stand (0x300C), the gold (0x280F), a guild (0x280B), the GP (0x280E);
+    // A blessing (action 0x1C, in its order): the holder's guild or its union (0x283D: the two union ids compared with no
+    // test for none, as the original's, so a guild of no union passes when the holder has none), the fortress's row
+    // (0x2840), no fortress blessing on the player (0x300C), its reuse (0x284A), a buff that may stand (0x300C), the
+    // gold (0x280F), a guild (0x280B), the GP (0x280E);
     // `_SiegeFortressEngageBlessBuff` takes both. The buff goes on the one who asked (inferred: the replacement and reuse
     // checks are his; the answer's delivery was not traced).
     void Bless(const FortressActor& a, Fortress& f, const std::optional<FortressGuild>& g, std::uint32_t blessId) {
@@ -1616,18 +1647,23 @@ struct Fortresses::State {
         const std::uint32_t holder = f.Controller();
         if (holder == 0) return refuse(FortressError::NotHolder);
         const std::uint32_t holderUnion = AllianceOf(holder);
-        if (!g || (g->id != holder && (holderUnion == 0 || g->alliance != holderUnion))) return refuse(FortressError::NotUnion);
+        if ((g ? g->id : 0u) != holder && (g ? g->alliance : 0u) != holderUnion) return refuse(FortressError::NotUnion);
         const BlessRow* row = nullptr;
         for (const BlessRow& b : config.blesses) {
             if (b.id == blessId && b.fortress == f.spec.id) row = &b;
         }
         if (row == nullptr) return refuse(FortressError::NoBless);
-        const std::int64_t nowMs = unixNow * 1000;
-        if (const auto it = blessReady.find({a.character, row->skill}); it != blessReady.end() && nowMs < it->second) return refuse(FortressError::BlessWait);
         const FortressHost::BlessCheck check = host.FortressBlessCheck(a.peer, row->skill);
         if (!check.known) return refuse(FortressError::NoBless);
+        // One fortress blessing at a time: any `_RefSiegeBlessBuff` skill among the player's buffs.
+        for (const std::uint32_t skill : check.running) {
+            if (std::any_of(config.blesses.begin(), config.blesses.end(), [&](const BlessRow& b) { return b.skill == skill; })) return refuse(FortressError::BlessOverlap);
+        }
+        const std::int64_t nowMs = unixNow * 1000;
+        if (const auto it = blessReady.find({a.character, row->skill}); it != blessReady.end() && nowMs < it->second) return refuse(FortressError::BlessWait);
         if (!check.admitted) return refuse(FortressError::BlessOverlap);
         if (a.gold < row->gold) return refuse(FortressError::Gold);
+        if (!g) return refuse(FortressError::NotInGuild);
         if (g->points < row->guildPoints) return refuse(FortressError::GuildPoints);
         // Its reuse begun now (a second ask waits), the gold, the guild's points and their history in one transaction; the
         // blessing once it stands (its reuse forgotten if it does not).
@@ -1699,9 +1735,17 @@ struct Fortresses::State {
         const int op = int(m.action) - int(trainer ? A::TrainQuery : A::ForgeQuery); // 0 query, 1 start, 2 cancel, 3 collect
         Fortress* f = AtForge(a, m.npc, trainer);
         const auto refuse = [&](FortressError e) { ManageAnswer(a, m.action, e, f != nullptr ? f->spec.id : m.fortress); };
+        // The query answers anyone at the NPC; the others are not for the war (0x2818), then the fortress.
+        if (op != 0 && warOn) return refuse(FortressError::InWar);
         if (f == nullptr) return refuse(FortressError::NoFortress);
         const std::optional<FortressGuild> g = host.FortressGuildOf(a.character);
-        if (!g || g->id != f->Controller()) return refuse(FortressError::NotHolder);
+        const std::uint8_t position = trainer ? game::kPositionTraining : game::kPositionProduction;
+        // The holder's guild (0x2806), its master or the side's administrator (0x2817).
+        const auto holderRefusal = [&]() -> FortressError {
+            if (!g || g->id != f->Controller()) return FortressError::NotHolder;
+            if (!g->master && (host.FortressPositionOf(a.character) & position) == 0) return FortressError::ForgePosition;
+            return FortressError::None;
+        };
         FortressForgeRow* running = Running(*f, trainer);
         const auto tell = [&] {
             proto::FortressForge s{m.npc, std::uint8_t(trainer ? 1 : 0), f->spec.id};
@@ -1717,17 +1761,16 @@ struct Fortresses::State {
         if (op == 0) return tell();
         const std::uint32_t id = f->spec.id;
         if (op == 1) {
-            // Start: not in the war (0x2818), none running (0x280A), the master or the side's
-            // position (Production 8, Training 0x10; 0x2817), at most 20 (0x2816), the gold (0x280F) and GP (0x280E); cost and
-            // time times the count, times 0.85 when a member holds the side's position.
-            if (warOn) return refuse(FortressError::InWar);
+            // Start: not in the war (0x2818), none running (0x280A), the holder's guild (0x2806), the master or the side's
+            // position (Production 8, Training 0x10; 0x2817), the side's item (3), at most 20 (0x2816; ours: none refused
+            // too, the original's free empty work), the gold (0x280F) and GP (0x280E); cost and time times the count, times
+            // 0.85 when a member holds the side's position.
             if (running != nullptr) return refuse(FortressError::ForgeBusy);
-            const std::uint8_t position = trainer ? game::kPositionTraining : game::kPositionProduction;
-            if (!g->master && (host.FortressPositionOf(a.character) & position) == 0) return refuse(FortressError::ForgePosition);
-            const int count = int(m.value2);
-            if (count <= 0 || count > kForgeMost) return refuse(FortressError::ForgeCount);
+            if (const FortressError e = holderRefusal(); e != FortressError::None) return refuse(e);
             const ForgeReferenceRow* row = ForgeRow(id, m.value);
             if (row == nullptr || row->trainer != trainer) return refuse(FortressError::NoFortress);
+            const int count = int(m.value2);
+            if (count <= 0 || count > kForgeMost) return refuse(FortressError::ForgeCount);
             const double factor = host.FortressGuildHasPosition(g->id, position) ? 0.85 : 1.0;
             const std::uint64_t gold = std::uint64_t(std::floor(double(row->gold) * count * factor));
             const std::uint32_t points = std::uint32_t(std::floor(double(row->guildPoints) * count * factor));
@@ -1767,7 +1810,10 @@ struct Fortresses::State {
                 });
             return;
         }
+        // Cancel and collect: the holder and the position, a work of the side (0x2819), the work's item named (3).
+        if (const FortressError e = holderRefusal(); e != FortressError::None) return refuse(e);
         if (running == nullptr) return refuse(FortressError::ForgeNone);
+        if (running->item != m.value) return refuse(FortressError::NoFortress);
         const FortressForgeRow r = *running;
         if (op == 2) {
             // Cancel: nothing given back.
@@ -1776,11 +1822,13 @@ struct Fortresses::State {
             ManageAnswer(a, m.action, FortressError::None, id, r.item);
             return tell();
         }
-        // Collect (`_SiegeFortressCollectForgedItem`'s rules): done (0x281A), not more than made (0x281B), the bag (0x281C).
+        // Collect (`_SiegeFortressCollectForgedItem`'s rules): done (0x281A), not more than is left nor than one stack
+        // (MaxStack; 0x281B; ours: none refused too), one stack into an empty bag place (0x281C).
         if (!running->finished) return refuse(FortressError::ForgeNotDone);
-        const int count = m.value2 == 0 ? running->amount : int(m.value2);
-        if (count > running->amount) return refuse(FortressError::ForgeTooMany);
-        if (!host.FortressGiveItem(a.peer, running->item, std::uint32_t(count))) return refuse(FortressError::ForgeBagFull);
+        const int count = int(m.value2);
+        const std::uint32_t stack = host.FortressItemMaxStack(running->item);
+        if (count <= 0 || count > running->amount || (stack != 0 && std::uint32_t(count) > stack)) return refuse(FortressError::ForgeTooMany);
+        if (!host.FortressGiveStack(a.peer, running->item, std::uint32_t(count))) return refuse(FortressError::ForgeBagFull);
         running->amount -= count;
         const FortressForgeRow left = *running;
         if (left.amount <= 0) {
@@ -1850,13 +1898,17 @@ struct Fortresses::State {
         if (m.action < A::DungeonQuery || m.action > A::DungeonLeave) return refuse(FortressError::NoFortress);
         const std::optional<FortressGuild> g = host.FortressGuildOf(a.character);
         if (m.action == A::DungeonLeave) {
-            // Leave (0x20): the holder's guild or union (0x283D), in its dungeon; out to the character's recall point
-            // (`_Char.TelRegion`, set to the entry's place when it entered; none: code 5).
+            // Leave (0x20): the Cave's teleporter in reach (3), a living player, the holder's guild or union (0x283D: the
+            // union ids compared with no test for none, as the original's), in its dungeon; out to the character's recall
+            // point (`_Char.TelRegion`, set to the entry's place when it entered; none: code 5).
+            if (const std::string code = host.FortressNpc(m.npc); code.find("SIEGE_DUNGEON_TELEPORT") == std::string::npos) return refuse(FortressError::NoFortress);
+            if (const double d = host.FortressDistance(a.entity, m.npc); d < 0 || d > game::kFortressNpcReach) return refuse(FortressError::NoFortress);
+            if (a.dead) return refuse(FortressError::Failed);
             const std::uint32_t layer = host.FortressDungeonOf(a.peer);
             for (Fortress& f : forts) {
                 if (f.dungeonLayer == 0 || f.dungeonLayer != layer) continue;
                 const std::uint32_t holder = f.Controller(), holderUnion = AllianceOf(holder);
-                if (!g || (g->id != holder && (holderUnion == 0 || g->alliance != holderUnion))) return refuse(FortressError::NotUnion);
+                if ((g ? g->id : 0u) != holder && (g ? g->alliance : 0u) != holderUnion) return refuse(FortressError::NotUnion);
                 if (!host.FortressDungeonExit(a.peer)) return refuse(FortressError::NoRecallPoint);
                 return ManageAnswer(a, m.action, FortressError::None, f.spec.id);
             }
@@ -2002,7 +2054,9 @@ struct Fortresses::State {
         if (next == nullptr) return refuse(FortressError::NoFortress);
         const std::optional<FortressGuild> g = host.FortressGuildOf(a.character);
         const std::uint8_t position = host.FortressPositionOf(a.character);
-        if (!g || g->id != f->Controller() || (position & (game::kPositionCommander | game::kPositionWar)) == 0) return refuse(FortressError::UpgradeRole);
+        // A member with position 1 or 4 (0x2833), of any guild: the original asks nothing of the holder (its client
+        // offers the button to the holder's members only).
+        if (!g || (position & (game::kPositionCommander | game::kPositionWar)) == 0) return refuse(FortressError::UpgradeRole);
         if (a.level < next->reqLevel) return refuse(FortressError::UpgradeLevel);
         if (a.gold < ref->gold) return refuse(FortressError::UpgradeGold);
         if (std::optional<FortressGuild> held = host.FortressGuildById(g->id); !held) return refuse(FortressError::UpgradePoints);
@@ -2433,6 +2487,20 @@ void Fortresses::Tick(Clock::time_point now, std::int64_t unixNow) {
         else s.EndWar();
         s.Warnings(p);
     }
+    // The first time the periods are known (the keeper's own, or the keeper's word): outside a war, a fortress of this
+    // server still held for now (a war cut by a stop) is finished with its holder as the owner (the original's
+    // RestoreOccupation at the start).
+    if (!s.restored && (s.config.periodKeeper || s.told)) {
+        s.restored = true;
+        for (std::size_t fi = 0; fi < s.forts.size() && !s.warOn; ++fi) {
+            State::Fortress& f = s.forts[fi];
+            if (!f.spec.local || f.row.tempGuild == 0) continue;
+            core::LogInfo("fortress war: {} was held for now by guild {} with no war on: its war finished", f.spec.codename, f.row.tempGuild);
+            f.atWar = true;
+            s.Finish(fi);
+            s.BroadcastList();
+        }
+    }
     s.TellTax();
     if (s.config.periodKeeper && now >= s.nextPeriods) {
         // Once a minute the others hear the periods again (a lost word is made good).
@@ -2798,6 +2866,37 @@ bool Fortresses::MayEnter(std::int64_t character, std::uint16_t region) const {
     return true;
 }
 
+FortressError Fortresses::EntryRefusal(std::int64_t character, std::uint16_t region, bool fortressGate, bool jobSuit) const {
+    const State& s = *s_;
+    const auto it = std::find_if(s.forts.begin(), s.forts.end(), [&](const State::Fortress& f) { return f.InArea(region); });
+    if (it == s.forts.end()) return FortressError::None;
+    const State::Fortress& f = *it;
+    const std::optional<FortressGuild> g = s.host.FortressGuildOf(character);
+    // Any other gate into its world (the revival, charge and glory gates): the holder's side only.
+    if (!fortressGate) return s.HolderSide(f, g) ? FortressError::None : FortressError::EntryNotMember;
+    game::FortressEntryFacts facts;
+    facts.jobSuit = jobSuit;
+    facts.warOn = s.warOn && f.atWar;
+    facts.guild = g ? g->id : 0;
+    facts.participant = g && s.Participant(f, g->id);
+    facts.holderSide = s.HolderSide(f, g);
+    facts.held = f.Controller() != 0;
+    facts.closed = f.openAgainAt && s.now < *f.openAgainAt;
+    facts.maxAdmission = f.spec.maxAdmission;
+    if (facts.warOn && facts.participant && f.spec.maxAdmission > 0) {
+        // Each side inside (the original's world counts of its attackers and defenders).
+        const auto side = [&](bool defenders) {
+            return s.host.FortressCountIn(f.spec.regions, [&](std::int64_t c) {
+                const std::optional<FortressGuild> o = s.host.FortressGuildOf(c);
+                return o && s.Participant(f, o->id) && s.HolderSide(f, o) == defenders;
+            });
+        };
+        facts.defendersInside = facts.holderSide ? side(true) : 0;
+        facts.attackersInside = facts.holderSide ? 0 : side(false);
+    }
+    return game::EntryRefusal(facts);
+}
+
 void Fortresses::SendOut(const FortressActor& actor, std::uint16_t region) {
     for (const State::Fortress& f : s_->forts) {
         if (!f.atWar || !f.InArea(region)) continue;
@@ -2807,12 +2906,13 @@ void Fortresses::SendOut(const FortressActor& actor, std::uint16_t region) {
     }
 }
 
-void Fortresses::PlayerKilled(std::int64_t killer, std::int64_t victim) {
+void Fortresses::PlayerKilled(std::int64_t killer, std::int64_t victim, std::uint16_t region) {
     State& s = *s_;
     if (!s.warOn) return;
     const std::optional<FortressGuild> gk = s.host.FortressGuildOf(killer), gv = s.host.FortressGuildOf(victim);
     for (State::Fortress& f : s.forts) {
-        if (!f.atWar || !s.Participant(f, gk ? gk->id : 0) || !s.Participant(f, gv ? gv->id : 0)) continue;
+        // The fortress of the victim's place (the original's: of his world), its war's two guilds.
+        if (!f.atWar || !f.InArea(region) || !s.Participant(f, gk ? gk->id : 0) || !s.Participant(f, gv ? gv->id : 0)) continue;
         State::Fortress::Record& v = f.records[victim];
         ++v.deaths;
         // The kill counts for the killer and their living party members within 1,000, each climbing the ranks.
