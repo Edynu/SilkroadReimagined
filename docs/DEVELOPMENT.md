@@ -87,6 +87,22 @@ A window of our own is a widget made in code: the performance panel is the examp
 `client/src/gui/HudWindows.h`, `HudPerformance.cpp`): a class registered under a name, opened by `Hud::Create` from a
 node made in code, placed by `Hud::Place`, reading what it shows from the `HudContext` the game screen fills.
 
+## A development shard
+
+`start-dev.bat [debug|release] [noclient]` starts the front (`SroControl`), two game servers of one shard (East and West,
+`deploy/dev-shard.cfg`), `SroWeb` and a client on the title screen; `start-client.bat [debug|release] [count]` adds clients,
+`stop-dev.bat` ends them all. The machine's own settings go in `dev.local.bat` beside them (git-ignored, called first):
+
+```bat
+set "SR_DB_URL=postgresql://sro:PASSWORD@127.0.0.1:5432/sro_dev"
+set "SR_GAME_DIR=E:\Silkroad\VSRO_Client"
+rem optional: the original's database export (imported once) and quest script (its quests and ours, at each start)
+set "SR_VSRO_EXPORT=D:\path\to\export"
+set "SR_QUEST_SCRIPT=D:\path\to\Quest.sct"
+rem optional: more options for both game servers
+set "SR_GAME_EXTRA=--qin-time-scale 60"
+```
+
 ## The developer commands (the servers)
 
 A developers' server build (`SR_DEV_COMMANDS` on) takes `--dev-commands` (or `dev-commands = true` in the shard's
