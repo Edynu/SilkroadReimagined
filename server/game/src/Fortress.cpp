@@ -2167,7 +2167,15 @@ struct Fortresses::State {
             std::erase_if(f->requests, [&](const FortressRequestRow& r) { return r.guild == g->id; });
             const std::uint32_t fortress = f->spec.id, guild = g->id;
             Publish(kBusRequest, Bytes(RequestWire{fortress, guild, std::uint8_t(side), false}));
-            Write([fortress, guild](Database& db) { DeleteFortressRequest(db, fortress, guild); });
+            // In the master's order of saves, as the application's insert (FortressPay): a cancel and a new application
+            // right after it are written in that order.
+            host.FortressPay(
+                a.character, 0, 0, 0,
+                [fortress, guild](Database& tx) -> std::optional<std::uint64_t> {
+                    if (!DeleteFortressRequest(tx, fortress, guild)) return std::nullopt;
+                    return 0;
+                },
+                [](bool, std::uint64_t) {});
             core::LogInfo("fortress war: guild {} cancels its application to {}", g->name, f->spec.codename);
         }
         Answer(a, proto::FortressAction::Cancel, error, m.fortress, side);
