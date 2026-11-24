@@ -77,6 +77,15 @@ struct Monsters::State {
             int chance = 0;
         };
         std::vector<DeathSkill> deaths;
+        // Its conditional skills (Monsters::SetConditionalSkills), in order.
+        struct Conditional {
+            const assets::SkillRow* skill = nullptr;
+            SummonSkill summon;
+            int kind = 0;
+            std::uint32_t data = 0;
+            int option = 0;
+        };
+        std::vector<Conditional> conditionals;
         // A unique's nest (MonsterNest::hiveMax): its hive, whether the hive's monster is here (in the world, or
         // waiting for the region to wake), and when it may hatch here.
         int hive = -1;
@@ -121,6 +130,9 @@ struct Monsters::State {
         std::uint32_t body = 0;     // a god's linked loot body (its _DROP summon)
         Clock::time_point nextRecovery; // its natural recovery's next tick
         Clock::time_point lastStrike;   // its last swing (a chaser that has not struck for 5 s walks to a far target)
+        // Its conditional skills' state: a health one used (once), an interval one's last time (none: not looked at yet).
+        std::vector<bool> conditionalUsed;
+        std::vector<std::optional<Clock::time_point>> conditionalAt;
         struct PendingHit {
             Clock::time_point at;
             std::uint32_t target = 0;
@@ -161,6 +173,53 @@ struct Monsters::State {
     std::function<bool(std::uint16_t)> town; // a bandit entering one is gone
     std::function<bool(const proto::WorldPosition&)> townArea; // a town's safe area (regioninfo's, by position)
     std::unordered_map<std::string, proto::WorldPosition> summonPlaces; // a summon's own spot by its codename
+    std::unordered_map<std::uint32_t, std::vector<Monsters::ConditionalSkill>> conditionalSkills; // by the monster's refObjId
+    // A nest's conditional skills from the table (its monster's).
+    void FillConditionals(Nest& nest) {
+        nest.conditionals.clear();
+        const auto it = conditionalSkills.find(nest.spec.refObjId);
+        if (it == conditionalSkills.end() || skills == nullptr) return;
+        for (const Monsters::ConditionalSkill& c : it->second) {
+            const assets::SkillRow* skill = skills->Find(std::string_view(c.skill));
+            if (skill == nullptr) continue;
+            Nest::Conditional entry{skill, {}, c.kind, c.data, c.option};
+            assets::ForEachSkillParam(*skill, [&](std::uint32_t tag, std::span<const std::uint32_t> args) {
+                if (tag != assets::SkillTag("ssou")) return;
+                for (std::size_t g = 0; g + 1 < args.size() && args[g] != 0; g += 4) {
+                    const std::uint32_t fewest = g + 2 < args.size() ? args[g + 2] : 1;
+                    const std::uint32_t most = g + 3 < args.size() ? std::max(args[g + 3], fewest) : fewest;
+                    entry.summon.groups.push_back({args[g], int(args[g + 1] & 0x0F), int(std::clamp<std::uint32_t>(fewest, 1, 50)),
+                                                   int(std::clamp<std::uint32_t>(most, 1, 50))});
+                }
+            });
+            nest.conditionals.push_back(std::move(entry));
+        }
+    }
+    // Its first conditional skill ready now (the original's in order): a health one once at its share or below, an
+    // interval one every `data` ms (its first look only stamps the time); -1: none.
+    int ReadyConditional(Monster& m, const Nest& nest, Clock::time_point now) {
+        m.conditionalUsed.resize(nest.conditionals.size(), false);
+        m.conditionalAt.resize(nest.conditionals.size());
+        for (std::size_t i = 0; i < nest.conditionals.size(); ++i) {
+            const Nest::Conditional& c = nest.conditionals[i];
+            if (c.kind == 0) {
+                if (m.conditionalUsed[i] || m.stats.maxHp == 0) continue;
+                if (double(m.hp) * 100.0 / double(m.stats.maxHp) > double(c.data)) continue;
+                m.conditionalUsed[i] = true;
+                return int(i);
+            }
+            if (c.kind == 1) {
+                if (!m.conditionalAt[i]) {
+                    m.conditionalAt[i] = now;
+                    continue;
+                }
+                if (now - *m.conditionalAt[i] < std::chrono::milliseconds(c.data)) continue;
+                m.conditionalAt[i] = now;
+                return int(i);
+            }
+        }
+        return -1;
+    }
     // Town ground: a town's region (`_RefRegion.IsBattleField` 0) or a town's safe area about it (the original's
     // regioninfo's rectangles of kind 2); never in an instance's layer.
     bool InTown(const proto::WorldPosition& at) const {
@@ -381,6 +440,7 @@ struct Monsters::State {
                 }
                 if (skill->attack) out.attacks.push_back(skill);
             }
+            FillConditionals(out);
             // The unnamed bands spaced evenly over its health.
             const int n = int(out.summons.size());
             for (int i = 0; i < n; ++i) {
@@ -1006,6 +1066,19 @@ struct Monsters::State {
         }
         if (world.Moving(m.entity)) world.MoveTo(m.entity, place->position); // stop where it stands
         if (now < m.nextSwing) return;
+        // A conditional skill ready (Tab_RefAISkill) goes first: a summon's monsters raised, an attack swung in this skill's
+        // place (ours: another kind not yet).
+        if (const int c = ReadyConditional(m, nest, now); c >= 0) {
+            const Nest::Conditional& cond = nest.conditionals[std::size_t(c)];
+            if (!cond.summon.groups.empty()) {
+                RaiseSummons(m, nest, cond.summon);
+                out.swings.push_back({m.entity, m.target, cond.skill->id});
+                m.lastStrike = now;
+                m.nextSwing = now + std::chrono::milliseconds(std::max(1000, cond.skill->durationMs));
+                return;
+            }
+            if (cond.skill->attack) skill = cond.skill;
+        }
         out.swings.push_back({m.entity, m.target, skill->id});
         m.lastStrike = now;
         const game::AttackSpec attack = game::AttackOf(*skill);
@@ -1274,6 +1347,11 @@ void Monsters::SetTowns(std::function<bool(std::uint16_t)> town) { s_->town = st
 void Monsters::SetTownAreas(std::function<bool(const proto::WorldPosition&)> area) { s_->townArea = std::move(area); }
 
 void Monsters::SetSummonPlaces(std::unordered_map<std::string, proto::WorldPosition> places) { s_->summonPlaces = std::move(places); }
+
+void Monsters::SetConditionalSkills(std::unordered_map<std::uint32_t, std::vector<ConditionalSkill>> skills) {
+    s_->conditionalSkills = std::move(skills);
+    for (auto& nest : s_->nests) s_->FillConditionals(nest);
+}
 
 std::uint32_t Monsters::LinkedBody(std::uint32_t god) const {
     const auto it = s_->monsters.find(god);

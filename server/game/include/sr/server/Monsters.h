@@ -304,6 +304,15 @@ public:
     // Where a summon of that codename stands (`_RefGameWorldNPC`'s INS_DEFAULT rows named after it: the gods' loot
     // bodies), instead of the ring about its summoner.
     void SetSummonPlaces(std::unordered_map<std::string, game::proto::WorldPosition> places);
+    // A monster's conditional skills (`Tab_RefAISkill` by its tactics' monster): kind 0 once at `data` percent of its health
+    // or below, kind 1 every `data` ms; checked in order before the weighted draw at each swing.
+    struct ConditionalSkill {
+        std::string skill;
+        int kind = 0;
+        std::uint32_t data = 0;
+        int option = 0;
+    };
+    void SetConditionalSkills(std::unordered_map<std::uint32_t, std::vector<ConditionalSkill>> skills);
     // A god's linked loot body still standing (0: none): the god dead, it is struck whole in the killer's name.
     std::uint32_t LinkedBody(std::uint32_t god) const;
 

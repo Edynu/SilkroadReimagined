@@ -13008,6 +13008,20 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
                                                                float(rows.Double(k, 4))};
             }
             state->monsters->SetSummonPlaces(std::move(places));
+            // The uniques' conditional skills (Tab_RefAISkill), by their tactics' monster.
+            const QueryResult ai = db->Query(
+                "SELECT t.dwobjid, a.skillcodename, a.excuteconditiontype, a.excuteconditiondata, a.\"option\" FROM tab_refaiskill a "
+                "JOIN tab_reftactics t ON t.dwtacticsid = a.tacticsid ORDER BY t.dwobjid, a.tacticsid");
+            std::unordered_map<std::uint32_t, std::vector<Monsters::ConditionalSkill>> conditional;
+            std::set<std::pair<std::uint32_t, std::string>> seen;
+            for (int k = 0; ai.Ok() && k < ai.Rows(); ++k) {
+                const std::uint32_t obj = std::uint32_t(ai.Int(k, 0));
+                std::string code = ai.Text(k, 1);
+                while (!code.empty() && std::isspace(static_cast<unsigned char>(code.back()))) code.pop_back();
+                if (!seen.insert({obj, code}).second) continue; // a monster's tactics rows share them (its champion's)
+                conditional[obj].push_back({code, int(ai.Int(k, 2)), std::uint32_t(std::max<std::int64_t>(0, ai.Int(k, 3))), int(ai.Int(k, 4))});
+            }
+            state->monsters->SetConditionalSkills(std::move(conditional));
         }
         if (!LoadJobRules(*db, state->jobRules, error)) {
             core::LogWarning("{}: the jobs' constants: {}", config.name, error);
