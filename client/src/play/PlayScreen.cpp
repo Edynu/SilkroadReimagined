@@ -3041,7 +3041,11 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.npcGreeting = [this](const std::string& codename) { return gui_.data().NpcGreeting(codename); };
     hudContext_.npcTalk = [this](const std::string& codename) { return gui_.data().NpcTalk(codename); };
     // The underbar's shortcuts: an item's icon (what is in that place now).
+    hudContext_.slotText = [this](const game::QuickSlot& q) {
+        return q.kind == game::QuickSlot::Kind::Action ? gui_.data().Text(ActionSlotLook(q.value).second) : std::string();
+    };
     hudContext_.slotIcon = [this](const game::QuickSlot& q) {
+        if (q.kind == game::QuickSlot::Kind::Action) return ActionSlotLook(q.value).first;
         if (q.kind == game::QuickSlot::Kind::Skill) {
             const assets::SkillRow* s = tables_ && tables_->Usable() ? tables_->skills.Find(q.value) : nullptr;
             return s != nullptr && !s->iconPath.empty() ? "icon\\" + s->iconPath : std::string();
@@ -3552,6 +3556,10 @@ void PlayScreen::HudRequests(ScreenContext& context) {
             const game::QuickSlot& q = player_.quickSlots.slots[std::size_t(r.value)];
             if (q.kind == game::QuickSlot::Kind::Skill) {
                 UseSkill(context, q.value);
+                break;
+            }
+            if (q.kind == game::QuickSlot::Kind::Action) { // as a click on its icon of the Action page
+                UseAction(context, q.value);
                 break;
             }
             if (q.kind != game::QuickSlot::Kind::Item || !tables_ || !tables_->Usable()) break;

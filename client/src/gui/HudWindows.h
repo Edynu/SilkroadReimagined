@@ -233,6 +233,8 @@ struct HudContext {
     std::function<std::string(std::uint16_t region)> regionKey;
     // Icons (paths under the archive's root) and names; empty when unknown.
     std::function<std::string(const game::QuickSlot& slot)> slotIcon;
+    // An action shortcut's tooltip (what its next use does: sit or stand, walk or run, free PvP on or off).
+    std::function<std::string(const game::QuickSlot& slot)> slotText;
     // A quick slot's wait (its clock, the ready flash after it, the seconds left; all 0 / -1 when none).
     struct Cooling {
         float cooling = 0.0f, charge = 0.0f;
@@ -1329,6 +1331,8 @@ ui::Color GoldColor(std::uint64_t gold);
 
 // The skill a dragged widget is (a learned skill's icon on the Skills page): its skilldata id, 0 none.
 std::uint32_t DraggedSkill(const ui::Widget* source);
+// The action a dragged widget is (an icon of the Action page): its actionwnddata id, 0 none.
+std::uint32_t DraggedAction(const ui::Widget* source);
 // The Input page's keys (Windows key codes, in the original's order of the 34 actions) as the HUD's
 // bindings (HudOptions.cpp).
 void ApplyKeyOptions(const core::InputOptions& input, ui::KeyBindings& bindings);

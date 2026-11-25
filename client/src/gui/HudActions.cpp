@@ -27,7 +27,7 @@ public:
             if (slot == nullptr) continue;
             slot->icon = "icon\\" + row.icon.substr(row.icon.rfind("icon\\", 0) == 0 ? 5 : 0);
             slot->tooltip = context_.Text(row.textKey);
-            slot->pickable = false; // to the quick slots later
+            slot->pickable = true; // onto a quick slot: its shortcut (kind 74)
             ids_[slot] = row.id;
         }
     }
@@ -40,6 +40,11 @@ public:
         return true;
     }
 
+    std::uint32_t ActionOf(const ui::Widget* w) const {
+        const auto it = ids_.find(w);
+        return it != ids_.end() ? it->second : 0;
+    }
+
 private:
     HudContext& context_;
     std::unordered_map<const ui::Widget*, std::uint32_t> ids_;
@@ -47,6 +52,13 @@ private:
 };
 
 } // namespace
+
+std::uint32_t DraggedAction(const ui::Widget* source) {
+    for (const ui::Widget* w = source; w != nullptr; w = w->parent()) {
+        if (const auto* page = dynamic_cast<const ActionPage*>(w)) return page->ActionOf(source);
+    }
+    return 0;
+}
 
 void RegisterActionWindow(ui::Interface& ui, HudContext& context) {
     ui.Register("CIFAction", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<ActionPage>(n, *c); });

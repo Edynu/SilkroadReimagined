@@ -13,6 +13,31 @@ namespace sr::client {
 
 namespace proto = game::proto;
 
+std::pair<std::string, std::string> PlayScreen::ActionSlotLook(std::uint32_t action) const {
+    // What the next use does (the original's quick slots swap their icon and text on each change): sit or stand by
+    // the motion, walk or run by the pace, free PvP on or off by the player's team.
+    const auto own = entityMotions_.find(view_.Self());
+    const bool sitting = own != entityMotions_.end() &&
+                         (own->second.motion == proto::kMotionSit || (own->second.motion == proto::kMotionChanging && own->second.to == proto::kMotionSit));
+    const bool walking = own != entityMotions_.end() && own->second.walking;
+    const auto pvp = entityPvp_.find(view_.Self());
+    const bool freePvp = pvp != entityPvp_.end() && pvp->second.team != 0;
+    switch (action) {
+    case 1000: return sitting ? std::pair{"icon\\action\\icon_cha_stand.ddj", "UIIT_CTL_STAND"} : std::pair{"icon\\action\\icon_cha_sit.ddj", "UIIT_CTL_SIT"};
+    case 1001: return walking ? std::pair{"icon\\action\\icon_cha_run.ddj", "UIIT_CTL_RUN"} : std::pair{"icon\\action\\icon_cha_walk.ddj", "UIIT_CTL_WALK"};
+    case 1017:
+        return freePvp ? std::pair{"icon\\action\\icon_cha_frpvp_off.ddj", "UIIT_STT_FRPVP_OFF"} : std::pair{"icon\\action\\icon_cha_frpvp_on.ddj", "UIIT_STT_FRPVP_ON"};
+    default: break;
+    }
+    // The others as the Action page shows them.
+    if (hudContext_.actions != nullptr) {
+        for (const assets::ActionRow& row : *hudContext_.actions) {
+            if (row.id == action) return {"icon\\" + row.icon.substr(row.icon.rfind("icon\\", 0) == 0 ? 5 : 0), row.textKey};
+        }
+    }
+    return {};
+}
+
 void PlayScreen::UseAction(ScreenContext& context, std::uint32_t action) {
     const auto send = [this](proto::MessageId id, std::vector<std::byte> payload) {
         if (!replay_) shared_->session->SendGame(id, std::move(payload));

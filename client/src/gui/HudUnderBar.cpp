@@ -53,6 +53,8 @@ void ShowSlot(ui::Slot* slot, const HudContext& context, const game::QuickSlot& 
         slot->tooltipSigned = true;
         slot->tooltipLines = nullptr;
     }
+    // An action's shortcut: what its next use does.
+    if (q.kind == game::QuickSlot::Kind::Action && context.slotText) slot->tooltip = context.slotText(q);
     // An item shortcut shows its stack's count (expendables).
     slot->count = 0;
     slot->countAlways = false;
@@ -95,8 +97,13 @@ void LinkQuickSlotDrops(ui::Widget& window, HudContext& context) {
             if (c->hud != nullptr) c->hud->Request({HudRequest::Kind::QuickSlotChanged, to});
             return true;
         }
+        // An icon of the Action page: a shortcut to the action (kind 74, its actionwnddata id).
+        if (const std::uint32_t action = DraggedAction(source); action != 0) {
+            q.slots[std::size_t(to)] = {game::QuickSlot::Kind::Action, action};
+            if (c->hud != nullptr) c->hud->Request({HudRequest::Kind::QuickSlotChanged, to});
+            return true;
+        }
         // An item from the inventory or the equipment: a shortcut to its place (kinds 70 and 71).
-        // Actions come with their window.
         if (const int place = InventoryPlaceOf(source); place >= 0) {
             q.slots[std::size_t(to)] = {place >= game::slot::kWorn ? game::QuickSlot::Kind::Item : game::QuickSlot::Kind::Equipped,
                                         std::uint32_t(place)};

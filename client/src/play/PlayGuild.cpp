@@ -485,6 +485,22 @@ void PlayScreen::GuildScript(ScreenContext& context) {
         } else {
             core::LogWarning("game: goto-place: '{}' is not REGION,X,Z[,Y]", arg);
         }
+    } else if (verb == "quick-action" || verb == "use-quick") {
+        // quick-action:SLOT,ID: an Action page icon dropped on quick slot SLOT (its shortcut, kind 74); use-quick:SLOT:
+        // that slot pressed (as its key).
+        int slot = -1;
+        unsigned action = 0;
+        if (verb == "quick-action" && std::sscanf(arg.c_str(), "%d,%u", &slot, &action) == 2 && slot >= 0 && slot < game::QuickSlots::kCount) {
+            player_.quickSlots.slots[std::size_t(slot)] = {game::QuickSlot::Kind::Action, action};
+            hud_.Request({HudRequest::Kind::QuickSlotChanged, slot});
+            core::LogInfo("game: --guild {}: action {} on quick slot {}", step, action, slot);
+        } else if (verb == "use-quick" && std::sscanf(arg.c_str(), "%d", &slot) == 1 && slot >= 0 && slot < game::QuickSlots::kCount) {
+            hud_.UseQuickSlot(slot, context.time, true);
+            const game::QuickSlot& q = player_.quickSlots.slots[std::size_t(slot)];
+            core::LogInfo("game: --guild {}: used (its icon now {})", step, hudContext_.slotIcon ? hudContext_.slotIcon(q) : std::string());
+        } else {
+            core::LogWarning("game: --guild {}: expected quick-action:SLOT,ID or use-quick:SLOT", step);
+        }
     } else if (verb == "click-gate") {
         // click-gate:REFOBJID: the player's click on the screen where that gate stands (its spot projected), through
         // the pick as a mouse's (tries of the gates' pick).
