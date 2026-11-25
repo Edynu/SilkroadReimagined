@@ -115,7 +115,10 @@ enum class Sight : int { Free = 0, ThirdPerson = 1, QuarterView = 2 };
 
 struct InputOptions {
     static constexpr int kBindings = 34;
-    int mouseMode = 0; // 0: the wheel changes the sight, 1: the wheel uses a skill
+    // Which button turns the view (the original's choice, saved in its option file): 0 the right button, the wheel button using
+    // the short cut (UIIT_STT_USE_WHEEL_TO_USE_SKILL; the original's default), 1 the wheel button, the right button using the
+    // short cut (UIIT_STT_USE_WHEEL_TO_CHANGE_SIGHT).
+    int mouseMode = 0;
     std::array<int, kBindings> keys{};
     static InputOptions Defaults();
     // The text key naming a binding's command (UIIT_...).

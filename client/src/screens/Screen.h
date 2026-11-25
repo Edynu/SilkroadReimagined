@@ -82,6 +82,11 @@ struct ScreenContext {
     // The mouse cursor the screen wants (the original's cursor resource ids,
     // section 7); reset to the normal arrow (0x95) every frame.
     int cursor = 0x95;
+    // The mouse put back at a place this frame (pixels; the camera's method 2: where a turn began), when set.
+    bool warpMouse = false;
+    ui::Vec2 warpTo;
+    // The cursor hidden this frame (set again each frame it should stay hidden).
+    bool hideCursor = false;
     // The player's options (sro_options.cfg; the Option window edits them): a screen sets
     // optionsChanged after changing them, the app then saves and applies them (the window mode,
     // the frame limit, the renderer's settings each frame through the snapshot).

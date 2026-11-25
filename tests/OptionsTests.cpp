@@ -23,6 +23,25 @@ TEST_CASE("options start as the original's defaults") {
     CHECK_FALSE(o.game.Get("hpWarning")); // warnings and the status windows start off ...
     CHECK(GameOptions::Reset().Get("hpWarning")); // ... the Default button turns them on
     CHECK_FALSE(GameOptions::Reset().Get("windowMode"));
+    // The mouse: the right button turns the camera (method 1, the cursor free); no player's menu on a right click.
+    CHECK(o.input.mouseMode == 0);
+    CHECK(o.game.Get("cameraMethod1"));
+    CHECK_FALSE(o.game.Get("cameraMethod2"));
+    CHECK_FALSE(o.game.Get("actionShortcut"));
+}
+
+TEST_CASE("the camera's two rotation methods: one at a time") {
+    GameOptions g = GameOptions::Initial();
+    g.Set("cameraMethod2", true);
+    CHECK(g.Get("cameraMethod2"));
+    CHECK_FALSE(g.Get("cameraMethod1"));
+    g.Set("cameraMethod2", false);
+    CHECK(g.Get("cameraMethod1"));
+    g.Set("cameraMethod1", false);
+    CHECK(g.Get("cameraMethod2"));
+    g.Set("actionShortcut", true); // the other rows stay as they are
+    CHECK(g.Get("actionShortcut"));
+    CHECK(g.Get("cameraMethod2"));
 }
 
 TEST_CASE("choosing a quality preset loads it; any other change makes the record custom") {

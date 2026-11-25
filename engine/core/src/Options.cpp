@@ -85,6 +85,11 @@ const GameOptions::Row kGameRows[] = {
     {"hpWarning", "UIIT_STT_CAUTION_HP", false, true, 1},
     {"mpWarning", "UIIT_STT_CAUTION_MP", false, true, 1},
     {"warningSound", "UIIT_STT_CAUTION_SOUND", false, true, 1},
+    // The right button's (the original's Default: the short cut off, the camera's method 1): a right click on a player opens
+    // its menu; method 1 a turn past 5 pixels opens none, method 2 the cursor goes back where the turn began (one or the other).
+    {"actionShortcut", "UIIT_CTL_ACTION_LIST_ACTIVE", false, false, 1},
+    {"cameraMethod1", "UIIT_CTL_CAMERA_ROTATE_METHOD1", true, true, 1},
+    {"cameraMethod2", "UIIT_CTL_CAMERA_ROTATE_METHOD2", false, false, 1},
 };
 constexpr int kGameRowCount = static_cast<int>(sizeof(kGameRows) / sizeof(kGameRows[0]));
 static_assert(kGameRowCount <= GameOptions::kMax);
@@ -364,6 +369,11 @@ bool GameOptions::Get(std::string_view key) const {
 void GameOptions::Set(std::string_view key, bool value) {
     for (int i = 0; i < kGameRowCount; ++i) {
         if (key == kGameRows[i].key) on[static_cast<std::size_t>(i)] = value;
+    }
+    // The camera's two methods are one choice (the original's pair: one on, the other off).
+    const std::string_view other = key == "cameraMethod1" ? "cameraMethod2" : key == "cameraMethod2" ? "cameraMethod1" : "";
+    for (int i = 0; i < kGameRowCount && !other.empty(); ++i) {
+        if (other == kGameRows[i].key) on[static_cast<std::size_t>(i)] = !value;
     }
 }
 

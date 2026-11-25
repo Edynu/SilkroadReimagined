@@ -456,6 +456,9 @@ private:
     glm::dvec3 cameraFocus_{0.0};              // the point the camera looks at, in world units, eased after the character
     bool cameraFocusSet_ = false;
     bool turning_ = false;
+    bool turnHeld_ = false;   // this turn holds the cursor (the Game page's camera method 2)
+    ui::Vec2 turnFrom_;       // where the turn's button was pressed
+    bool targetMenuArmed_ = false; // the right press may still open a player's menu at its release
     InterfaceHost gui_;
     Hud hud_;
     game::PlayerState player_; // what the HUD shows

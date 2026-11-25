@@ -183,11 +183,22 @@ bool PlayScreen::PartyRequest(const HudRequest& r) {
 }
 
 void PlayScreen::PartyRightClick(ScreenContext& context, const ui::Input& in) {
-    // A right click (pressed and let go without turning the camera) on another player: selected,
-    // its menu at the mouse (the 1.188 client's CNIFTargetMenu).
+    // With the Game page's "Activate action short cut" on, a right click on another player: selected, its menu at the
+    // mouse (the 1.188 client's CNIFTargetMenu). While the right button turns the camera, camera method 1 cancels it when
+    // the mouse moved over 5 pixels either way; method 2 (the cursor held) takes the press's place, unless a frame
+    // pushed it over 5 pixels (CameraInput). While the wheel button turns, any right click.
     if (!in.Released(ui::MouseButton::Right) || gui_.interface() == nullptr || replay_) return;
-    const ui::Vec2 at = in.mouse(), from = in.PressPosition(ui::MouseButton::Right);
-    if (std::hypot(at.x - from.x, at.y - from.y) > 4.0f) return;
+    const bool armed = targetMenuArmed_;
+    targetMenuArmed_ = false;
+    if (!armed || context.options == nullptr) return;
+    const bool rightTurns = context.options->input.mouseMode == 0;
+    const ui::Vec2 from = in.PressPosition(ui::MouseButton::Right);
+    ui::Vec2 at = in.mouse();
+    if (rightTurns && context.options->game.Get("cameraMethod2")) {
+        at = from;
+    } else if (rightTurns && (std::abs(at.x - from.x) > 5.0f || std::abs(at.y - from.y) > 5.0f)) {
+        return;
+    }
     const float width = float(context.device.SwapchainWidth()), height = float(context.device.SwapchainHeight());
     const std::uint32_t other = PlayerUnder(at.x, at.y, width, height);
     const game::WorldView::Entity* e = other != 0 ? view_.Find(other) : nullptr;

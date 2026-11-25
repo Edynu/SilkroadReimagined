@@ -1337,6 +1337,8 @@ void PlayScreen::Arrive(ScreenContext& context, FrameSnapshot& snapshot) {
     black_ = 1.0f;
     if (teleport) pendingGate_ = 0;
     turning_ = false;
+    turnHeld_ = false;
+    targetMenuArmed_ = false;
     // The world screen around the character's region, with stage slots for the walkers.
     const proto::WorldPosition& at = arrival_.position;
     originX_ = at.region & 0xFF;
@@ -2503,9 +2505,12 @@ void PlayScreen::NetworkPanel() {
 }
 
 // The camera's own input, before anything this frame is drawn against the camera (the names, the hit
-// numbers, the speech, the ground decals, the scene): the right button turns it with the mouse (a turn
-// begun over the world goes on over the windows), the wheel brings it nearer or farther. Whether the
-// mouse is over a window is the interface's word from the last frame (this frame's is not out yet).
+// numbers, the speech, the ground decals, the scene): the turn button (the right one, or the wheel button by the
+// Input page's choice) turns it with the mouse (a turn begun over the world goes on over the windows), the wheel
+// brings it nearer or farther. Whether the mouse is over a window is the interface's word from the last frame (this
+// frame's is not out yet). The Game page's camera rows, as the original's: method 1 turns as the cursor moves;
+// method 2 hides the cursor and holds it where the button was pressed, turns by how far it was pushed each frame,
+// and leaves it there at the release.
 void PlayScreen::CameraInput(ScreenContext& context) {
     cameraDt_ = static_cast<float>(context.dt);
     cameraNow_ = context.time;
@@ -2513,13 +2518,36 @@ void PlayScreen::CameraInput(ScreenContext& context) {
     const ui::Input& in = *context.input;
     const bool overWindow = gui_.interface() != nullptr && (gui_.context().mouseOverUi() || gui_.interface()->pointer().held);
     const bool blocked = context.mouseBlocked || overWindow || (gui_.interface() != nullptr && gui_.interface()->pickEnded());
-    if (in.Pressed(ui::MouseButton::Right) && !blocked) turning_ = true;
-    if (!in.Down(ui::MouseButton::Right)) turning_ = false;
+    const bool wheelTurns = context.options != nullptr && context.options->input.mouseMode == 1;
+    const ui::MouseButton button = wheelTurns ? ui::MouseButton::Middle : ui::MouseButton::Right;
+    if (in.Pressed(button) && !blocked) {
+        turning_ = true;
+        turnFrom_ = in.PressPosition(button);
+        turnHeld_ = context.options != nullptr && context.options->game.Get("cameraMethod2");
+    }
+    if (turning_ && !in.Down(button)) {
+        // Method 2's cursor back where the button was pressed.
+        if (turnHeld_) {
+            context.warpMouse = true;
+            context.warpTo = turnFrom_;
+        }
+        turning_ = false;
+        turnHeld_ = false;
+    }
     if (turning_) {
+        ui::Vec2 d = in.mouseDelta();
+        if (turnHeld_) {
+            d = {in.mouse().x - turnFrom_.x, in.mouse().y - turnFrom_.y};
+            context.hideCursor = true;
+            context.warpMouse = true;
+            context.warpTo = turnFrom_;
+            // Pushed over 5 pixels in a frame: the turn's release opens no player's menu.
+            if (!wheelTurns && (std::abs(d.x) > 5.0f || std::abs(d.y) > 5.0f)) targetMenuArmed_ = false;
+        }
         // 0.005 radians a pixel both ways, the pitch within the original's +-1.0708 (half pi less 0.5; positive looks
         // down); the quarter view holds its pitch (the original's leaves it alone in view 2).
-        cameraYaw_ += in.mouseDelta().x * 0.005f;
-        if (Sight() != core::Sight::QuarterView) cameraPitch_ = std::clamp(cameraPitch_ + in.mouseDelta().y * 0.005f, -kCameraPitchLimit, kCameraPitchLimit);
+        cameraYaw_ += d.x * 0.005f;
+        if (Sight() != core::Sight::QuarterView) cameraPitch_ = std::clamp(cameraPitch_ + d.y * 0.005f, -kCameraPitchLimit, kCameraPitchLimit);
     }
     // The wheel: 6 units a notch (the original's), from 10 out to 300 (ours: the original's farthest is 150, M-13).
     if (!blocked && in.wheel() != 0.0f) cameraDistance_ = std::clamp(cameraDistance_ - in.wheel() * 6.0f, 10.0f, kCameraFarthest);
@@ -2575,10 +2603,15 @@ void PlayScreen::HandleInput(ScreenContext& context) {
         }
     }
     if (blocked) return;
+    // A right press on the world readies a player's menu when the Game page's "Activate action short cut" is on.
+    if (in.Pressed(ui::MouseButton::Right)) targetMenuArmed_ = context.options != nullptr && context.options->game.Get("actionShortcut");
     PartyRightClick(context, in); // a player's menu (PlayParty.cpp)
-    // The middle button on the world uses the underbar's M slot, as the X key does (the user's
-    // report 2026-11-13: it did nothing).
-    if (in.Pressed(ui::MouseButton::Middle) && !leaving_) hud_.UseQuickSlot(game::QuickSlots::kRightButton, context.time, false);
+    // The button that does not turn the camera uses the underbar's M slot, as the X key does: the wheel button while the
+    // right one turns, the right one while the wheel button turns (the original's mouse choice).
+    const bool wheelTurns = context.options != nullptr && context.options->input.mouseMode == 1;
+    if (in.Pressed(wheelTurns ? ui::MouseButton::Right : ui::MouseButton::Middle) && !leaving_) {
+        hud_.UseQuickSlot(game::QuickSlots::kRightButton, context.time, false);
+    }
     // A left press on the world: what is there, where it was pressed. On the press, not the
     // release: clicking from place to place the mouse is still moving, and a release a few pixels
     // on used to be taken for a drag and lost (the left button drags nothing on the world). A

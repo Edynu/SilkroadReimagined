@@ -477,6 +477,12 @@ int Run(const core::Config& config) {
             if (!cursors->images.empty()) core::LogInfo("cursors: {} from {}", cursors->images.size(), cursors->source);
             cursorsApplied = true;
         }
+        if (context.warpMouse) {
+            context.warpMouse = false;
+            window.WarpMouse(context.warpTo.x, context.warpTo.y);
+        }
+        window.HideCursor(context.hideCursor);
+        context.hideCursor = false;
         if (cursorsApplied) {
             if (toolsVisible && io.WantCaptureMouse) {
                 window.ForgetCursor();

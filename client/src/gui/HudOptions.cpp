@@ -504,7 +504,8 @@ void OptionWindow::Fill() {
         }
     }
     if (ui::Widget* input = Child(13)) {
-        if (auto* radio = ui::As<ui::RadioButton>(input->Child(20))) radio->selected = draft_.input.mouseMode;
+        // The radio's first unit is the wheel turning (mouseMode 1), its second the right button (0).
+        if (auto* radio = ui::As<ui::RadioButton>(input->Child(20))) radio->selected = 1 - draft_.input.mouseMode;
     }
     if (betaMovement_ != nullptr) betaMovement_->selected = int(draft_.beta.movement);
     if (betaNames_ != nullptr) betaNames_->selected = draft_.beta.namesFar ? 1 : 0;
@@ -592,7 +593,7 @@ void OptionWindow::Update(ui::Frame& frame) {
     Scroll(gameList_, &frame);
     // The mouse mode as its radio shows it.
     if (ui::Widget* input = Child(13)) {
-        if (auto* radio = ui::As<ui::RadioButton>(input->Child(20))) draft_.input.mouseMode = radio->selected;
+        if (auto* radio = ui::As<ui::RadioButton>(input->Child(20))) draft_.input.mouseMode = 1 - radio->selected;
     }
     // The movement as the Beta page's radio shows it.
     if (betaMovement_ != nullptr) draft_.beta.movement = core::BetaOptions::Movement(std::clamp(betaMovement_->selected, 0, 1));
@@ -736,7 +737,7 @@ bool OptionWindow::OnNotice(const ui::Notice& notice) {
     // The input page: the mouse mode; a key slot clicked waits for a key.
     if (ui::Widget* input = Child(13); input != nullptr && notice.kind == ui::Notice::Kind::Clicked) {
         if (auto* radio = ui::As<ui::RadioButton>(input->Child(20)); radio != nullptr && (notice.source == radio || notice.source->parent() == radio)) {
-            draft_.input.mouseMode = radio->selected;
+            draft_.input.mouseMode = 1 - radio->selected;
             return true;
         }
     }
@@ -747,6 +748,7 @@ bool OptionWindow::OnNotice(const ui::Notice& notice) {
         for (auto& [box, row] : gameBoxes_) {
             if (notice.source == box) {
                 draft_.game.Set(rows[row].key, box->checked);
+                Fill(); // a pair's other box (the camera's two methods) follows
                 return true;
             }
         }

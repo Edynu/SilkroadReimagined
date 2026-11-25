@@ -157,6 +157,26 @@ bool Window::SetMode(Mode mode) {
     return false;
 }
 
+void Window::WarpMouse(float x, float y) {
+    // The UI's pixels back to the window's coordinates SDL takes.
+    int windowW = 0, windowH = 0, pixelW = 0, pixelH = 0;
+    SDL_GetWindowSize(Sdl(window_), &windowW, &windowH);
+    SDL_GetWindowSizeInPixels(Sdl(window_), &pixelW, &pixelH);
+    const float sx = pixelW > 0 ? static_cast<float>(windowW) / static_cast<float>(pixelW) : 1.0f;
+    const float sy = pixelH > 0 ? static_cast<float>(windowH) / static_cast<float>(pixelH) : 1.0f;
+    SDL_WarpMouseInWindow(Sdl(window_), x * sx, y * sy);
+}
+
+void Window::HideCursor(bool hide) {
+    if (hide == cursorHidden_) return;
+    cursorHidden_ = hide;
+    if (hide) {
+        SDL_HideCursor();
+    } else {
+        SDL_ShowCursor();
+    }
+}
+
 bool Window::Translate(const void* sdlEvent, ui::InputEvent& out) const {
     const SDL_Event& e = *static_cast<const SDL_Event*>(sdlEvent);
     // SDL reports the mouse in window coordinates; the UI works in pixels.

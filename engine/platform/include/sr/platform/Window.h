@@ -76,11 +76,16 @@ public:
     void UseCursor(int key);
     // Someone else (the developer tools) set the cursor: the next UseCursor sets it again.
     void ForgetCursor() { cursor_ = -2; }
+    // Puts the mouse at a place in the window, in pixels (the UI's units).
+    void WarpMouse(float x, float y);
+    // Hides the cursor (the camera's turn with the cursor held) or shows it again.
+    void HideCursor(bool hide);
 
 private:
     void* window_ = nullptr;
     std::unordered_map<int, void*> cursors_; // SDL_Cursor*
     int cursor_ = -1;
+    bool cursorHidden_ = false;
     bool resized_ = false;
 };
 
