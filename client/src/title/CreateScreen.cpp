@@ -106,6 +106,7 @@ void CreateScreen::Enter(ScreenContext& context) {
     backdrop.fovY = 45.0f * kPi / 180.0f; // the character window's 45 (inferred: its field of view)
     world_ = std::make_unique<WorldScreen>(backdrop);
     world_->Enter(context);
+    loading_.Begin(context.assets, europe_ ? "interface\\loading\\loading_charactercustom_europe.ddj" : "interface\\loading\\loading_charactercustom.ddj");
 
     // The setup's choices: a man, the first figure, height and volume in the
     // middle, no weapon; China's armour starts at its first kind, Europe's at none.
@@ -127,6 +128,7 @@ void CreateScreen::Enter(ScreenContext& context) {
 
 void CreateScreen::Exit(ScreenContext& context, FrameSnapshot& snapshot) {
     if (shared_) context.jobs.Wait(shared_->charactersJob); // it reads the file system
+    loading_.End(context.assets);
     if (world_) world_->Exit(context, snapshot);
     world_.reset();
     if (const rhi::TextureHandle t = atlas_.Release()) snapshot.releaseTextures.push_back(t);
@@ -362,12 +364,26 @@ void CreateScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     if (!shown_ && world_ && world_->Settled() && world_->StageReady(0)) {
         shown_ = true;
         screenFade_.In(0.5f);
+        loading_.End(context.assets);
     }
     screenFade_.Draw(*kit_, width, height);
     ui_.EndLayer();
     ui_.EndFrame();
     if (font) atlas_.Sync(context.device, *font);
     for (const ui::DrawList* list : ui_.DrawOrder()) AppendUi(list == under ? snapshot.uiUnder : snapshot.ui, *list);
+    // Not in yet: the race's loading picture over it all, its gauge by the town's streaming.
+    if (!shown_ && world_) {
+        loading_.SetProgress(world_->StreamProgress(context.assets));
+        loadingUi_.Clear();
+        loading_.Draw(context.assets, loadingUi_, width, height);
+        AppendUi(snapshot.ui, loadingUi_);
+        // --capture-loading: the loading picture itself, once its pictures are in.
+        // (the town's own wait is let go: this frame is the one wanted)
+        if (context.config.GetBool("capture-loading", false) && loading_.Ready(context.assets) && loading_.Progress() > 0.0f) {
+            context.holdCapture = false;
+            return;
+        }
+    }
     context.textInput = ui_.typing();
 
     // Automated runs: once dressed, type the name, confirm and create.

@@ -22,6 +22,7 @@
 #include "title/ScreenFade.h"
 #include "title/TitleShared.h"
 #include "title/UiKit.h"
+#include "world/LoadingScreen.h"
 
 namespace sr::client {
 
@@ -76,6 +77,10 @@ private:
     float angle_ = 0.0f, spin_ = 0.0f; // the character's turn (degrees) and its speed (degrees / s)
     bool lookDirty_ = true;
     bool shown_ = false; // the town and the character were in once: no black after that
+    // Until then, the original's loading picture of the race's custom screen (the lobby layout's GDR_LOADING_CHINA /
+    // _EUROPE with its frame, gauge and caption: 1.188's CPSCharacterSelect state 9).
+    LoadingScreen loading_;
+    ui::DrawList loadingUi_;
     ScreenFade screenFade_; // in from black over 0.5 s when shown; out before the lobby
     bool leaving_ = false;
     float height_ = 1.0f; // the dressed height factor
