@@ -156,7 +156,7 @@ std::string UseLine(const QuestDef::UseRule& u) {
         s += std::format(" after {} minutes {}", w.after, w.minutes);
         if (!w.notMaster.Empty()) s += " master " + Text(w.notMaster);
         if (!w.transport.Empty()) s += " transport " + Text(w.transport);
-        for (const QuestText& t : w.comes) s += " comes " + Text(t);
+        for (std::size_t i = 0; i < w.comes.size(); ++i) s += (i < w.replies.size() && w.replies[i] ? " replies " : " comes ") + Text(w.comes[i]);
         if (!w.begun.Empty()) s += " begun " + Text(w.begun);
         for (const auto& [minutes, text] : w.warnings) s += std::format(" warn {} {}", minutes, Text(text));
         if (!w.slain.Empty()) s += " slain " + Text(w.slain);
@@ -864,7 +864,7 @@ bool ParseUse(Reader& r, QuestDef& q, bool talk) {
             } else {
                 ok = r.Text(what == "says" ? generals.back().says : what == "dies" ? generals.back().dies : generals.back().last, "what is said");
             }
-        } else if (what == "unique" || what == "after" || what == "master" || what == "transport" || what == "comes" || what == "begun" ||
+        } else if (what == "unique" || what == "after" || what == "master" || what == "transport" || what == "comes" || what == "replies" || what == "begun" ||
                    what == "slain" || what == "over" || ((what == "minutes" || what == "warn") && !u.capture && u.instance)) {
             if (!u.instance) {
                 ok = r.Fail(std::format("'{}' belongs to an 'instance'", what));
@@ -886,8 +886,9 @@ bool ParseUse(Reader& r, QuestDef& q, bool talk) {
                     u.instance->notMaster = std::move(t);
                 } else if (what == "transport") {
                     u.instance->transport = std::move(t);
-                } else if (what == "comes") {
+                } else if (what == "comes" || what == "replies") {
                     u.instance->comes.push_back(std::move(t));
+                    u.instance->replies.push_back(what == "replies");
                 } else if (what == "begun") {
                     u.instance->begun = std::move(t);
                 } else if (what == "slain") {

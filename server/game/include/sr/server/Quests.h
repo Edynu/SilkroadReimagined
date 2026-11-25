@@ -138,6 +138,12 @@ public:
         (void)player;
         (void)key;
     }
+    // A text key spoken by a character (`speaker`: a monster, an NPC or a player), told to `player` (the original's 0x3026
+    // kind 13 to those near it: inside a quest's instance, its members). By default the plain line.
+    virtual void QuestSpeak(std::uint32_t player, std::uint32_t speaker, const std::string& key) {
+        (void)speaker;
+        QuestSay(player, key);
+    }
     // --- The original's other item handlers ----------------------------------------
     // The living monster the player has selected (none: nothing, or no living monster).
     struct Selected {
@@ -189,6 +195,11 @@ public:
     virtual std::uint16_t QuestDay() { return 0; }
     // A raised monster's nest's monsters standing (0: dead, or gone).
     virtual int QuestSpawnStanding(std::size_t nest) {
+        (void)nest;
+        return 0;
+    }
+    // A raised monster's entity while it stands (0: none).
+    virtual std::uint32_t QuestSpawnEntity(std::size_t nest) {
         (void)nest;
         return 0;
     }
@@ -407,6 +418,9 @@ private:
         std::optional<Clock::time_point> ends; // the time's end, from the (first) battle's begin
         Clock::time_point next; // Waiting: the unique's coming; Fighting: the time's end; Ending: everyone out
         std::size_t unique = SIZE_MAX;
+        // Who speaks its lines (the original's kind 13): the unique's entity, kept past its death for its last words; the
+        // player it came by (a `replies` line's speaker).
+        std::uint32_t uniqueEntity = 0, opener = 0;
         std::set<std::uint32_t> warned; // the warnings said (minutes left)
     };
     std::vector<QuestWorld> worlds_;

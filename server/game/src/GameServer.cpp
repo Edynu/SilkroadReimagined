@@ -4783,6 +4783,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (Peer* peer = peers->Find(world->PeerOf(entity))) SendMessage(*peer->connection, proto::InstanceNotice{key, false, false, true});
     }
     void SummonSay(std::uint32_t entity, const std::string& key) override { QuestSay(entity, key); }
+    // A character's line (the original's 0x3026 kind 13: its entity and the text key; the client names it).
+    void QuestSpeak(std::uint32_t entity, std::uint32_t speaker, const std::string& key) override {
+        if (Peer* peer = peers->Find(world->PeerOf(entity))) SendMessage(*peer->connection, proto::ChatLine{proto::ChatKind::Speech, speaker, {}, key});
+    }
     std::optional<SummonHost::User> SummonUser(std::uint32_t entity) override {
         const PlayerWorld* p = PlayerByEntity(entity);
         const auto at = world->Where(entity);
@@ -4937,6 +4941,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         world->Leave(cos);
     }
     int QuestSpawnStanding(std::size_t nest) override { return monsters && monsters->NestSpec(nest) != nullptr ? monsters->NestCounts(nest).first : 0; }
+    std::uint32_t QuestSpawnEntity(std::size_t nest) override {
+        if (!monsters || monsters->NestSpec(nest) == nullptr) return 0;
+        const std::vector<std::uint32_t> standing = monsters->NestMonsters(nest);
+        return standing.empty() ? 0 : standing.front();
+    }
     // A quest's instance (Quests::OpenWorld): the party's members here, its master, a transport out, the world's layer.
     std::vector<std::uint32_t> QuestPartyHere(std::uint32_t entity) override { return parties ? parties->MemberEntities(entity) : std::vector<std::uint32_t>{}; }
     bool QuestPartyMaster(std::uint32_t entity) override { return parties && parties->Leads(entity); }

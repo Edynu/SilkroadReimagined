@@ -709,6 +709,10 @@ enum class ChatKind : std::uint8_t {
     Notice = 7,   // the server's notice: no speaker
     Stall = 9,    // the people at a stall
     Union = 11,
+    // A character's line (the original's kind 13): `sender` the one who speaks, `text` a text key, no name (the client
+    // names it). A monster's or an NPC's prints as "Name: line" with its bubble; a player's as its own All line (the
+    // coded quests' players' replies, as the original's client turns them).
+    Speech = 13,
     Academy = 16,
 };
 

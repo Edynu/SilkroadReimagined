@@ -172,6 +172,7 @@ void SampleCharacter(game::PlayerState& s, game::WorldView& world, double now, c
     line(proto::ChatKind::Guild, 0, "Bo", "guild meeting at 8");
     line(proto::ChatKind::Union, 0, "Lee", "union war tonight");
     line(proto::ChatKind::Global, 0, "Merchant", "Selling elixirs, whisper me");
+    line(proto::ChatKind::Speech, 0, "Demon Shaitan", "You will not leave this place."); // a monster's line (as named by PlayScreen)
     line(proto::ChatKind::Notice, 0, "", "The server will be checked in 10 minutes.");
     s.Notify(game::Banner::Kind::Notice, "The server will be checked in 10 minutes.", now);
     s.Notify(game::Banner::Kind::Warning, "[Tiger Girl]has appeared.", now);

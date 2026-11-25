@@ -1134,6 +1134,18 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
             berserkEffects_.erase(kept);
         }
     }
+    // A character's line (chat kind 13, a text key): named here, as the original's client names it by its entity. A
+    // player's (a coded quest's reply) is its own All line; a monster's or an NPC's stays a speech, with its name.
+    if (auto* line = std::get_if<proto::ChatLine>(&event); line != nullptr && line->kind == proto::ChatKind::Speech) {
+        line->text = gui_.data().Text(line->text);
+        if (const game::WorldView::Entity* who = view_.Find(line->sender); who != nullptr && IsPlayer(*who)) {
+            line->kind = proto::ChatKind::All;
+            line->name = who->look.name;
+            if (line->sender == view_.Self()) line->sender = 0; // shown, not taken for the player's own echo (its bubble by name)
+        } else if (who != nullptr && tables_ && tables_->Usable()) {
+            if (const assets::ObjectRow* row = tables_->characters.Find(who->look.model)) line->name = gui_.data().Text(row->nameKey);
+        }
+    }
     view_.Apply(event);
     player_.Apply(event);
     if (const auto* link = std::get_if<proto::LinkAdded>(&event)) {
@@ -3720,6 +3732,7 @@ void PlayScreen::TakeSpeech(double now) {
             }
             break;
         case proto::ChatKind::Global: colour = ui::Argb(0xFFFFFF00); break;
+        case proto::ChatKind::Speech: colour = ui::Argb(0xFFDBADF8); break; // a monster's or an NPC's line
         default: continue;
         }
         std::uint32_t who = e.sender != 0 && view_.Find(e.sender) != nullptr ? e.sender : 0;

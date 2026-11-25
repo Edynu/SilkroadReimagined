@@ -311,7 +311,7 @@ const std::vector<OriginalUseRule> kRules = {
     {"QNO_EU_IVY_3",
      "on use ITEM_QNO_EU_IVY_3_06 status 1 7 8 place-first party @SN_TALK_QNO_EU_IVY_3_08 at 25183 1882 -169 632 600 away @SN_TALK_QNO_EU_IVY_3_10 "
      "instance INS_QNO_EU_IVY_3 unique MOB_QT_01_IVY after 30 minutes 20 master @SN_TALK_QNO_EU_IVY_3_09 comes @SN_TALK_QNO_EU_IVY_3_11 "
-     "comes @SN_TALK_QNO_EU_IVY_3_12 comes @SN_TALK_QNO_EU_IVY_3_13 begun @SN_TALK_QNO_EU_IVY_3_24 warn 10 @SN_TALK_QNO_EU_IVY_3_14 "
+     "replies @SN_TALK_QNO_EU_IVY_3_12 comes @SN_TALK_QNO_EU_IVY_3_13 begun @SN_TALK_QNO_EU_IVY_3_24 warn 10 @SN_TALK_QNO_EU_IVY_3_14 "
      "warn 5 @SN_TALK_QNO_EU_IVY_3_15 slain @SN_TALK_QNO_EU_IVY_3_21 over @SN_TALK_QNO_EU_IVY_3_22"},
     // states 1/7/8, the world, the calabash (_01) and the stone held (silently), the tomb's floor 0x8005 within 2000 of
     // (184, 72, 157) (_23), the party (_21), its master (_22); the

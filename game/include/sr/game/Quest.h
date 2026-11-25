@@ -409,6 +409,10 @@ struct QuestDef {
             std::string world, unique;
             std::uint32_t after = 30, minutes = 20;
             std::vector<QuestText> comes;
+            // Each `comes` line's speaker: the unique, or (`replies TEXT`) the player who opened it (IVY_3's _12). The
+            // unique's lines (`comes`, `slain`, `over`; a general's `says`, `dies`, `last`) are spoken by it, the original's
+            // kind 13 chat; `begun`, the warnings and the rest are notices.
+            std::vector<bool> replies;
             QuestText begun, slain, over, notMaster, transport;
             std::vector<std::pair<std::uint32_t, QuestText>> warnings; // minutes left, said then
             // Uniques in turn instead of one (QNO_TQ_ORNAMENT_4's and QNO_TQ_STONEBOARD_4's four generals): the first

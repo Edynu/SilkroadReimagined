@@ -2118,6 +2118,14 @@ void Quests::TickWorlds(Clock::time_point now) {
         const auto all = [&](const game::QuestText& t) {
             for (const std::uint32_t m : w.inside) say(m, t);
         };
+        // A character's line: the unique's (a general's), or a `replies` line's player, to everyone inside.
+        if (w.unique != SIZE_MAX) {
+            if (const std::uint32_t e = host_.QuestSpawnEntity(w.unique); e != 0) w.uniqueEntity = e;
+        }
+        const auto speak = [&](std::uint32_t speaker, const game::QuestText& t) {
+            if (t.Empty()) return;
+            for (const std::uint32_t m : w.inside) host_.QuestSpeak(m, speaker, t.key.empty() ? t.literal : t.key);
+        };
         switch (w.phase) {
         case QuestWorld::Phase::Waiting: {
             if (now < w.next) break;
@@ -2149,6 +2157,8 @@ void Quests::TickWorlds(Clock::time_point now) {
             const auto nest = host_.QuestSpawn(by, unique, at);
             if (!nest) break; // its ground not in yet: the next second
             w.unique = *nest;
+            w.uniqueEntity = host_.QuestSpawnEntity(*nest);
+            w.opener = by;
             w.uniqueAt = at;
             w.moved = false;
             // The opening: 2 s on its first line, each next 5 s on, the battle begun 5 s after the last (IVY_3's tick
@@ -2167,14 +2177,14 @@ void Quests::TickWorlds(Clock::time_point now) {
                 // Slain (a general's too): its words; a general before the last, the next one `next` seconds on;
                 // the last one, everyone out (the members' kills counted by the kill).
                 if (chain && w.general + 1 < spec.generals.size()) {
-                    all(spec.generals[w.general].dies);
+                    speak(w.uniqueEntity, spec.generals[w.general].dies);
                     ++w.general;
                     if (spec.generals[w.general].movesTo) all(spec.moving); // "You will be teleported ... in 50 seconds." 
                     w.phase = QuestWorld::Phase::Waiting;
                     w.next = now + std::chrono::seconds(spec.next);
                     break;
                 }
-                all(chain ? spec.generals[w.general].dies : spec.slain);
+                speak(w.uniqueEntity, chain ? spec.generals[w.general].dies : spec.slain);
                 if (spec.wayOut) {
                     // Its way out where it came, 20..100 added to its x and to its z (the original's rand / 32767 x 80 + 20
                     // each); the members leave by it, the time's end puts out the rest.
@@ -2204,7 +2214,8 @@ void Quests::TickWorlds(Clock::time_point now) {
                 if (now < w.next) break;
                 const std::vector<game::QuestText> lines = chain ? std::vector<game::QuestText>{spec.generals[w.general].says} : spec.comes;
                 if (w.line < lines.size()) {
-                    all(lines[w.line++]);
+                    const bool reply = !chain && w.line < spec.replies.size() && spec.replies[w.line];
+                    speak(reply ? w.opener : w.uniqueEntity, lines[w.line++]);
                     w.next = now + std::chrono::seconds(5);
                     break;
                 }
@@ -2225,7 +2236,7 @@ void Quests::TickWorlds(Clock::time_point now) {
             }
             if (now >= *w.ends) {
                 // Its time over: the unique's (the general's) words, it goes, everyone out 10 s later.
-                all(chain ? spec.generals[w.general].last : spec.over);
+                speak(w.uniqueEntity, chain ? spec.generals[w.general].last : spec.over);
                 host_.QuestDespawn(w.unique);
                 w.phase = QuestWorld::Phase::Ending;
                 w.next = now + std::chrono::seconds(10);

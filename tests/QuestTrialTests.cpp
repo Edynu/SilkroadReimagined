@@ -120,6 +120,17 @@ struct TrialHost : server::QuestHost {
     }
     void QuestDespawn(std::size_t nest) override { raised.at(nest).gone = true; }
     int QuestSpawnStanding(std::size_t nest) override { return nest < raised.size() && !raised[nest].gone && raised[nest].standing ? 1 : 0; }
+    // A raised monster's entity: 1000 + its nest while it stands.
+    std::uint32_t QuestSpawnEntity(std::size_t nest) override { return QuestSpawnStanding(nest) != 0 ? 1000 + std::uint32_t(nest) : 0; }
+    // A character's line: who spoke it (also told, as a line).
+    std::vector<std::pair<std::uint32_t, std::string>> spoken;
+    void QuestSpeak(std::uint32_t entity, std::uint32_t speaker, const std::string& key) override {
+        spoken.push_back({speaker, key});
+        told.push_back({entity, key});
+    }
+    bool Spoke(std::uint32_t speaker, const std::string& key) const {
+        return std::find(spoken.begin(), spoken.end(), std::pair{speaker, key}) != spoken.end();
+    }
     std::vector<std::uint32_t> QuestPartyHere(std::uint32_t) override { return party; }
     bool QuestPartyMaster(std::uint32_t entity) override { return entity == 1 && master; }
     // In a party sharing both (who.sharedParty): a kill's share among the killer alone here.
@@ -1039,10 +1050,16 @@ TEST_CASE("Quest talk rule: OLDWOMAN_6's Meet Shaitan takes the members holding 
         CAPTURE(line);
         CHECK(host.Told(1, line));
     }
-    // Slain: his last words and a way out back where its user came in.
+    // Shaitan speaks his own lines (the original's kind 13 from him); the battle's begin is a notice.
+    const std::uint32_t shaitan = 1000 + std::uint32_t(host.raised.size() - 1);
+    CHECK(host.Spoke(shaitan, "SN_TALK_QNO_RM_OLDWOMAN_6_25"));
+    CHECK(host.Spoke(shaitan, "SN_TALK_QNO_RM_OLDWOMAN_6_11"));
+    CHECK_FALSE(host.Spoke(shaitan, "SN_TALK_QNO_RM_OLDWOMAN_6_34"));
+    // Slain: his last words (spoken by him, dead) and a way out back where its user came in.
     host.raised.back().standing = false;
     quests.Tick(start + 70s);
     CHECK(host.Told(1, "SN_TALK_QNO_RM_OLDWOMAN_6_12"));
+    CHECK(host.Spoke(shaitan, "SN_TALK_QNO_RM_OLDWOMAN_6_12"));
     REQUIRE(host.ways.size() == 1);
     CHECK_FALSE(host.ways[0].to.has_value());
 }

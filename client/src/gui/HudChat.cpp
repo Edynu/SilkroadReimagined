@@ -113,6 +113,8 @@ ChatWindow::Shown ChatWindow::Format(const game::ChatEntry& e, const HudContext&
     case proto::ChatKind::Union: return {kUnion, kUnionLime, e.name + tag("UIIT_STT_GUILD_RESPECT_ALLY") + text};
     // The academy's: "(Academy):" in its blue (colour 0xFF64C7FF), in All alone.
     case proto::ChatKind::Academy: return {kAcademy, kAcademyBlue, e.name + tag("UIIT_CTL_TC_TRAININGCAMP") + text};
+    // A monster's or an NPC's line (kind 13): "Name:line" in the original's 0xFFDBADF8.
+    case proto::ChatKind::Speech: return {kAll, ui::Argb(0xFFDBADF8), e.name + ":" + text};
     default: break;
     }
     return {0, 0, {}}; // the stall's chat is its window's (C7j)
