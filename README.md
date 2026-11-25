@@ -158,6 +158,13 @@ Some tests need more, and skip without it:
 | `tools/` | `pk2tool` |
 | `deploy/` | the shard's settings files |
 
+## Friends of the project
+
+Silkroad Reimagined is not the only open project bringing Silkroad Online back to life. Please visit our friends at
+**[OpenSRO](https://github.com/opensro-dev/opensro)**: an open-source Silkroad Online server, built in the open by
+people who love the game as much as we do. Have a look at their code, star the repository, try it out and lend them a
+hand. Every open project like these keeps the game and its community alive.
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE): you may use, study, change and share this software. Anyone who distributes a changed
