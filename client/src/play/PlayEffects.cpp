@@ -453,6 +453,15 @@ void PlayScreen::KeptEffects(ScreenContext& context) {
 
 // --- States -------------------------------------------------------------------------------------
 
+namespace {
+// Each state kind's part of its lines' keys (the 1.188 client's table by mask bit, here by game::StateKind): the player's
+// own state begun says UIIT_MSG_STATE_SKILL_CURSING_<part>, ended UIIT_MSG_STATE_SKILL_CURSING_RELEASE_<part>.
+constexpr const char* kStateLineParts[25] = {"FZ",       "FB",       "BU",        "ES",        "PS",       "ZB",       "SLEEP",
+                                             "ROOT",     "SLOW",     "FEAR",      "MYOPIA",    "BLOOD",    "STONE",    "DN",
+                                             "STUN",     "DISEASE",  "CHAOS",     "CURSE_PD",  "CURSE_MD", "CURSE_STR", "CURSE_INT",
+                                             "CURSE_HP", "CURSIE_MP", nullptr,    "TIME_BOMB"};
+} // namespace
+
 void PlayScreen::TakeStates(const proto::EntityStates& message, double now) {
     // The server's list is all the states the entity is in: those gone end (their end effect, their
     // loops released), those still there keep when they began.
@@ -477,6 +486,26 @@ void PlayScreen::TakeStates(const proto::EntityStates& message, double now) {
         const std::size_t slot = SlotOf(message.entity);
         const auto* stages = tables_ && tables_->Usable() ? tables_->skillAnimations.Stages(StateTitle(game::StateBit(old.kind))) : nullptr;
         if (world_ && stages != nullptr && slot != StageEffects::kNone) stageEffects_.StateEnd(*world_, *stages, slot);
+    }
+    // The player's own: a line for each begun and each ended (a Status line and the warning banner, as the original's).
+    if (message.entity == view_.Self() && gui_.data().Ready()) {
+        const auto has = [](const std::vector<ShownState>& list, game::StateKind k) {
+            return std::any_of(list.begin(), list.end(), [&](const ShownState& s) { return s.kind == k; });
+        };
+        const auto say = [&](game::StateKind k, bool begun) {
+            const std::size_t i = std::size_t(k);
+            if (i >= std::size(kStateLineParts) || kStateLineParts[i] == nullptr) return;
+            const std::string line = gui_.data().Text(std::string(begun ? "UIIT_MSG_STATE_SKILL_CURSING_" : "UIIT_MSG_STATE_SKILL_CURSING_RELEASE_") +
+                                                      kStateLineParts[i]);
+            player_.Post(game::GameMessage::Kind::Status, line, now);
+            player_.Notify(game::Banner::Kind::Warning, line, now);
+        };
+        for (const ShownState& s : next) {
+            if (!has(a.states, s.kind)) say(s.kind, true);
+        }
+        for (const ShownState& s : a.states) {
+            if (!has(next, s.kind)) say(s.kind, false);
+        }
     }
     a.states = std::move(next);
     // The player's own on its buff board (the lower rows; their gauge from when each was first seen).

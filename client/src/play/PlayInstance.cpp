@@ -201,10 +201,10 @@ void PlayScreen::HandleInstance(ScreenContext& context, const proto::InstanceEve
         player_.Notify(game::Banner::Kind::Warning, line, context.time);
         core::LogInfo("game: roc: {}", line);
     } else if (const auto* alert = std::get_if<proto::InstanceAlert>(&event)) {
-        // "After %02d:%02d later, user will move to saved return place." (the minutes and seconds left).
-        std::string line = text("UIIT_MSG_INSTANCEDUNGEON_ALERT_MSG_01");
-        if (const std::size_t at = line.find("%02d"); at != std::string::npos) line.replace(at, 4, std::format("{:02}", alert->seconds / 60));
-        if (const std::size_t at = line.find("%02d"); at != std::string::npos) line.replace(at, 4, std::format("{:02}", alert->seconds % 60));
+        // The original's 0x300C alarm (1.188's Msg_300C: a byte, the minutes left): "After %d minute, instance dungeon will
+        // vanish. When it vanish, user will move to saved return place.", in the chat and on the warning banner.
+        std::string line = text("UIIT_MSG_EGYPT_DUNGEON_DESTROY_ALARM");
+        if (const std::size_t at = line.find("%d"); at != std::string::npos) line.replace(at, 2, std::to_string((alert->seconds + 30) / 60));
         post(line);
         player_.Notify(game::Banner::Kind::Warning, line, context.time);
     } else if (const auto* temple = std::get_if<proto::TempleNotice>(&event)) {
