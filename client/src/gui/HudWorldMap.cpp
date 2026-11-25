@@ -4,8 +4,8 @@
 // (20: following the player, switching to the map the player stands in, centred on the player; any press in the view
 // stops it), the floor spinner (4: up 22, down 24, its label 27; a dungeon of several floors). A place's picture on
 // the world map opens that place's map. The player's arrow and the party's members are drawn on it.
-// Ours, against the original: the guide (11, CNIFWorldMapGuide) with its side tab, the level's monster list of the
-// bottom bar and its box, the small window (7), the tooltips and the fortresses' icons on the world map are not
+// The guide (11, CNIFWorldMapGuide, worldmapguidedata.txt) opens by the side arrow (15); the bottom bar's monster box (31)
+// marks the monsters near the player's level. Ours, against the original: the small window (7) and the tooltips are not
 // built; the player's floor in a dungeon of several is not known yet (the shown floor is kept, else the first).
 
 #include <algorithm>
