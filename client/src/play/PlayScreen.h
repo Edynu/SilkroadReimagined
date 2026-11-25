@@ -414,6 +414,9 @@ private:
         double started = 0;
         bool hideSelf = false;
         bool bars = false;
+        std::string name;              // its script's name
+        std::minstd_rand random{std::random_device{}()}; // its #rand(a,b)
+        GameAudio* music = nullptr;    // its music started there (S_SetBGM): the area's again at its end
         float barsSeconds = 2.0f, barsHeight = 120.0f;
         double barsShown = 0; // 0..1, sliding
         std::vector<assets::CameraKey> inserting, track;
@@ -437,6 +440,7 @@ private:
             bool hidden = false; // *SCR_OBJ_NODRAW
             bool noIdle = false; // *SCR_OBJ_NOIDLE: a clip played through holds its last frame
             double clipFrom = 0; // S_ObjectAniToName's clip started then (scene time)
+            std::uint32_t figure = 0; // S_ObjectCreateIndex's player figure (its RefObjID), dressed by S_ObjectEquipSetIndex
             std::vector<std::uint32_t> effects; // S_DecoEftAdd's on its bones, until S_DecoEftClear
         };
         std::map<std::string, Placed> looks;

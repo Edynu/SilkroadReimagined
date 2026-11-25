@@ -99,6 +99,9 @@ public:
     void SetPlace(std::uint16_t region, float x, float z, bool night);
     // A Music.pk2 file by name (cross-faded), or silence with an empty name. Ambience off too.
     void PlayMusic(std::string_view file);
+    // A quest scene's music (S_SetBGM): it plays over the area's, which no change of place replaces until it ends
+    // (an empty name: the area's music again).
+    void SceneMusic(std::string_view file);
     void Silence();
 
 private:
@@ -126,6 +129,7 @@ private:
     std::unordered_map<std::string, std::string> voiceObjects_; // codename -> effectsound object
     // The place's sound.
     std::string area_;
+    std::string sceneMusic_; // SceneMusic's track while it plays
     bool night_ = false;
     std::vector<Ambient> ambience_;
 };

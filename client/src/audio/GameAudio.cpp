@@ -360,7 +360,7 @@ void GameAudio::SetPlace(std::uint16_t region, float x, float z, bool night) {
     night_ = night;
     if (areaChanged) {
         core::LogInfo("audio: area {} ({}): {}", area_, area->town ? "town" : "field", sounds->music);
-        sound_.PlayMusic(sounds->music);
+        if (sceneMusic_.empty()) sound_.PlayMusic(sounds->music);
     }
     std::vector<Ambient> list;
     for (const audio::AreaSounds::Ambient& a : night ? sounds->night : sounds->day) list.push_back({a.path, a.minSeconds, a.maxSeconds});
@@ -368,6 +368,18 @@ void GameAudio::SetPlace(std::uint16_t region, float x, float z, bool night) {
 }
 
 void GameAudio::PlayMusic(std::string_view file) { sound_.PlayMusic(file); }
+
+void GameAudio::SceneMusic(std::string_view file) {
+    if (!file.empty()) {
+        sceneMusic_ = std::string(file);
+        sound_.PlayMusic(file);
+        return;
+    }
+    if (sceneMusic_.empty()) return;
+    sceneMusic_.clear();
+    const audio::AreaSounds* sounds = Ready() && !area_.empty() ? tables_->areas.Find(area_) : nullptr;
+    sound_.PlayMusic(sounds != nullptr ? sounds->music : std::string());
+}
 
 void GameAudio::Silence() {
     sound_.PlayMusic({});
