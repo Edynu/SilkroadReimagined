@@ -129,8 +129,9 @@ const char* JobSuitKey(std::uint16_t code, bool* banner = nullptr) {
 } // namespace
 
 // An item's slot: its icon, a stackable's count (shown even at 1), red when it cannot be used.
-void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& context) {
+void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& context, bool wornMarks) {
     const assets::ItemRow* row = item != nullptr && context.items != nullptr ? context.items->Find(item->refId) : nullptr;
+    slot.worn = slot.broken = false;
     if (row == nullptr) {
         slot.icon.clear();
         slot.count = 0;
@@ -179,6 +180,12 @@ void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& 
     // What is not worn (a potion, a scroll) by its level alone.
     for (std::size_t i = 0; place < 0 && i < 4; ++i) {
         if (row->requirementTypes[i] == 1 && context.wearer.level < row->requirementLevels[i]) slot.usable = false;
+    }
+    // A piece with a durability under 7 (the bag's and the equipment's slots): pulsing while it may be worn; broken, its
+    // red frame when that alone keeps it off (another reason: the plain veil).
+    if (wornMarks && game::NewDurability(*row) > 0 && item->durability < 7) {
+        slot.worn = item->durability > 0;
+        slot.broken = check == game::EquipCheck::Broken && game::RequirementsMet(*row, context.wearer) == game::EquipCheck::Ok;
     }
 }
 
@@ -799,7 +806,7 @@ void InventoryWindow::Refresh() {
         }
         slot.enabled = true;
         slot.pickable = !ServicePicking(context_); // a pick mode takes the click (HudServices.cpp)
-        ShowItem(slot, inv.At(std::uint8_t(13 + k)), context_);
+        ShowItem(slot, inv.At(std::uint8_t(13 + k)), context_, true);
         // Offered in an exchange: held there, under a white veil, until it ends.
         slot.ghost = context_.exchange != nullptr && context_.exchange->Offered(int(13 + k));
         if (slot.ghost) slot.pickable = false;
@@ -1726,7 +1733,7 @@ void EquipmentWindow::Refresh() {
         ui::Slot& slot = *slots_[std::size_t(i)];
         slot.ghost = false;
         slot.pickable = context_.servicePick != 1; // the store's Repair takes the click (HudServices.cpp)
-        ShowItem(slot, inv.At(std::uint8_t(i)), context_);
+        ShowItem(slot, inv.At(std::uint8_t(i)), context_, true);
     }
     // A two-handed weapon (not a bow or crossbow) shows a pale copy in the empty shield place.
     const game::ItemInstance* weapon = inv.At(game::slot::kWeapon);

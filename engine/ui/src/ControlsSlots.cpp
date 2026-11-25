@@ -64,7 +64,14 @@ void Slot::Draw(Frame& frame) {
     }
     const std::string& path = frame.paint.HasTexture(icon) ? icon : std::string("icon\\icon_default.ddj");
     frame.paint.Image(path, r, {0, 0}, {1, 1}, WithAlpha(kWhite, opacity));
-    if (!usable) frame.paint.Image("icon\\icon_disable.ddj", r, {0, 0}, {1, 1}, WithAlpha(kWhite, opacity)); // the red veil
+    if (!usable) // the red veil, or a broken piece's red frame
+        frame.paint.Image(broken ? "icon\\icon_item_broken.ddj" : "icon\\icon_disable.ddj", r, {0, 0}, {1, 1}, WithAlpha(kWhite, opacity));
+    if (worn && usable) {
+        // Its pulse: the 17 steps of 80 ms read as frames 0..15 (the step x 16 / 17).
+        const int f = int(frame.time / 0.08) % 17 * 16 / 17;
+        const Vec2 uv0{float(f % 8) / 8.0f, float(f / 8) / 4.0f};
+        frame.paint.Image("icon\\icon_item_warning.ddj", r, uv0, {uv0.x + 0.125f, uv0.y + 0.25f}, WithAlpha(kWhite, opacity));
+    }
     if (ghost) frame.paint.Fill(r, WithAlpha(kWhite, 0.45f * opacity));
     if ((veil >> 24) != 0) frame.paint.Fill(r, WithAlpha(veil | 0xFF000000u, float(veil >> 24) / 255.0f * opacity));
     if (!overlay.empty()) frame.paint.Image(overlay, r, {0, 0}, {1, 1}, WithAlpha(kWhite, opacity));

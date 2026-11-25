@@ -359,6 +359,10 @@ public:
     std::string overlay;   // a picture over the item (the exchange's blue com_item_exchange.ddj once a side confirmed)
     bool rare = false;     // the rare items' sparkle running round the edge (icon_edge_rare)
     bool petOut = false;   // a summoned pet's item: interface\pet\pt_edge_effect running round it
+    // A piece near breaking (durability 1..6): icon_item_warning's red pulse over it, 16 frames of 16 pixels (an 8-column
+    // sheet), 80 ms each. Broken (durability 0, nothing else keeping it off): icon_item_broken's red frame in place of
+    // icon_disable's veil.
+    bool worn = false, broken = false;
     std::string tooltip;   // the help text
     std::function<std::vector<TooltipLine>()> tooltipLines; // an item's (or a skill's) tooltip, built when shown
     std::string tooltipSign; // its sign before the name (com_itemsign... ; empty: the plain one)

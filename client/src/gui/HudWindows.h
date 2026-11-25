@@ -1341,8 +1341,9 @@ int AvatarPlaceOf(const ui::Widget* slot);
 // degree, white stats with their "(+X%)", requirements in red when not met, seal, blues, a stack's
 // quantity).
 std::vector<ui::TooltipLine> ItemTooltip(const assets::ItemRow& row, const game::ItemInstance& item, const HudContext& context);
-// An item's slot: its icon, a stackable's count, red when it cannot be used (none: empty).
-void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& context);
+// An item's slot: its icon, a stackable's count, red when it cannot be used (none: empty). `wornMarks`: the bag's and the
+// equipment's slots, where a piece near breaking pulses and a broken one is framed (1.188 marks no other window's).
+void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& context, bool wornMarks = false);
 // A description as tooltip lines: plain text as it is, SML2 markup cut at its line breaks in its colours.
 void AddTooltipDescription(std::vector<ui::TooltipLine>& out, std::string_view text);
 // A skill's tooltip: its name and level, active or
