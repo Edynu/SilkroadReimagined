@@ -92,6 +92,7 @@ struct SoundSystem::Stream {
     std::vector<std::uint32_t> free; // buffers not queued
     float fade = 0.0f, target = 1.0f, speed = 1.0f; // the fade's gain now, where it goes, per second
     bool ended = false;                             // failed, or faded out
+    bool waiting = false;                           // starts once every track before it has faded out (silent till then)
 };
 
 SoundSystem::SoundSystem(core::JobSystem& jobs, const assets::FileSystem& files)
@@ -360,7 +361,7 @@ void SoundSystem::TrimClips() {
     }
 }
 
-void SoundSystem::PlayMusic(std::string_view path, float fadeSeconds) {
+void SoundSystem::PlayMusic(std::string_view path, float fadeSeconds, bool afterFade) {
     if (!device_.IsOpen()) return;
     const std::string key = core::NormalizeAssetPath(path);
     if (key == musicPath_) return;
@@ -376,6 +377,11 @@ void SoundSystem::PlayMusic(std::string_view path, float fadeSeconds) {
     stream->path = key;
     stream->speed = speed;
     stream->fade = streams_.empty() ? 1.0f : 0.0f; // the first track starts at once, later ones cross-fade
+    // Or, after the fade: silent until the tracks before it are gone, then at full volume.
+    if (afterFade && !streams_.empty()) {
+        stream->waiting = true;
+        stream->fade = 1.0f;
+    }
     ALuint source = 0;
     alGenSources(1, &source);
     ALuint buffers[kStreamBuffers] = {};
@@ -429,6 +435,15 @@ void SoundSystem::UpdateStreams(double dt) {
     const float music = gains_[std::size_t(Channel::Music)];
     for (auto& s : streams_) {
         const ALuint source = Id(s->source);
+        // A track waiting for the ones before it to fade out: silent, not started, until they are gone.
+        if (s->waiting) {
+            const bool before = std::any_of(streams_.begin(), streams_.end(), [&](const auto& o) { return o.get() != s.get() && !o->ended && !o->waiting; });
+            if (before) {
+                alSourcef(source, AL_GAIN, 0.0f);
+                continue;
+            }
+            s->waiting = false;
+        }
         // The fade.
         const float step = s->speed * float(dt);
         s->fade = s->fade < s->target ? std::min(s->target, s->fade + step) : std::max(s->target, s->fade - step);

@@ -99,6 +99,7 @@ public:
     void SetPlace(std::uint16_t region, float x, float z, bool night);
     // A Music.pk2 file by name (cross-faded), or silence with an empty name. Ambience off too.
     void PlayMusic(std::string_view file);
+    static constexpr float kMusicFadeSeconds = 5.0f; // the old track's fade-out before the new one starts
     // A quest scene's music (S_SetBGM): it plays over the area's, which no change of place replaces until it ends
     // (an empty name: the area's music again).
     void SceneMusic(std::string_view file);

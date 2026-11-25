@@ -351,34 +351,41 @@ void GameAudio::Death(std::string_view codename, glm::vec3 at) {
 void GameAudio::SetPlace(std::uint16_t region, float x, float z, bool night) {
     if (!sound_.IsOpen() || !Ready()) return;
     const audio::RegionAreaTable::Area* area = tables_->regions.Find(region, x, z);
-    if (area == nullptr) return;
-    if (area->name == area_ && night == night_) return;
-    const audio::AreaSounds* sounds = tables_->areas.Find(area->name);
-    if (sounds == nullptr) return; // a named area without sounds: what plays goes on
-    const bool areaChanged = area->name != area_;
-    area_ = area->name;
+    const std::string name = area != nullptr ? area->name : std::string();
+    if (name == area_ && night == night_) return;
+    // Any new area (none too, or one without sounds) releases the old one's ambience at once, as the original's sound
+    // body does; the music goes on until an area names another.
+    const audio::AreaSounds* sounds = area != nullptr ? tables_->areas.Find(area->name) : nullptr;
+    const bool areaChanged = name != area_;
+    area_ = name;
     night_ = night;
+    if (sounds == nullptr) {
+        StopAmbience();
+        return;
+    }
     if (areaChanged) {
         core::LogInfo("audio: area {} ({}): {}", area_, area->town ? "town" : "field", sounds->music);
-        if (sceneMusic_.empty()) sound_.PlayMusic(sounds->music);
+        if (sceneMusic_.empty()) PlayMusic(sounds->music);
     }
     std::vector<Ambient> list;
     for (const audio::AreaSounds::Ambient& a : night ? sounds->night : sounds->day) list.push_back({a.path, a.minSeconds, a.maxSeconds});
     StartAmbience(list);
 }
 
-void GameAudio::PlayMusic(std::string_view file) { sound_.PlayMusic(file); }
+// The original's change of music: the track playing fades out (ten steps of a tenth of its volume, one each stream
+// step: ours 0.5 s), then the new one starts at full volume.
+void GameAudio::PlayMusic(std::string_view file) { sound_.PlayMusic(file, kMusicFadeSeconds, true); }
 
 void GameAudio::SceneMusic(std::string_view file) {
     if (!file.empty()) {
         sceneMusic_ = std::string(file);
-        sound_.PlayMusic(file);
+        PlayMusic(file);
         return;
     }
     if (sceneMusic_.empty()) return;
     sceneMusic_.clear();
     const audio::AreaSounds* sounds = Ready() && !area_.empty() ? tables_->areas.Find(area_) : nullptr;
-    sound_.PlayMusic(sounds != nullptr ? sounds->music : std::string());
+    PlayMusic(sounds != nullptr ? sounds->music : std::string());
 }
 
 void GameAudio::Silence() {

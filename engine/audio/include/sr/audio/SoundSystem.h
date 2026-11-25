@@ -86,8 +86,9 @@ public:
     void Preload(std::string_view path);
 
     // The music: `path` streamed and looping, faded in over `fadeSeconds` while the track before
-    // fades out over the same time; the same path again does nothing; empty: fade to silence.
-    void PlayMusic(std::string_view path, float fadeSeconds = 2.0f);
+    // fades out over the same time; the same path again does nothing; empty: fade to silence. `afterFade`: the track
+    // before fades out first and the new one starts after it at full volume (the original's way).
+    void PlayMusic(std::string_view path, float fadeSeconds = 2.0f, bool afterFade = false);
     const std::string& Music() const { return musicPath_; }
 
     // Once a frame: clips decoded since are handed to OpenAL, waiting sounds start, finished voices
