@@ -1263,7 +1263,7 @@ class DealBox : public ui::MainFrame {
 public:
     DealBox(const assets::UiLayoutNode& node, HudContext& context) : MainFrame(node), context_(context) {}
     struct Deal {
-        enum class Kind : std::uint8_t { Buy, Sell, Buyback, StallRegister };
+        enum class Kind : std::uint8_t { Buy, Sell, Buyback, StallRegister, Deposit };
         Kind kind = Kind::Buy;
         std::string icon, name;
         std::uint64_t unitPrice = 0; // a buy's per piece; a sale's per piece; a buy-back's total
@@ -1272,6 +1272,7 @@ public:
         int place = 0;               // a sale's inventory place
         int index = 0;               // a buy-back's entry
         int stallSlot = 0;           // a stall's register: the stall's slot (`place` the bag's)
+        int storageMove = 0;         // a deposit's: its StorageMove request (`unitPrice` the whole fee)
     };
     void Created(ui::Interface& ui) override;
     void Update(ui::Frame& frame) override;

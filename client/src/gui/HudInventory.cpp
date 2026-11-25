@@ -967,7 +967,23 @@ void StorageWindow::Created(ui::Interface& ui) {
             return true;
         }
         if (const int place = InventoryPlaceOf(source); place >= game::slot::kWorn) {
-            context_.hud->Request({HudRequest::Kind::StorageMove, place | to << 8 | 1 << 17 | guild});
+            // Asked first, with the fee: the item's keeping fee times its count (the guild storage's half), Store or
+            // Cancel (the original's confirm box kind 5).
+            const game::ItemInstance* item = context_.state != nullptr ? context_.state->inventory.At(std::uint8_t(place)) : nullptr;
+            const assets::ItemRow* row = item != nullptr && context_.items != nullptr ? context_.items->Find(item->refId) : nullptr;
+            if (row == nullptr) {
+                context_.hud->Request({HudRequest::Kind::StorageMove, place | to << 8 | 1 << 17 | guild});
+                return true;
+            }
+            DealBox::Deal deal;
+            deal.kind = DealBox::Deal::Kind::Deposit;
+            deal.icon = row->iconPath.empty() ? std::string("icon\\icon_default.ddj") : "icon\\" + row->iconPath;
+            deal.name = context_.Text(row->nameKey);
+            const int count = std::max<int>(1, item->count);
+            deal.count = deal.most = count;
+            deal.unitPrice = row->keepingFee * std::uint64_t(count) / (guild_ ? 2u : 1u);
+            deal.storageMove = place | to << 8 | 1 << 17 | guild;
+            context_.hud->Deal(deal);
             return true;
         }
         return false;
@@ -1482,16 +1498,20 @@ void DealBox::Set(const Deal& deal) {
         if (ui::Widget* ok = Named("GDR_MBS_CONFIRM_BTN_SELL")) {
             ok->SetText(context_.Text(deal.kind == Deal::Kind::Sell ? "UIIT_STT_SELL" : "UIIT_STT_RE_BUY_OBJECT"));
         }
-        if (deal.kind == Deal::Kind::Buyback) {
+        if (deal.kind == Deal::Kind::Buyback || deal.kind == Deal::Kind::Deposit) {
             for (const char* spin : {"GDR_MBS_CONFIRM_SPINBTN_UP", "GDR_MBS_CONFIRM_SPINBTN_DOWN"}) {
                 if (ui::Widget* w = Named(spin)) w->visible = false;
             }
             if (count_ != nullptr) count_->interactive = false;
         }
+        // A deposit's button says Store; its price the fee.
+        if (deal.kind == Deal::Kind::Deposit) {
+            if (ui::Widget* ok = Named("GDR_MBS_CONFIRM_BTN_SELL")) ok->SetText(context_.Text("UIIT_STT_DEPOSIT"));
+        }
     }
     if (count_ != nullptr) {
         count_->SetValue(std::to_string(deal.count));
-        if (deal.kind != Deal::Kind::Buyback && ui_ != nullptr) ui_->Focus(count_);
+        if (deal.kind != Deal::Kind::Buyback && deal.kind != Deal::Kind::Deposit && ui_ != nullptr) ui_->Focus(count_);
     }
 }
 
@@ -1508,7 +1528,7 @@ void DealBox::Update(ui::Frame&) {
     }
     // Only a count over the most is brought back while typing: an empty box or a 0 stays as typed (the deal takes 1 at
     // the least), so 50 can be deleted and 28 typed.
-    if (count_ != nullptr && deal_.kind != Deal::Kind::Buyback && !count_->text().empty()) {
+    if (count_ != nullptr && deal_.kind != Deal::Kind::Buyback && deal_.kind != Deal::Kind::Deposit && !count_->text().empty()) {
         const int typed = std::atoi(count_->text().c_str());
         if (typed > std::max(1, deal_.most)) count_->SetValue(std::to_string(std::max(1, deal_.most)));
     }
@@ -1517,7 +1537,7 @@ void DealBox::Update(ui::Frame&) {
         const std::uint64_t shown = deal_.kind == Deal::Kind::Buy ? deal_.unitPrice * std::uint64_t(Count()) : deal_.unitPrice;
         price_->SetText(GoldText(shown));
     }
-    if (context_.state != nullptr && context_.state->shopNpc == 0 && ui_ != nullptr) ui_->Close(this);
+    if (deal_.kind != Deal::Kind::Deposit && context_.state != nullptr && context_.state->shopNpc == 0 && ui_ != nullptr) ui_->Close(this);
 }
 
 bool DealBox::OnNotice(const ui::Notice& notice) {
@@ -1552,6 +1572,7 @@ bool DealBox::OnNotice(const ui::Notice& notice) {
             break;
         }
         case Deal::Kind::Buyback: context_.hud->Request({HudRequest::Kind::ShopBuyback, deal_.index}); break;
+        case Deal::Kind::Deposit: context_.hud->Request({HudRequest::Kind::StorageMove, deal_.storageMove}); break;
         case Deal::Kind::StallRegister: {
             const std::uint64_t price = price_ != nullptr ? std::strtoull(price_->text().c_str(), nullptr, 10) : 0;
             if (context_.stallRequest) {
