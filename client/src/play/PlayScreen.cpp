@@ -3012,6 +3012,10 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
         }
     }
     hudContext_.useAction = [this, &context](std::uint32_t action) { UseAction(context, action); };
+    hudContext_.playAtPlayer = [this, &context](const std::string& path) {
+        const game::WorldView::Entity* self = view_.Find(view_.Self());
+        if (context.audio != nullptr && world_ && self != nullptr) context.audio->PlayEffect(path, world_->OriginRelative(self->position));
+    };
     hudContext_.layout2dt = [this](const std::string& path) { return gui_.data().Layout2dt(path); };
     hudContext_.world = &view_;
     hudContext_.hud = &hud_;

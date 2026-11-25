@@ -365,6 +365,22 @@ void BuffBoard::Layout() {
 
 void BuffBoard::Update(ui::Frame& frame) {
     Layout();
+    // The skill buffs gone since the last frame: their end's flash and sound (not on entering the world, a board
+    // made afresh: nothing was there before).
+    if (context_.state != nullptr) {
+        std::unordered_map<std::uint32_t, ui::Vec2> now;
+        const auto& effects = context_.state->effects;
+        for (std::size_t i = 0; i < effects.size() && i < places_.size(); ++i) {
+            if (effects[i].kind == game::ActiveEffect::Kind::Skill && !effects[i].debuff && effects[i].token != 0) now[effects[i].token] = places_[i];
+        }
+        for (const auto& [token, place] : lastBuffs_) {
+            if (now.contains(token)) continue;
+            endings_.push_back({place, context_.time});
+            if (context_.playAtPlayer) context_.playAtPlayer("prim\\snd\\ui\\buf_disappear.wav");
+        }
+        lastBuffs_ = std::move(now);
+    }
+    std::erase_if(endings_, [&](const Ending& e) { return context_.time - e.started >= 1.0; });
     hovered_ = -1;
     if (frame.pointer.hovered != this || context_.state == nullptr) return;
     const ui::Vec2 o = Origin();
@@ -406,6 +422,12 @@ void BuffBoard::Draw(ui::Frame& frame) {
             icon = context_.effectIcon(e);
         }
         if (!icon.empty()) frame.paint.Image(icon, {at.x, at.y, 20, 20}, {0, 0}, {1, 1}, tint);
+    }
+    // The ended buffs' flash: the sheet's cells are 50 x 52 in 512 x 64, centred on the slot.
+    for (const Ending& e : endings_) {
+        const int cell = std::clamp(int((context_.time - e.started) / 0.1), 0, 9);
+        const ui::Rect r{o.x + e.place.x + 10.0f - 25.0f, o.y + e.place.y + 12.0f - 26.0f, 50.0f, 52.0f};
+        frame.paint.Image("icon\\buf_effect.ddj", r, {float(cell) * 50.0f / 512.0f, 0.0f}, {float(cell + 1) * 50.0f / 512.0f, 52.0f / 64.0f}, tint);
     }
 }
 

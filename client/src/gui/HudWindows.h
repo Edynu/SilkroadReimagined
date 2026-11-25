@@ -235,6 +235,8 @@ struct HudContext {
     std::function<std::string(const game::QuickSlot& slot)> slotIcon;
     // An action shortcut's tooltip (what its next use does: sit or stand, walk or run, free PvP on or off).
     std::function<std::string(const game::QuickSlot& slot)> slotText;
+    // A sound file (a prim\snd\ path) played at the player (a buff's end: buf_disappear.wav).
+    std::function<void(const std::string& path)> playAtPlayer;
     // A quick slot's wait (its clock, the ready flash after it, the seconds left; all 0 / -1 when none).
     struct Cooling {
         float cooling = 0.0f, charge = 0.0f;
@@ -611,6 +613,14 @@ private:
     HudContext& context_;
     std::vector<ui::Vec2> places_;
     int hovered_ = -1;
+    // A skill buff's end (the original's): icon\buf_effect.ddj's ten frames over where its slot was, one
+    // each 100 ms, and buf_disappear.wav at the player. The last frame's skill buffs (token -> place) find the ended.
+    struct Ending {
+        ui::Vec2 place;
+        double started = 0.0;
+    };
+    std::vector<Ending> endings_;
+    std::unordered_map<std::uint32_t, ui::Vec2> lastBuffs_;
 };
 
 // The abnormal states by their bit (game::StateBit): the icon (icon\stateodd\s_<name>_icon.ddj) and
