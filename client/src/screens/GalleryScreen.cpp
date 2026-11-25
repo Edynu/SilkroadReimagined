@@ -1225,6 +1225,11 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 mall_.catalog = &mallTable_;
                 hudContext_.mall = &mall_;
                 sample_.Apply(game::TitleEvent{game::proto::MallEvent{game::proto::SilkBalanceMessage{9870, 120, 35}}});
+                // Each purchase logged and answered "bought" (the next frame): a lump buy's one-at-a-time sends show.
+                hudContext_.mallRequest = [this](game::proto::MessageId id, std::vector<std::byte>) {
+                    core::LogInfo("gallery: mall request 0x{:04X}", id);
+                    if (id == game::proto::MallBuy::kId) ++mallAnswers_;
+                };
                 if (page_ == "mall-enter") {
                     AskItemMall(hudContext_);
                 } else {
@@ -1250,6 +1255,10 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             }
         }
         if (page_.starts_with("mall") && !mallShown_) context.holdCapture = true;
+        if (mallAnswers_ > 0) {
+            --mallAnswers_;
+            ItemMallAnswer(hudContext_, game::proto::MallEvent{game::proto::MallBought{}});
+        }
         // The won and lost pages wait for the roll's end (its result shown).
         const bool popResult = page_ == "magic-pop:won" || page_ == "magic-pop:lost";
         if (page_.starts_with("magic-pop") && (!popShown_ || (popResult && MagicPopRolling(hudContext_)))) context.holdCapture = true;

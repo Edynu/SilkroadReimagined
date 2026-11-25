@@ -76,6 +76,7 @@ private:
     bool exchangeShown_ = false;   // --page exchange: the exchange window on a sample exchange
     int exchangeFrames_ = 0;       // frames since (--click waits for its windows to stand where they stay)
     bool mallShown_ = false;       // --page mall[:...]: the item mall (HudMall.cpp)
+    int mallAnswers_ = 0;          // purchases sent, answered "bought" a frame later
     assets::MallTable mallTable_;
     MallView mall_;
     bool popShown_ = false;        // --page magic-pop[:STATE]: Magic POP's window (HudMagicPop.cpp)

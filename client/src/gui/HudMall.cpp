@@ -751,34 +751,54 @@ public:
         lumpPrice_ = price;
         lumpPlaces_ = places;
     }
-    // A lump buy: silk against all, the bag against all, then one request (ours: one transaction).
+    // A lump buy (the worn set's or the basket's), as the original's: silk against all and the bag against all first, then
+    // one purchase per good, the next sent when the one before is answered (each bought good off the basket at once); a
+    // refusal stops the rest.
     bool BuyLump() {
         if (c_.mall == nullptr || lump_.empty()) return false;
         if (FreePlaces() < lumpPlaces_) return Refused(code::kBagFull), false;
         if (Silk() < lumpPrice_) return Refused(code::kNoSilk), false;
-        proto::MallBuyMany m;
-        for (const GoodRef& r : lump_) {
-            const assets::MallGood* g = GoodOf(r);
-            if (g != nullptr) m.goods.push_back({r.tab, std::uint8_t(r.slot), g->packageId, 1});
-        }
-        c_.mall->dealing = 1;
-        dealtGoods_ = lump_;
-        if (c_.mallRequest) c_.mallRequest(proto::MallBuyMany::kId, proto::Encode(m));
+        lumpQueue_ = lump_;
+        lumpFromBasket_ = boxKind_ == "AllBuyZzim" || view_ == View::Basket;
         CloseChild(kBox);
-        return true;
+        return BuyNextOfLump();
+    }
+    bool BuyNextOfLump() {
+        while (!lumpQueue_.empty()) {
+            const GoodRef r = lumpQueue_.front();
+            const assets::MallGood* g = GoodOf(r);
+            if (g == nullptr) {
+                lumpQueue_.erase(lumpQueue_.begin());
+                continue;
+            }
+            c_.mall->dealing = 1;
+            dealtGoods_ = {r};
+            if (c_.mallRequest) c_.mallRequest(proto::MallBuy::kId, proto::Encode(proto::MallBuy{r.tab, std::uint8_t(r.slot), g->packageId, 1, 0}));
+            return true;
+        }
+        return false;
     }
 
-    // A purchase's answer: the dealing over; done, the basket's bought goods out of it; refused, the box.
+    // A purchase's answer: the dealing over; done, the basket's bought good out of it and a lump's next sent; refused, the
+    // box (and a lump stopped).
     void Bought(const proto::MallBought& a) {
         if (c_.mall == nullptr) return;
         c_.mall->dealing = 0;
-        if (a.code != code::kOk) return Refused(a.code);
-        if (boxKind_ == "AllBuyZzim" || view_ == View::Basket) {
+        const bool inLump = !lumpQueue_.empty();
+        if (a.code != code::kOk) {
+            lumpQueue_.clear();
+            return Refused(a.code);
+        }
+        if (inLump ? lumpFromBasket_ : (boxKind_ == "AllBuyZzim" || view_ == View::Basket)) {
             for (const GoodRef& r : dealtGoods_) std::erase(c_.mall->basket, std::pair{r.tab, r.slot});
         }
         dealtGoods_.clear();
         ++c_.mall->version;
         if (ui_ != nullptr) ui_->Sound("SND_ITEM_BUY");
+        if (inLump) {
+            lumpQueue_.erase(lumpQueue_.begin());
+            BuyNextOfLump();
+        }
     }
 
     bool BoxNotice(const ui::Notice& n) {
@@ -904,6 +924,8 @@ public:
     GoodRef selected_, confirm_, boxGood_;
     int count_ = 1;
     std::vector<GoodRef> lump_, dealtGoods_;
+    std::vector<GoodRef> lumpQueue_; // a lump buy's goods still to buy, the first one's purchase awaited
+    bool lumpFromBasket_ = false;    // the lump is the basket's (its goods leave it as they are bought)
     std::uint64_t lumpPrice_ = 0;
     int lumpPlaces_ = 0;
     std::string boxKind_;
