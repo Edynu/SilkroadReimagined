@@ -40,6 +40,7 @@
 #include "sr/game/JobProtocol.h"
 #include "sr/game/MallProtocol.h"
 #include "sr/game/PlayerState.h"
+#include "sr/game/Spirit.h"
 #include "sr/game/WorldProtocol.h"
 #include "sr/game/WorldView.h"
 #include "sr/ui/Controls.h"
@@ -264,6 +265,7 @@ struct HudContext {
     const assets::ItemTable* items = nullptr;
     const assets::CharacterTable* characters = nullptr; // characterdata (a fortress structure's name, icon, level)
     const std::vector<assets::MagicOptionRow>* magicOptions = nullptr;
+    const game::SpiritTable* spirits = nullptr; // the Devil's Spirit's options by plus (its tooltip)
     // refmagicoptgroup.txt: the socket stones' skills by level (a stone's tooltip, the Socket page; null: not loaded yet).
     const std::vector<assets::MagicOptGroupRow>* magicOptGroups = nullptr;
     // A window's pick mode wants this mouse cursor (the original's cursor resource id; 0: the screen's own): the Socket

@@ -18,6 +18,7 @@
 #include "sr/assets/UiLayout.h"
 #include "sr/assets/UiLayout2dt.h"
 #include "sr/core/Jobs.h"
+#include "sr/game/Spirit.h"
 #include "sr/gfx/AssetStore.h"
 #include "sr/ui/Font.h"
 
@@ -51,6 +52,8 @@ public:
     ui::Font* Font() const { return Ready() && state_->fontLoaded ? &state_->font : nullptr; }
     // magicoption.txt (the item tooltip's blues); null until ready.
     const std::vector<assets::MagicOptionRow>* MagicOptions() const { return Ready() ? &state_->magicOptions : nullptr; }
+    // The Devil's Spirit's options by plus (its tooltip's groups).
+    const game::SpiritTable* Spirits() const { return Ready() ? &state_->spirits : nullptr; }
     // refmagicoptgroup.txt (the socket stones' skills by level); null until ready.
     const std::vector<assets::MagicOptGroupRow>* MagicOptGroups() const { return Ready() ? &state_->magicOptGroups : nullptr; }
     const std::vector<assets::ActionRow>* Actions() const { return Ready() ? &state_->actions : nullptr; }
@@ -86,6 +89,7 @@ private:
         assets::TextCatalog text;
         std::unordered_map<std::uint16_t, std::string> regionKeys;
         std::vector<assets::MagicOptionRow> magicOptions;
+        game::SpiritTable spirits;
         std::vector<assets::MagicOptGroupRow> magicOptGroups;
         std::vector<assets::ActionRow> actions; // the Action window's icons
         assets::WorldMapData worldMap;

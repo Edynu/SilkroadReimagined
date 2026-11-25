@@ -76,7 +76,22 @@ bool DecodeSpiritAbilities(std::string_view text, std::vector<SpiritAbilityRow>&
 
 bool DecodeSpiritOptions(std::string_view text, std::vector<SpiritOptionRow>& out, std::string& error) {
     out.clear();
-    Lines(text, 4, [&](const std::vector<long long>& n) { out.push_back({int(n[0]), std::uint32_t(n[1]), std::uint32_t(n[2]), int(n[3])}); });
+    Lines(text, 4, [&](const std::vector<long long>& n) { out.push_back({int(n[0]), std::uint32_t(n[1]), std::uint32_t(n[2]), int(n[3]), {}}); });
+    // Each row's tooltip text key (its fifth cell), in the same order as the rows read.
+    std::size_t at = 0, start = 0;
+    while (start < text.size() && at < out.size()) {
+        std::size_t end = text.find('\n', start);
+        if (end == std::string_view::npos) end = text.size();
+        const std::string_view line = Trimmed(text.substr(start, end - start));
+        start = end + 1;
+        if (line.empty() || line.starts_with("//")) continue;
+        const std::vector<std::string_view> c = Cells(line);
+        if (c.size() < 4) continue;
+        long long first = 0;
+        if (!Number(c[0], first)) continue;
+        if (c.size() > 4) out[at].tooltip = std::string(Trimmed(c[4]));
+        ++at;
+    }
     if (out.empty()) error = "no Devil's Spirit option rows (refmagicoptbyitemoptleveldata.txt)";
     return !out.empty();
 }
@@ -101,7 +116,7 @@ SpiritTable MakeSpiritTable(const std::vector<SpiritAbilityRow>& abilities, cons
         for (const SpiritOptionRow& o : options) {
             if (o.link != a.id) continue;
             const assets::MagicOptionRow* m = FindOption(magicOptions, o.option);
-            if (m != nullptr) level.options.push_back({o.option, m->attribute, o.value});
+            if (m != nullptr) level.options.push_back({o.option, m->attribute, o.value, o.tooltipType, o.tooltip});
         }
         for (const SpiritSkillRow& s : skills) {
             if (s.link == a.id) level.skills.push_back(s.skill);

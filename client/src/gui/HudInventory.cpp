@@ -631,8 +631,37 @@ std::vector<ui::TooltipLine> ItemTooltipBody(const assets::ItemRow& row, const g
             blank();
             out.insert(out.end(), needs.begin(), needs.end());
         }
+        // A Devil's Spirit: its plus's options by their tooltip's group, each under its heading (beige): basic (white),
+        // added (0xFF6CE675), magic (0xFF00EAFF); a row's text key, or ("xxx") the option's own line. Its own blues then
+        // come under "Magic option".
+        const bool spirit = game::IsDevilSpirit(row);
+        if (spirit && c.spirits != nullptr) {
+            if (const game::SpiritLevel* level = c.spirits->Find(row.refObjId, item.plus)) {
+                static constexpr const char* kHeads[] = {"UIIT_STT_NASRUN_BASIC_OPTION", "UIIT_STT_NASRUN_ADD_OPTION", "UIIT_STT_NASRUN_MAGIC_OPTION"};
+                const ui::Color kColours[] = {kWhite, ui::Argb(0xFF6CE675), ui::Argb(0xFF00EAFF)};
+                for (int group = 0; group < 3; ++group) {
+                    bool headed = false;
+                    for (const game::SpiritLevel::Option& o : level->options) {
+                        if (o.tooltipType != group) continue;
+                        if (!headed) {
+                            blank();
+                            line(c.Text(kHeads[group]), kKindBeige);
+                            headed = true;
+                        }
+                        std::string text;
+                        if (!o.tooltip.empty() && o.tooltip != "xxx") {
+                            text = c.Text(o.tooltip);
+                        } else {
+                            text = MagicOptionLine(c, row, {o.option, o.value}).text;
+                        }
+                        if (!text.empty()) line(text, kColours[group]);
+                    }
+                }
+            }
+        }
         if (!item.options.empty() && c.magicOptions != nullptr) {
             blank();
+            if (spirit) line(c.Text("UIIT_STT_NASRUN_MAGIC_OPTION"), kKindBeige);
             // In option-id order, each as 1.188 writes it (MagicOptionLine).
             std::vector<game::ItemInstance::Option> sorted = item.options;
             std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.id < b.id; });

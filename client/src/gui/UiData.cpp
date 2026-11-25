@@ -153,6 +153,7 @@ void UiData::Load(core::JobSystem& jobs, const assets::FileSystem& files, std::v
             if (const auto file = files->Read("server_dep\\silkroad\\textdata\\magicoption.txt")) {
                 assets::DecodeMagicOptions(core::DecodeTextFile(file->Bytes()), state->magicOptions, error);
             }
+            if (std::string why; !game::LoadSpiritTable(*files, state->magicOptions, state->spirits, why)) core::LogWarning("ui: the Devil's Spirit: {}", why);
             if (const auto file = files->Read("server_dep\\silkroad\\textdata\\refmagicoptgroup.txt")) {
                 assets::DecodeMagicOptGroups(core::DecodeTextFile(file->Bytes()), state->magicOptGroups, error);
             }

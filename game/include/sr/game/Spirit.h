@@ -39,7 +39,8 @@ struct SpiritAbilityRow {
 struct SpiritOptionRow {
     int link = 0;
     std::uint32_t option = 0, value = 0;
-    int tooltipType = 0;
+    int tooltipType = 0;  // the tooltip's group: 0 basic, 1 added, 2 magic
+    std::string tooltip;  // its line's text key ("xxx": the option's own line)
 };
 // refskillbyitemoptleveldata.txt: 0 Link, 1 RefSkillID.
 struct SpiritSkillRow {
@@ -55,6 +56,8 @@ bool DecodeSpiritSkills(std::string_view utf8Text, std::vector<SpiritSkillRow>& 
 struct SpiritLevel {
     struct Option {
         std::uint32_t option = 0, code = 0, value = 0;
+        int tooltipType = 0;  // its tooltip's group (SpiritOptionRow)
+        std::string tooltip;  // its line's text key ("xxx": the option's own line)
         bool operator==(const Option&) const = default;
     };
     std::vector<Option> options;

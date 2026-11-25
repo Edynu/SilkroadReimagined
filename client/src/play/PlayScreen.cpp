@@ -3068,6 +3068,7 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.characters = tables_ && tables_->Usable() ? &tables_->characters : nullptr;
     hudContext_.creation = tables_ && tables_->Usable() ? &tables_->rules.creation : nullptr;
     hudContext_.magicOptions = gui_.data().MagicOptions();
+    hudContext_.spirits = gui_.data().Spirits();
     hudContext_.magicOptGroups = gui_.data().MagicOptGroups();
     hudContext_.skills = tables_ && tables_->Usable() ? &tables_->skills : nullptr;
     hudContext_.masteryCosts = tables_ && tables_->Usable() ? &tables_->masteryCosts : nullptr;
