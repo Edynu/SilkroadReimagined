@@ -90,6 +90,8 @@ void DivideBox::Ask(const std::string& icon, const std::string& name, int count,
     if (ui::Widget* w = Child(12)) w->SetText(name);
     if (ui::Widget* w = Child(15)) w->SetText(std::to_string(count));
     if (auto* edit = ui::As<ui::Edit>(Child(17))) {
+        // The original's: "1", 0 .. count - 1, a larger number typed becomes count - 1.
+        edit->maxValue = std::max(0, count - 1);
         edit->SetValue("1");
         if (ui_ != nullptr) ui_->Focus(edit);
     }

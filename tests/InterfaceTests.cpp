@@ -521,6 +521,49 @@ TEST_CASE("an edit takes the keyboard from the game while it has the focus") {
     CHECK(h.interface.focus() == nullptr);
 }
 
+TEST_CASE("a numeric edit with a highest number holds what is typed to it, as the split box's count") {
+    Harness h;
+    assets::UiLayout layout;
+    assets::UiLayoutSection section;
+    section.name = "Split";
+    section.rect = {0, 0, 200, 40};
+    section.nodes.push_back(Node("CIFEdit", 4, {10, 10, 120, 20}, ""));
+    layout.sections.push_back(section);
+    h.layouts["resinfo\\split.txt"] = layout;
+    Widget* window = h.interface.Open("resinfo\\split.txt", "Split", 0, {0, 0});
+    REQUIRE(window != nullptr);
+    auto* edit = As<Edit>(window->Find(4));
+    REQUIRE(edit != nullptr);
+    edit->numeric = true;
+    edit->emptyAllowed = true;
+    edit->maxValue = 49; // a stack of 50
+    h.Frame();
+    h.interface.Focus(edit);
+    edit->SetValue("1");
+    const auto type = [&](const char* s) {
+        InputEvent text;
+        text.type = InputEvent::Type::Text;
+        text.text = s;
+        h.Frame({text});
+    };
+    const auto backspace = [&] {
+        InputEvent back;
+        back.type = InputEvent::Type::KeyDown;
+        back.key = Key::Backspace;
+        h.Frame({back});
+    };
+    type("5");
+    CHECK(edit->text() == "15"); // a digit goes after the "1"
+    type("0");
+    CHECK(edit->text() == "49"); // 150: over the highest
+    backspace();
+    backspace();
+    CHECK(edit->text().empty()); // emptied, a count typed afresh
+    type("0");
+    type("7");
+    CHECK(edit->text() == "7"); // "07" reads 7
+}
+
 TEST_CASE("every interface layout of the game builds into a window") {
     const char* dirVar = std::getenv("SR_GAME_DIR");
     if (dirVar == nullptr) {

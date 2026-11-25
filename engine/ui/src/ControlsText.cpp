@@ -260,6 +260,19 @@ void Edit::Keyboard(Frame& frame) {
         changed = true;
     }
     if (numeric && value.empty() && changed && !emptyAllowed) value = "0";
+    if (numeric && changed && maxValue >= 0 && !value.empty()) {
+        // Read back as a number: over the highest it becomes the highest; "05" reads "5".
+        std::int64_t number = 0;
+        for (const char c : value) {
+            if (c < '0' || c > '9') continue;
+            number = std::min(number * 10 + (c - '0'), maxValue + 1);
+        }
+        const std::string again = std::to_string(std::min(number, maxValue));
+        if (again != value) {
+            value = again;
+            caret_ = value.size();
+        }
+    }
     if (changed) {
         SetText(value);
         Notify(Notice::Kind::TextChanged);

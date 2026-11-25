@@ -414,6 +414,9 @@ public:
     bool numeric = false;
     // A numeric box left empty when its digits are all deleted (else it reads 0): a count typed afresh.
     bool emptyAllowed = false;
+    // A numeric box's highest number (-1: none): a larger one typed becomes it, and its leading zeros go (the original's
+    // numeric boxes reread what was typed as a number after each key).
+    std::int64_t maxValue = -1;
     bool passKeys = false;   // Enter and Escape go to the window (Submitted, Cancelled: the chat input)
     bool multiline = false;  // rows wrapped at its width, Enter a new line, the wheel scrolls it (a guild notice)
     bool readOnly = false;   // shown, never typed in
