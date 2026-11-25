@@ -20,7 +20,7 @@ namespace sr::client {
 namespace {
 
 // The widget of a type somewhere under `w` (depth first).
-bool EquipmentPage(const std::string& page) { return page == "equipment" || page == "dress" || page == "dress-plain"; }
+bool EquipmentPage(const std::string& page) { return page == "equipment" || page == "dress" || page == "dress-plain" || page == "worn-state"; }
 
 template <typename T>
 T* FindUnder(ui::Widget* w) {
@@ -838,7 +838,8 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         // --page equipment | dress | dress-plain: the sample character in a Chinese man's set, every
         // worn place (the accessories too) and a hat and a dress in the bag; dress: the equipment's dress side with a hat, a
         // dress that takes an attachment, its attachment, a flag and a Devil's Spirit; dress-plain: a dress that takes none
-        // (the attachment's slot veiled). --mouse on a slot holds its tooltip.
+        // (the attachment's slot veiled); worn-state: the equipment with some pieces worn down (the head 3, the chest 0, the
+        // hands 6, the feet 0, the weapon 2, the shield 0: the paper doll of CEquipStateImg). --mouse on a slot holds its tooltip.
         if (EquipmentPage(page_) && !autoPotionShown_ && interface_ != nullptr && tables_ && tables_->Ready()) {
             autoPotionShown_ = true;
             if (tables_->Usable()) {
@@ -861,12 +862,17 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 game::proto::InventoryList bag;
                 bag.size = 45;
                 for (std::uint8_t place = 0; place < 13; ++place) bag.items.push_back(record(place, kWorn[place], place == 6 ? 3 : 0));
+                if (page_ == "worn-state") {
+                    constexpr std::uint32_t kLeft[8] = {3, 0, 200, 6, 200, 0, 2, 0}; // 200: sound
+                    for (auto& r : bag.items)
+                        if (r.slot < 8 && kLeft[r.slot] < 200) r.durability = kLeft[r.slot];
+                }
                 bag.items.push_back(record(13, "ITEM_MALL_AVATAR_M_PIRATE_HAT"));
                 bag.items.push_back(record(14, page_ == "dress-plain" ? "ITEM_MALL_AVATAR_M_CH_WEDDING" : "ITEM_MALL_AVATAR_M_ANGEL_WING_DRESS"));
                 std::erase_if(bag.items, [](const game::proto::ItemRecord& r) { return r.item == 0; });
                 sample_.Apply(game::TitleEvent{bag});
                 game::proto::AvatarList avatars;
-                if (page_ != "equipment") {
+                if (page_ != "equipment" && page_ != "worn-state") {
                     avatars.items.push_back(record(game::avatar::kHat, "ITEM_MALL_AVATAR_M_CH_WEDDING_HAT"));
                     if (page_ == "dress-plain") {
                         avatars.items.push_back(record(game::avatar::kDress, "ITEM_MALL_AVATAR_M_ANGEL_WING_DRESS"));
@@ -880,7 +886,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 }
                 sample_.Apply(game::TitleEvent{avatars});
                 hud_.OpenPage(hud::kPageInventory);
-                if (auto* equipment = FindUnder<EquipmentWindow>(interface_->Window(hud::kMainPopup)); equipment && page_ != "equipment") {
+                if (auto* equipment = FindUnder<EquipmentWindow>(interface_->Window(hud::kMainPopup)); equipment && page_ != "equipment" && page_ != "worn-state") {
                     equipment->ShowView(true);
                 }
             }

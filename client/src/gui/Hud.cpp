@@ -17,7 +17,7 @@ constexpr const char* kMaster = "resinfo\\ginterface.txt";
 // (ginterface.txt's CIFUnderBar is made but not shown: 1.188 shows its CNIFUnderMenuBar there,.)
 constexpr int kShownAtStart[] = {hud::kChat,       hud::kMinimap,        hud::kPlayerInfo,  hud::kBuffs,
                                  hud::kQuickParty, hud::kSystemMessages, hud::kDelayGauges, hud::kNotice,   hud::kWarning,
-                                 hud::kQuestNotice, hud::kRegionView};
+                                 hud::kQuestNotice, hud::kRegionView, hud::kEquipState};
 
 // Always in front, raised again in this order after every open and raise.
 const std::vector<int> kOnTop = {hud::kSystemMenu, hud::kGameGuide, hud::kEventGuide, hud::kHelpBubble, hud::kNotice,
@@ -133,6 +133,7 @@ void Hud::Place(ui::Vec2 screen) {
         case hud::kMenuBar: r.x = std::floor((W - 800.0f) / 2.0f), r.y = H - 68.0f; break;
         case hud::kQuestQuick: r.x = W - 324.0f; break; //, under the minimap, its y kept
         case hud::kDurability: r.x = W - 42.0f, r.y = 224.0f; break;
+        case hud::kEquipState: r.x = W - 200.0f, r.y = 74.0f; break; // 1.188's place (W - 200, 74)
         case hud::kDelayGauges: r.x = std::floor((W - 192.0f) / 2.0f), r.y = H - 165.0f; break;
         case hud::kExtQuickSlots: r.x = W - 26.0f - r.w, r.y = 181.0f; break;
         case hud::kBuffs: r.x = 218.0f, r.y = 10.0f; break;

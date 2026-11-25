@@ -80,6 +80,7 @@ void RegisterHudWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CIFStorageGold", [c](const assets::UiLayoutNode& n) { return std::make_unique<GoldBox>(n, *c); });
     ui.Register("CIFStorageRoom", [c](const assets::UiLayoutNode& n) { return std::make_unique<StorageWindow>(n, *c); });
     ui.Register("CIFDelayGaugeBoard", [c](const assets::UiLayoutNode& n) { return std::make_unique<DelayGaugeBoard>(n, *c); });
+    ui.Register("CEquipStateImg", [c](const assets::UiLayoutNode& n) { return std::make_unique<EquipStateImage>(n, *c); });
     ui.Register("CIFDelayInfo", [](const assets::UiLayoutNode& n) { return std::make_unique<ui::Static>(n); });
     ui.Register("CIF_NPCWindow", [c](const assets::UiLayoutNode& n) { return std::make_unique<NpcWindow>(n, *c); });
     // The talk panel inside it: a frame of its own (npc_conversation_window_*) around the dark tile.

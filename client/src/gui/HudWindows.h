@@ -996,6 +996,21 @@ private:
     std::uint32_t shownItem_ = 0;
 };
 
+// CEquipStateImg (ginterface 157, 68 x 96, at (W - 200, 74)): the worn pieces near breaking, a paper doll of eight
+// pictures over the same place, one per place 0..7 (head, chest, shoulders, hands, legs, feet, weapon, shield): its
+// part yellow at durability 1..6, red at 0 (interface\ifcommon\com_re_*_y / _r); accessories never; empty while all are
+// sound. 1.188 shows it in place of the older durability warning (34), which stays hidden.
+class EquipStateImage : public ui::Widget {
+public:
+    EquipStateImage(const assets::UiLayoutNode& node, HudContext& context) : Widget(node), context_(context) {}
+    void Created(ui::Interface& ui) override;
+    void Update(ui::Frame& frame) override;
+
+private:
+    HudContext& context_;
+    std::array<ui::Static*, 8> parts_{};
+};
+
 // --- NPCs and gates (C7i) ---------------------------------------
 
 // CIF_NPCWindow (30): the talk window (if_npcwindow.txt's CIF_NPCTalk: a text box over a dark tile,

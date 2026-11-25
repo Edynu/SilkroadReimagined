@@ -1962,4 +1962,46 @@ std::uint32_t EquipSkillWindow::SkillOf(const ui::Widget* w) const {
     return 0;
 }
 
+// --- The worn pieces near breaking ---------------------------------------------------------------
+
+namespace {
+
+// A place's picture (0..7, the places' order; each 68 x 96, its part drawn where it stands on the doll).
+std::string EquipStatePicture(std::size_t place, bool broken) {
+    static constexpr const char* kParts[] = {"avatar01", "avatar04", "avatar03", "avatar02", "avatar05", "avatar06", "sword", "shield"};
+    return std::string("interface\\ifcommon\\com_re_") + kParts[place] + (broken ? "_r.ddj" : "_y.ddj");
+}
+
+} // namespace
+
+void EquipStateImage::Created(ui::Interface& ui) {
+    clickThrough = true;
+    for (std::size_t i = 0; i < parts_.size(); ++i) {
+        assets::UiLayoutNode node;
+        node.type = "CIFStatic";
+        node.name = "GDR_EQUIP_STATE_PART";
+        node.id = 10 + int(i);
+        node.ddj = EquipStatePicture(i, false);
+        node.rect = {0.0f, 0.0f, 68.0f, 96.0f};
+        auto made = ui.Make(node);
+        parts_[i] = ui::As<ui::Static>(made.get());
+        made->visible = false;
+        Add(std::move(made));
+    }
+}
+
+void EquipStateImage::Update(ui::Frame&) {
+    const game::Inventory* bag = context_.state != nullptr ? &context_.state->inventory : nullptr;
+    for (std::size_t i = 0; i < parts_.size(); ++i) {
+        if (parts_[i] == nullptr) continue;
+        const game::ItemInstance* item = bag != nullptr ? bag->At(std::uint8_t(i)) : nullptr;
+        const assets::ItemRow* row = item != nullptr && context_.items != nullptr ? context_.items->Find(item->refId) : nullptr;
+        // Equipment (TID 3/1) but an accessory (TID3 5 or 12), its durability under 7.
+        const bool watched = row != nullptr && row->typeId[0] == 3 && row->typeId[1] == 1 && row->typeId[2] != 5 && row->typeId[2] != 12 &&
+                             item->durability < 7;
+        parts_[i]->visible = watched;
+        if (watched) parts_[i]->texture = EquipStatePicture(i, item->durability == 0);
+    }
+}
+
 } // namespace sr::client
