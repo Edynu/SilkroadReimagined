@@ -100,12 +100,15 @@ void TargetWindow::Update(ui::Frame& frame) {
         SetColour(kind->Child(0), ui::Argb(kColours[step]));
         Health(kind->Child(1), t, 208.0f);
         Put(kind->Child(4), FormatText(context_.Text("UIIT_STT_LV_LEVEL"), {std::to_string(t.level)}));
-        // The rarity: its icon and its name, "(Party)" after it; rarity 2 shows none.
-        static constexpr const char* kIcons[] = {"tw_icon_normal.ddj", "tw_icon_champion.ddj", "", "tw_icon_unique.ddj",
-                                                 "tw_icon_giant.ddj",  "tw_icon_titan.ddj",    "tw_icon_elite.ddj"};
+        // The rarity: its icon and its name, "(Party)" after it; rarity 2 shows none. 7, the events' Strong monsters,
+        // the normal icon and "Strong"; 8, the Qin-Shi tomb's generals, a unique's (the original's).
+        static constexpr const char* kIcons[] = {"tw_icon_normal.ddj", "tw_icon_champion.ddj", "",
+                                                 "tw_icon_unique.ddj", "tw_icon_giant.ddj",    "tw_icon_titan.ddj",
+                                                 "tw_icon_elite.ddj",  "tw_icon_normal.ddj",   "tw_icon_unique.ddj"};
         static constexpr const char* kNames[] = {"UIIT_CTL_WARENETWORK_DETAIL_NORMAL", "UIIT_STT_MOB_CHAMPION", "", "UIIT_STT_MOB_UNIQUE",
-                                                 "UIIT_STT_MOB_GIANT", "UIIT_STT_MOB_TITAN", "UIIT_STT_MOB_ELITE"};
-        const bool known = t.rarity <= 6 && t.rarity != 2;
+                                                 "UIIT_STT_MOB_GIANT", "UIIT_STT_MOB_TITAN", "UIIT_STT_MOB_ELITE", "UIIT_STT_MOB_STRONG",
+                                                 "UIIT_STT_MOB_UNIQUE"};
+        const bool known = t.rarity <= 8 && t.rarity != 2;
         Widget* icon = kind->Child(3);
         Widget* rank = kind->Child(2);
         if (icon != nullptr) {

@@ -1595,6 +1595,7 @@ void PlayScreen::SelectMonster(std::uint32_t entity) {
     t.kind = fortress_.Structure(entity) != nullptr ? game::TargetStatus::Kind::Structure : game::TargetStatus::Kind::Monster; // its own window (iftw_fortressstructure.txt)
     t.model = e->look.model;
     t.name = gui_.data().Text(row->nameKey);
+    if ((e->rarity & 0x0F) == 7) t.name = gui_.data().Text("UIIT_STT_MOB_STRONG") + " " + t.name; // an event's Strong one
     t.level = std::uint8_t(std::clamp(row->level, 0, 255));
     t.rarity = e->rarity & 0x0F;      // the grade
     t.party = (e->rarity >> 4) == 1;  // a party monster
@@ -1941,13 +1942,15 @@ void PlayScreen::Sounds(ScreenContext& context, const game::TitleEvent& event) {
         if (hit->damage > 0 && hit->attacker != 0 && (hit->flags & proto::kDamageState) == 0) {
             const bool critical = (hit->flags & proto::kDamageCritical) != 0;
             hitSounds_.push_back({hit->attacker, hit->target, critical, context.time + 0.1}); // P12: 100 ms after
-            // One's own critical shakes the camera 50 for 500 ms in steps of 20 (the original's default; its
-            // other setting: a critical's 200/500/25 and a normal hit's 50/500/20).
-            if (critical && hit->attacker == view_.Self()) {
-                shake_.amplitude = std::max(shake_.amplitude * float(context.time < shake_.until), 50.0f); // a running one's kept
+            // One's own critical shakes the camera 50 for 500 ms in steps of 20; in berserk (the original's character
+            // mode 1) every hit of one's own does, a critical 200 in steps of 25.
+            const bool berserk = context.time < berserkUntil_;
+            if (hit->attacker == view_.Self() && (critical || berserk)) {
+                const float amplitude = berserk && critical ? 200.0f : 50.0f;
+                shake_.amplitude = std::max(shake_.amplitude * float(context.time < shake_.until), amplitude); // a running one's kept
                 shake_.from = context.time;
                 shake_.until = context.time + 0.5;
-                shake_.step = 0.02f;
+                shake_.step = berserk && critical ? 0.025f : 0.02f;
                 shake_.next = context.time;
             }
             // The struck one's voice (effectsound's VOC_MOAN of its object; a killing hit has its death's instead).
@@ -2618,6 +2621,21 @@ void PlayScreen::HandleInput(ScreenContext& context) {
     {
         const double left = berserkUntil_ - context.time, part = double(game::kBerserkMs) / 1000.0 / 5.0;
         player_.self.berserkLit = left > 0.0 ? std::uint8_t(std::clamp(int(std::ceil(left / part)), 1, 5)) : 0;
+    }
+    // HP or MP falling under 30 % (not to 0): the alarm once at the player, with the Game page's warning row for it and
+    // its sound row on (the original's CIFPlayerMiniInfo).
+    if (world_ && !replay_ && context.options != nullptr) {
+        const auto low = [](std::uint32_t now, std::uint32_t most) { return most != 0 && now != 0 && float(now) / float(most) < 0.3f; };
+        const bool hpLow = low(player_.self.hp, player_.self.maxHp), mpLow = low(player_.self.mp, player_.self.maxMp);
+        const core::GameOptions& rows = context.options->game;
+        const bool alarm = rows.Get("warningSound") && ((hpLow && !hpLow_ && rows.Get("hpWarning")) || (mpLow && !mpLow_ && rows.Get("mpWarning")));
+        if (alarm && context.audio != nullptr) {
+            if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
+                context.audio->PlayEffect("prim\\snd\\ui\\alarm_sound.wav", world_->OriginRelative(self->position));
+            }
+        }
+        hpLow_ = hpLow;
+        mpLow_ = mpLow;
     }
     if (!shown_ || context.input == nullptr) return;
     const ui::Input& in = *context.input;
@@ -3735,6 +3753,7 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
             const assets::ObjectRow* row = tables_->characters.Find(e.look.model);
             if (row == nullptr) continue;
             name = gui_.data().Text(row->nameKey);
+            if ((e.rarity & 0x0F) == 7) name = gui_.data().Text("UIIT_STT_MOB_STRONG") + " " + name; // an event's Strong one
             const int gap = row->level - int(player_.self.level);
             colour = ui::Argb(gap <= -7 ? 0xFF87D2FF : gap <= -4 ? 0xFFA5E0CE : gap <= 0 ? 0xFFFFFFFF : gap <= 5 ? 0xFFFFB387 : 0xFFFF8787);
             lift = 22.0f * MonsterScale(row, e.rarity);

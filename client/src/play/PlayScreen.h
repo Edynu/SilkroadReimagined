@@ -464,6 +464,7 @@ private:
     bool cameraFocusSet_ = false;
     bool turning_ = false;
     bool netOff_ = false; // the lost connection's box is up
+    bool hpLow_ = false, mpLow_ = false; // under 30 % at the last frame (the warning's alarm)
     bool turnHeld_ = false;   // this turn holds the cursor (the Game page's camera method 2)
     ui::Vec2 turnFrom_;       // where the turn's button was pressed
     bool targetMenuArmed_ = false; // the right press may still open a player's menu at its release
