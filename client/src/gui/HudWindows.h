@@ -48,6 +48,7 @@
 namespace sr::client {
 
 class Hud;
+class ConfirmBox;
 
 // What the windows read and whom they ask: the screen that owns the HUD keeps it.
 // The item mall as the window keeps it (HudMall.cpp): the catalogue, the stock the server told,
@@ -148,6 +149,9 @@ struct HudContext {
     bool tradeStolenBuyer = false;
     std::map<std::uint32_t, std::uint32_t> tradePrices;
     int tradeBuyLeft = 0, tradeBuyTab = 0, tradeBuySlot = 0;
+    // A purchase of more than a stack: the original's box saying it runs ("You are currently purchasing special goods."),
+    // its Cancel stopping the rest; closed when the last step is answered.
+    ConfirmBox* tradeBuyBox = nullptr;
     std::vector<std::uint32_t> tradeCentres;
     game::proto::TradeBoard tradeBoard;
     std::uint64_t tradeBoardVersion = 0;

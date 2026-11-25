@@ -21,6 +21,12 @@ namespace proto = game::proto;
 namespace {
 
 constexpr int kDealWindow = 67, kBoardWindow = 159; // ginterface.txt's ids (GDR_SPECIALTY_DEAL, GDR_TRADE_INFO_WND)
+constexpr int kBuyStep = 40; // a purchase's step: a stack
+
+// The purchase's box closed (its steps over or refused).
+void CloseBuyBox(HudContext& c) {
+    if (ConfirmBox* box = std::exchange(c.tradeBuyBox, nullptr)) box->Answer(false);
+}
 
 void Put(ui::Widget* w, const std::string& text) {
     if (w != nullptr && w->text() != text) w->SetText(text);
@@ -79,7 +85,9 @@ public:
             Put(Child(33), GoldText(sold));
             Put(Child(32), sold >= bought ? GoldText(sold - bought) : "-" + GoldText(bought - sold));
         }
-        Put(Child(34), std::to_string(c_.tradeStars));
+        // The scale by its name ("3 Stars", the original's list UIIT_STT_TRADE_TRADESCALE1..5; ours: the trade's now, the
+        // original's the one this deal's count would make).
+        Put(Child(34), c_.tradeStars >= 1 && c_.tradeStars <= 5 ? c_.Text("UIIT_STT_TRADE_TRADESCALE" + std::to_string(c_.tradeStars)) : std::string());
     }
 
     bool OnNotice(const ui::Notice& n) override {
@@ -99,6 +107,14 @@ public:
             c_.tradeBuyLeft = count;
             c_.tradeBuyTab = deal_.tab;
             c_.tradeBuySlot = deal_.slot;
+            if (count > kBuyStep && c_.tradeBuyBox == nullptr) {
+                // More than a stack: the original's box while the steps run (its button inferred to be Cancel).
+                HudContext* c = &c_;
+                c_.tradeBuyBox = c_.hud->Inform("UIIT_STT_EVENTGUIDE", {c_.Text("UIIT_MSG_SPECIALTY_ALLBUY_PROGRESS_WINDOW")}, [c] {
+                    c->tradeBuyLeft = 0;
+                    c->tradeBuyBox = nullptr;
+                }, "UIIT_CTL_CANCEL");
+            }
             TradeBuyStep(c_);
         } else if (c_.tradeRequest) {
             c_.tradeRequest(proto::TradeSell::kId, proto::Encode(proto::TradeSell{c_.tradeNpc, std::uint8_t(deal_.place), std::uint16_t(count)}));
@@ -208,7 +224,7 @@ const char* TradeCodeKey(std::uint16_t code, bool* banner) {
 
 void TradeBuyStep(HudContext& c) {
     if (c.tradeBuyLeft <= 0 || c.hud == nullptr) return;
-    const int step = std::min(c.tradeBuyLeft, 40); // a stack at a time
+    const int step = std::min(c.tradeBuyLeft, kBuyStep); // a stack at a time
     c.tradeBuyLeft -= step;
     HudRequest r{HudRequest::Kind::ShopBuy, c.tradeBuyTab | c.tradeBuySlot << 8};
     r.extra = step;
@@ -218,11 +234,15 @@ void TradeBuyStep(HudContext& c) {
 void TradeAnswered(HudContext& c, const proto::TradeAnswer& a) {
     if (a.code != proto::TradeCode::Ok) {
         c.tradeBuyLeft = 0;
+        CloseBuyBox(c);
         bool banner = false;
         if (const char* key = TradeCodeKey(std::uint16_t(a.code), &banner)) Line(c, c.Text(key), banner);
         return;
     }
-    if (a.request == proto::TradeRequest::Buy) TradeBuyStep(c); // the next step, if any
+    if (a.request == proto::TradeRequest::Buy) {
+        if (c.tradeBuyLeft > 0) TradeBuyStep(c); // the next step
+        else CloseBuyBox(c);                    // the last one answered
+    }
 }
 
 void TradeNotice(HudContext& c, const proto::TradeBargainNotice& n) {

@@ -174,12 +174,14 @@ ConfirmBox* Hud::Confirm(const std::string& titleKey, const std::vector<std::str
     return box;
 }
 
-void Hud::Inform(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void()> done) {
-    if (ui_ == nullptr) return;
+ConfirmBox* Hud::Inform(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void()> done,
+                        const std::string& buttonKey) {
+    if (ui_ == nullptr) return nullptr;
     ConfirmBox* box = Confirm(titleKey, lines, [done = std::move(done)](bool) {
         if (done) done();
     });
-    if (box != nullptr) box->OkOnly(ui_->resources().Text("UIIT_CTL_CONFIRM"));
+    if (box != nullptr) box->OkOnly(ui_->resources().Text(buttonKey));
+    return box;
 }
 
 void Hud::ReverseReturn(std::function<void(int)> answer) {

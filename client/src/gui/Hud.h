@@ -163,8 +163,10 @@ public:
     // A message box (CIFMessageBox) with a title key, lines and Yes / No, centred; `answer` hears
     // which (No when closed). The box made (none without an interface).
     ConfirmBox* Confirm(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void(bool yes)> answer);
-    // A message box that only tells (one button, Confirm); `done` hears its button or its closing.
-    void Inform(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void()> done);
+    // A message box that only tells (one button, Confirm unless `buttonKey` names another); `done` hears its button or
+    // its closing. The box made (none without an interface).
+    ConfirmBox* Inform(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void()> done,
+                       const std::string& buttonKey = "UIIT_CTL_CONFIRM");
     // The reverse return scroll's box (ReverseReturnBox), centred: `answer` hears 1 the last recall point, 2 the place
     // of death, 3 a point on the map, 0 cancelled.
     void ReverseReturn(std::function<void(int result)> answer);
