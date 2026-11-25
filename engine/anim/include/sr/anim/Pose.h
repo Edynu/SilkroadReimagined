@@ -61,8 +61,10 @@ public:
     // pose of the one-shots that animate it (two of weight 1 half and half), laid on with at most weight 1; the cyclic
     // clip fills the rest. A new cyclic clip cross-fades from the old over `fadeMs`. Times in ms on the caller's clock.
     void SetCycle(const assets::AnimationData* clip, double nowMs, float fadeMs);
-    // A one-shot started now; `tag` the caller's name for it (FindOnce). Its id (never 0).
-    std::uint32_t PlayOnce(const assets::AnimationData* clip, double nowMs, float blendInMs, float blendOutMs, bool holdFirst, std::uint64_t tag);
+    // A one-shot started now; `tag` the caller's name for it (FindOnce). Its id (never 0). `rate` its clip's speed
+    // (0.5: twice as long; a slowed entity's actions).
+    std::uint32_t PlayOnce(const assets::AnimationData* clip, double nowMs, float blendInMs, float blendOutMs, bool holdFirst, std::uint64_t tag,
+                           float rate = 1.0f);
     // A one-shot blended out from now (it plays on through its blend-out); Resume takes a stop back.
     void StopOnce(std::uint32_t id, double nowMs, float blendOutMs);
     void ResumeOnce(std::uint32_t id);
@@ -108,6 +110,7 @@ private:
         Clip clip;
         float blendIn = 0, blendOut = 0;
         bool holdFirst = false;
+        float rate = 1.0f;
         double stopMs = -1.0; // stopped at (its blend-out from then); -1: at its end
     };
     Clip cycle_, cycleFrom_;

@@ -379,7 +379,10 @@ bool StateSet::Idles(std::uint32_t target) const {
 }
 
 int StateSet::SpeedPercent() const { return In(StateKind::Frostbite) ? 50 : In(StateKind::Slow) ? 75 : 100; }
-int StateSet::AttackTimePercent() const { return In(StateKind::Frostbite) ? 200 : In(StateKind::Slow) ? 125 : 100; }
+int StateSet::AttackTimePercent() const { return game::AttackTimePercent(mask_); }
+int AttackTimePercent(std::uint32_t mask) {
+    return (mask & StateBit(StateKind::Frostbite)) != 0 ? 200 : (mask & StateBit(StateKind::Slow)) != 0 ? 125 : 100;
+}
 
 int StateSet::ReachPercent() const {
     const ActiveState* m = Find(StateKind::Myopia);

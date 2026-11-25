@@ -204,6 +204,9 @@ bool MakeSkillBench(const assets::SkillTable& skills, const assets::ItemTable& i
                 now = to;
                 step.capture = t + 0.12;
             }
+            if (options.casterState > 0) {
+                Put(out.recording, t - 0.01, proto::EntityStates{caster, {{std::uint8_t(options.casterState), std::uint8_t(1), 8000u}}});
+            }
             Put(out.recording, t, proto::EntitySwing{caster, on, s->id});
             // A heal or a cure on its caster: taking hold at its impact (its ACT_S on it, as the server tells).
             if ((traits.heal || traits.cure) && !traits.attack && !traits.resurrect && !(traits.buff || traits.toggle)) {

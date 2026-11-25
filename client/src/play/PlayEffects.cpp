@@ -51,6 +51,7 @@ StageEffects::Cast PlayScreen::CastOf(std::uint32_t caster, std::uint32_t target
     // The shot clip's hit moments as the caster plays it (its code-1 events): the stages started by an event start at them.
     const std::size_t from = SlotOf(caster);
     events = from != StageEffects::kNone && world_ ? world_->StageEvents(from, set, shotState) : std::vector<double>{};
+    for (double& t : events) t *= Stretch(caster); // a slowed caster's clip plays longer
     StageEffects::Cast cast;
     cast.shotEvents = events;
     cast.weapon = weapon;
@@ -528,6 +529,14 @@ void PlayScreen::StateLoops(double now) {
         }
         ++it;
     }
+}
+
+double PlayScreen::Stretch(std::uint32_t entity) const {
+    std::uint32_t mask = 0;
+    if (const auto it = afflicted_.find(entity); it != afflicted_.end()) {
+        for (const ShownState& s : it->second.states) mask |= game::StateBit(s.kind);
+    }
+    return double(game::AttackTimePercent(mask)) / 100.0;
 }
 
 bool PlayScreen::InState(std::uint32_t entity, game::StateKind kind, double now) const {

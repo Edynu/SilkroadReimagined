@@ -49,6 +49,8 @@ struct SkillBenchOptions {
     float reach = 0;
     // A state (game::StateKind) put on the monster through each step, to see its look (0: none).
     int state = 0;
+    // A state put on each step's caster before its swing (frostbite 1, slow 8: its clips slowed; 0: none).
+    int casterState = 0;
     // The weapons' plus (their glow and, from +8, their sparks).
     std::uint8_t plus = 0;
     // A weapon by codename held in place of the first one of its kind, for the skills it fits (e.g. a rare one, its

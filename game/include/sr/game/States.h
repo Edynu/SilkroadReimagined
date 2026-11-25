@@ -52,6 +52,9 @@ inline constexpr int kStateSlots = 32;
 
 // The kind's bit in the state mask: 1 << kind, burn and shock swapped.
 std::uint32_t StateBit(StateKind kind);
+// The time an entity of those states (a mask of StateBit) takes for its actions, a percent: frostbite 200, slow 125,
+// else 100 (the server's time between attacks; the client's action clips play at 100 / percent).
+int AttackTimePercent(std::uint32_t mask);
 // The elements (freeze .. zombie): their level is the tag's power cut by the target's resistance.
 constexpr bool IsElement(StateKind kind) { return std::uint8_t(kind) <= 5; }
 const char* StateName(StateKind kind);

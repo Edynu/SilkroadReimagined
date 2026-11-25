@@ -1729,7 +1729,10 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         // casts, then its shot for its duration (skilldata cols 11, 12, 13; ours: the clips' own
         // lengths are the client's in the original). A phase with no clip of its row runs in the next
         // clip (StageEffects::Swing). A skill of no duration (a buff) shows its shot 0.8 s.
-        const double ready = std::max(0, skill->preparingMs) / 1000.0, wait = dash > 0.0 ? dash : std::max(0, skill->castingMs) / 1000.0;
+        // Frostbite and slow (its time percent, 200 and 125) stretch them all, its clips playing at 100 / percent, as
+        // the original's.
+        const double stretch = Stretch(swing->attacker);
+        const double ready = std::max(0, skill->preparingMs) / 1000.0 * stretch, wait = dash > 0.0 ? dash : std::max(0, skill->castingMs) / 1000.0 * stretch;
         // The shot's time: its duration and those of the rows its chain adds (col 9; one clip shows
         // the whole chain), until its clip's own length is known.
         double seconds = dash > 0.0 ? 0.2 : skill->durationMs > 0 ? std::max(0.4, double(skill->durationMs) / 1000.0) : 0.8;
@@ -1738,6 +1741,7 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
              next = tables_->skills.Find(next->chainNext), ++rows) {
             seconds += std::max(0, next->durationMs) / 1000.0;
         }
+        if (dash <= 0.0) seconds *= stretch;
         // Its clips from its row's group (skillaniset2 col 5), whatever is in hand.
         const std::string set = anim != nullptr ? anim->group : std::string();
         // A skill whose row names no clips at all (an imbue: only its effect shows) moves nobody; its
@@ -1748,7 +1752,7 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         StageEffects::Swing times = StageEffects::Swing::Of(ready, wait, seconds, readyClip || !moves, waitClip || !moves);
         // The shot to its clip's end once its length is known (it may still be loading: see Motion).
         const std::size_t slot = SlotOf(swing->attacker);
-        const double clip = moves && dash <= 0.0 && slot != StageEffects::kNone && world_ ? world_->StageClipSeconds(slot, set, state) : -1.0;
+        const double clip = moves && dash <= 0.0 && slot != StageEffects::kNone && world_ ? world_->StageClipSeconds(slot, set, state) * stretch : -1.0;
         if (clip > 0.0) times.end = times.shot + StageEffects::kClipHold + clip;
         // Its weapon's model (a throw flies it): the first model of the item in its weapon place.
         std::string weapon;
@@ -1783,7 +1787,7 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
             const auto queue = [&](std::uint32_t clipState, double start) {
                 for (const assets::ResourceData::SoundEvent& e : world_->StageSounds(slot, set, clipState)) {
                     clipSounds_.push_back({swing->attacker, 0, soundKey, hand, row != nullptr ? row->codename : std::string(),
-                                           e.handle, e.wave, start + double(e.ms) / 1000.0});
+                                           e.handle, e.wave, start + double(e.ms) / 1000.0 * stretch});
                 }
             };
             if (readyClip) queue(std::uint32_t(anim->ready[turn % anim->ready.size()]), context.time + StageEffects::kClipHold);
@@ -1808,6 +1812,7 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         SkillEffects(clipSounds, *skill, swing->attacker, swing->target, context.time, times, set, state, weapon, deferShot);
         if (!moves) return;
         Motion motion;
+        motion.speed = float(1.0 / stretch);
         if (readyClip) motion.steps.push_back({std::uint32_t(anim->ready[turn % anim->ready.size()]), context.time + times.wait, ++takes_, set});
         if (waitClip) motion.steps.push_back({std::uint32_t(anim->wait[turn % anim->wait.size()]), context.time + times.shot, ++takes_, set});
         motion.steps.push_back({state, context.time + times.end, ++takes_, set});
@@ -1833,7 +1838,8 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
         // Its weapon hidden: from the cast (hide weapon 1), or as a WEAPON flight leaves the hand.
         if (anim != nullptr && anim->hideWeapon == 1) motion.hideFrom = context.time;
         if (const auto* stages = StageEffects::StagesOf(tables_->skillAnimations, Shown(*skill))) {
-            const std::vector<double> events = slot != StageEffects::kNone ? world_->StageEvents(slot, set, state) : std::vector<double>{};
+            std::vector<double> events = slot != StageEffects::kNone ? world_->StageEvents(slot, set, state) : std::vector<double>{};
+            for (double& t : events) t *= stretch;
             for (const StageEffects::Stage& s : *stages) {
                 if (core::NormalizeAssetPath(s.object) != "weapon" || !s.action.starts_with("AT_MOV")) continue;
                 const double launch = context.time + StageEffects::StageStart(s, times, events) + s.moveDelayMs / 1000.0;
@@ -1846,8 +1852,8 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
             const std::vector<double> on = world_->StageEvents(slot, set, state, 5), off = world_->StageEvents(slot, set, state, 6);
             if (!on.empty()) {
                 const double shot = context.time + times.shot + StageEffects::kClipHold;
-                motion.trailOn = shot + on.front();
-                motion.trailOff = !off.empty() && off.front() > on.front() ? shot + off.front() : clip > 0.0 ? shot + clip : shot + on.front() + 0.4;
+                motion.trailOn = shot + on.front() * stretch;
+                motion.trailOff = !off.empty() && off.front() > on.front() ? shot + off.front() * stretch : clip > 0.0 ? shot + clip : shot + on.front() * stretch + 0.4;
                 motion.trailTexture = anim->trailTexture;
                 motion.trailColour = anim->trailColour;
                 motion.trailSeconds = anim->trailMs > 0 ? float(anim->trailMs) / 1000.0f : 0.2f;
@@ -4428,7 +4434,7 @@ void PlayScreen::PlaceWalkers(ScreenContext& context) {
                 // The shot's clip in now: the swing lasts to its end.
                 const Motion::Step& shot = motion.steps.back();
                 if (const double clip = world_->StageClipSeconds(slot->second, shot.set, shot.state); clip > 0.0) {
-                    motion.steps.back().until = motion.shotFrom + StageEffects::kClipHold + clip;
+                    motion.steps.back().until = motion.shotFrom + StageEffects::kClipHold + clip / double(motion.speed);
                     motion.shotFrom = -1.0;
                 }
             }
@@ -4485,6 +4491,7 @@ void PlayScreen::PlaceWalkers(ScreenContext& context) {
                         look.state = step.state;
                         look.clipSet = step.set;
                         look.take = step.take;
+                        look.speed = motion.speed;
                         // Standing, its wait loop is the cycle from the cast (P18: under READY, which blends out onto it), and
                         // under the shot while the shot blends in (no dip toward the stance); once the shot covers the body
                         // the cycle goes back to the stance under it, unseen, so the shot's end blends out onto the stance
@@ -4799,6 +4806,7 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         benchOptions.weaponKind = context.config.GetInt("bench-weapon", 0);
         benchOptions.reach = float(context.config.GetInt("bench-reach", 0));
         benchOptions.state = context.config.GetInt("bench-state", 0);
+        benchOptions.casterState = context.config.GetInt("bench-caster-state", 0);
         benchOptions.plus = static_cast<std::uint8_t>(std::clamp(context.config.GetInt("bench-plus", 0), 0, 255));
         benchOptions.weapon = context.config.GetString("bench-item", "");
         benchOptions.impactDelayMs = context.config.GetInt("bench-impact-delay", 0);

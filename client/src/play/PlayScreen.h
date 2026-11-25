@@ -212,6 +212,8 @@ private:
         std::uint32_t waitState = 0;
         std::string waitSet;
         bool waitLoop = false;
+        // Its clips' speed: 1 / the caster's Stretch when it began.
+        float speed = 1.0f;
         double End() const { return steps.empty() ? 0.0 : steps.back().until; }
     };
     // A teleport skill's move told before its swing (EntityBlink), by its caster: its skill and how long its dash runs
@@ -1060,6 +1062,8 @@ private:
     void TakeStates(const game::proto::EntityStates& states, double now);
     void StateLoops(double now);
     bool InState(std::uint32_t entity, game::StateKind kind, double now) const;
+    // How much longer its actions take for its states (frostbite 2, slow 1.25, else 1; game::AttackTimePercent).
+    double Stretch(std::uint32_t entity) const;
     std::vector<game::ActiveEffect> StatesOf(std::uint32_t entity, double now) const;
     void DrawDamage(ScreenContext& context, ui::Painter& paint);
     // How near NPCs, monsters and items must be for their names to show (world units; --name-distance,

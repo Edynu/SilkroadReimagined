@@ -264,6 +264,10 @@ TEST_CASE("states: what they do to the numbers and the moves; a hit's damage wak
     slow.Apply(State(StateKind::Frostbite, 30, 5000, now));
     CHECK(slow.SpeedPercent() == 50);
     CHECK(slow.AttackTimePercent() == 200);
+    // The client's from the mask its states message gives (its action clips at 100 / percent).
+    CHECK(game::AttackTimePercent(game::StateBit(StateKind::Slow)) == 125);
+    CHECK(game::AttackTimePercent(game::StateBit(StateKind::Slow) | game::StateBit(StateKind::Frostbite)) == 200);
+    CHECK(game::AttackTimePercent(game::StateBit(StateKind::Burn)) == 100);
     CHECK_FALSE(slow.Locked());
     game::StateSet held;
     held.Apply(State(StateKind::Root, 10, 5000, now));

@@ -511,6 +511,7 @@ void WorldScreen::SetStage(std::size_t slot, const StageLook& look, float x, flo
     same.state = c.look.state;
     same.clipSet = c.look.clipSet;
     same.take = c.look.take;
+    same.speed = c.look.speed;
     same.held = c.look.held;
     same.hideWeapon = c.look.hideWeapon;
     same.spine = c.look.spine;
@@ -522,6 +523,7 @@ void WorldScreen::SetStage(std::size_t slot, const StageLook& look, float x, flo
         c.look.state = look.state;
         c.look.clipSet = look.clipSet;
         c.look.take = look.take;
+        c.look.speed = look.speed;
         c.look.held = look.held;
         c.look.hideWeapon = look.hideWeapon;
         c.look.spine = look.spine;
@@ -1608,7 +1610,7 @@ void WorldScreen::UpdateCharacters(ScreenContext& context, FrameSnapshot& snapsh
                 c.pose.ResumeOnce(id);
             } else {
                 const bool skill = !c.look.clipSet.empty();
-                id = c.pose.PlayOnce(top, at, 200.0f, 200.0f, skill, tag);
+                id = c.pose.PlayOnce(top, at, 200.0f, 200.0f, skill, tag, c.look.speed);
             }
             if (c.onceId != 0 && c.onceId != id) c.pose.StopOnce(c.onceId, at, 200.0f);
             c.onceId = id;

@@ -191,7 +191,8 @@ void SkeletonPose::SetCycle(const assets::AnimationData* clip, double nowMs, flo
     cycle_ = MapClip(clip, nowMs);
 }
 
-std::uint32_t SkeletonPose::PlayOnce(const assets::AnimationData* clip, double nowMs, float blendInMs, float blendOutMs, bool holdFirst, std::uint64_t tag) {
+std::uint32_t SkeletonPose::PlayOnce(const assets::AnimationData* clip, double nowMs, float blendInMs, float blendOutMs, bool holdFirst, std::uint64_t tag,
+                                     float rate) {
     if (clip == nullptr) return 0;
     // At most eight at once: the oldest gives way (a flood of swings).
     if (onces_.size() >= 8) onces_.erase(onces_.begin());
@@ -203,6 +204,7 @@ std::uint32_t SkeletonPose::PlayOnce(const assets::AnimationData* clip, double n
     o.blendIn = std::max(0.0f, blendInMs);
     o.blendOut = std::max(0.0f, blendOutMs);
     o.holdFirst = holdFirst;
+    o.rate = rate > 0.0f ? rate : 1.0f;
     onces_.push_back(std::move(o));
     return onces_.back().id;
 }
@@ -237,10 +239,10 @@ void SkeletonPose::OnceAt(const Once& o, double nowMs, float& weight, float& tim
     const assets::AnimationData* clip = o.clip.clip;
     const double duration = clip != nullptr && !clip->keyTimesMs.empty() ? double(std::max<std::uint32_t>(clip->keyTimesMs.back(), 1)) : 1.0;
     const double lead = o.holdFirst ? double(o.blendIn) : 0.0; // its first frame held through its blend-in
-    const double natural = o.clip.startMs + lead + duration;
+    const double natural = o.clip.startMs + lead + duration / double(o.rate);
     const double end = o.stopMs >= 0.0 ? o.stopMs : (clip != nullptr && clip->loop ? 1e300 : natural);
     const double at = std::min(nowMs, end);
-    timeMs = float(std::max(0.0, at - o.clip.startMs - lead)); // its last frame held through its blend-out
+    timeMs = float(std::max(0.0, at - o.clip.startMs - lead) * double(o.rate)); // its last frame held through its blend-out
     const double local = nowMs - o.clip.startMs;
     const double in = o.blendIn > 0.0f ? std::clamp(local / double(o.blendIn), 0.0, 1.0) : 1.0;
     const double out = nowMs <= end ? 1.0 : (o.blendOut > 0.0f ? 1.0 - (nowMs - end) / double(o.blendOut) : 0.0);

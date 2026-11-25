@@ -183,6 +183,9 @@ public:
         // col 5: the 1.188 client plays a skill's clips from it).
         std::string clipSet;
         std::uint32_t take = 0;         // a new value plays the state's clip again from its start (a repeated swing)
+        // The speed its one-shot starts at: an action's clips under frostbite or slow play at 100 / its time percent
+        // (game::AttackTimePercent), as the original's.
+        float speed = 1.0f;
         float height = 1.0f;            // a uniform scale
         // Grown or shrunk by a presentation (SCT_CHAR_SCALE: berserk's 1.1 and 1.2), times the height; a change does not
         // make the model again.
