@@ -1638,10 +1638,10 @@ TEST_CASE("Event So-Ok's registration row and her coded quest's talk in the NPC 
     desk.flagState = 1;
     desk.quests.push_back({10145, "SN_QEV_CH_EVENT_KISAENG_081201"});
     flag.Apply(desk);
-    // The registration row after her ordinary rows, before the end; drawing it expects the "accepted" answer.
+    // The registration row after her ordinary rows (a first menu has no end row, the original's); drawing it expects the "accepted" answer.
     flag.RowDrawn(2);
     npc->ShowNpc(kSoOk, "NPC_CH_EVENT_KISAENG1", "SN_NPC_CH_EVENT_KISAENG1", proto::kNpcTalk);
-    CHECK(rows() == std::vector<std::string>{"1. UIIT_STT_NPC_CHATTING_WND_TALKSTART", "2. UIIT_MSG_FLAGWAR_GAME_JOIN_REQ", "3. UIIT_STT_NPC_CHATTING_WND_TALKEND"});
+    CHECK(rows() == std::vector<std::string>{"1. UIIT_STT_NPC_CHATTING_WND_TALKSTART", "2. UIIT_MSG_FLAGWAR_GAME_JOIN_REQ"});
     CHECK(flag.Registering());
     // Under level 20: its line, nothing sent; at 20: the request.
     state.self.level = 19;
@@ -1661,7 +1661,7 @@ TEST_CASE("Event So-Ok's registration row and her coded quest's talk in the NPC 
     CHECK_FALSE(flag.Registering());
     // Another NPC: no row.
     npc->ShowNpc(kSoOk + 1, "NPC_CH_SMITH", "SN_NPC_CH_SMITH", proto::kNpcTalk);
-    CHECK(rows().size() == 2);
+    CHECK(rows().size() == 1);
 
     // Her talk: the swap's title in her list; picked: EventTalk 0xFF.
     sent.clear();
@@ -1743,11 +1743,11 @@ TEST_CASE("the Battle Arena manager's rows in the NPC window: the open mode's ro
     constexpr std::uint32_t kManager = 12;
     // No desk yet: the ordinary rows only.
     npc->ShowNpc(kManager, "NPC_BATTLE_ARENA_MANAGER", "SN_NPC_BATTLE_ARENA_MANAGER", proto::kNpcTalk);
-    CHECK(rows().size() == 2);
-    // The random mode open with both kinds: its name's row before the end; its talk with "Arena Registration".
+    CHECK(rows().size() == 1);
+    // The random mode open with both kinds: its name's row; its talk with "Arena Registration".
     arena.Apply(proto::ArenaDesk{kManager, 0x60});
     npc->ShowArenaDesk();
-    CHECK(rows() == std::vector<std::string>{"1. UIIT_STT_NPC_CHATTING_WND_TALKSTART", "2. UIIT_STT_ARENA_RANDOMMATCH", "3. UIIT_STT_NPC_CHATTING_WND_TALKEND"});
+    CHECK(rows() == std::vector<std::string>{"1. UIIT_STT_NPC_CHATTING_WND_TALKSTART", "2. UIIT_STT_ARENA_RANDOMMATCH"});
     CHECK(npc->Choose(2));
     CHECK(rows() == std::vector<std::string>{"SN_NPC_BATTLE_ARENA_MANAGER_RANDOMMATCH_BS", "1. UIIT_STT_ARENA_NPC_JOIN", "2. UIIT_STT_NPC_CHATTING_WND_TALKEND"});
     CHECK(sent.empty());
@@ -1770,10 +1770,10 @@ TEST_CASE("the Battle Arena manager's rows in the NPC window: the open mode's ro
     // No mode open, or another NPC: no row.
     arena.Apply(proto::ArenaDesk{kManager, 4});
     npc->ShowNpc(kManager, "NPC_BATTLE_ARENA_MANAGER", "SN_NPC_BATTLE_ARENA_MANAGER", proto::kNpcTalk);
-    CHECK(rows().size() == 2);
+    CHECK(rows().size() == 1);
     arena.Apply(proto::ArenaDesk{kManager, 0x20});
     npc->ShowNpc(kManager + 1, "NPC_CH_SMITH", "SN_NPC_CH_SMITH", proto::kNpcTalk);
-    CHECK(rows().size() == 2);
+    CHECK(rows().size() == 1);
 }
 
 TEST_CASE("the Battle Arena's windows: the rule window's kinds and the request, the guild window's 16, the score, rank and result windows (game files)") {
