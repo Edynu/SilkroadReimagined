@@ -842,6 +842,20 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 hudContext_.items = &tables_->items;
                 hudContext_.magicOptions = host_.data().MagicOptions(); // the tooltips' blues and the stones' targets
                 hudContext_.characters = &tables_->characters;          // a ride's or a transport's scroll's animal
+                // --in-fortress N: the sample character's region in fortress N's area (the fortress items' place line, the
+                // forges' making lines).
+                if (const int fortress = context.config.GetInt("in-fortress", 0); fortress > 0) {
+                    if (const game::WorldView::Entity* self = sampleWorld_.Find(sampleWorld_.Self())) {
+                        game::proto::FortressList forts;
+                        game::proto::FortressRecord f;
+                        f.id = std::uint32_t(fortress);
+                        f.nameKey = "SN_FORTRESS_JANGAN";
+                        f.regions = {self->position.region};
+                        forts.fortresses = {f};
+                        sampleFortress_.Apply(game::proto::FortressEvent{forts});
+                        hudContext_.worldMap = host_.data().WorldMap();
+                    }
+                }
                 game::proto::InventoryList bag;
                 bag.size = game::Inventory::kMaxSize;
                 if (const assets::ItemRow* row = tables_->items.Find(std::string_view("ITEM_ETC_HP_POTION_02")))

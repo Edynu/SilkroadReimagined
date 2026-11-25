@@ -244,6 +244,16 @@ void AddTooltipDescription(std::vector<ui::TooltipLine>& out, std::string_view t
 
 namespace {
 
+// The fortress whose area the player stands in (0: none), by the fortresses' regions as the server lists them.
+std::uint32_t AreaFortress(const HudContext& c) {
+    const game::WorldView::Entity* self = c.world != nullptr ? c.world->Find(c.world->Self()) : nullptr;
+    if (self == nullptr || c.fortress == nullptr) return 0;
+    for (const proto::FortressRecord& f : c.fortress->Fortresses()) {
+        if (std::find(f.regions.begin(), f.regions.end(), self->position.region) != f.regions.end()) return f.id;
+    }
+    return 0;
+}
+
 // The requirement lines, white when met, red when not: the level, a mastery
 // ("Mastery: Bicheon Mastery level 20"; white: the masteries are not in the player's state yet),
 // the sex, the race.
@@ -302,13 +312,7 @@ std::vector<ui::TooltipLine> Requirements(const assets::ItemRow& row, const HudC
         const bool gradeMet = me != nullptr && (grade == 0 || (me->position & grade) != 0);
         needs.push_back({c.Text("UIIT_STT_ITEM_FORMAT_FORT_USEGRADE") + ": " + who, gradeMet ? kWhite : kRed, kShadow});
         if (!(t[1] == 1 && t[2] == 6 && t[3] == 16)) {
-            const game::WorldView::Entity* self = c.world != nullptr ? c.world->Find(c.world->Self()) : nullptr;
-            bool inFortress = false;
-            if (self != nullptr && c.fortress != nullptr) {
-                for (const proto::FortressRecord& f : c.fortress->Fortresses()) {
-                    if (std::find(f.regions.begin(), f.regions.end(), self->position.region) != f.regions.end()) inFortress = true;
-                }
-            }
+            const bool inFortress = AreaFortress(c) != 0;
             std::string where = spot == 0 ? c.Text("UIIT_STT_QUEST_UNLIMITED") : std::string();
             bool whereMet = true;
             if ((spot & 1) != 0) where = c.Text("UIIT_STT_FORT_ITEMUSE_CONDITION_PLACE_FORTIN"), whereMet = inFortress;
@@ -473,6 +477,41 @@ std::vector<ui::TooltipLine> ItemTooltip(const assets::ItemRow& row, const game:
                            dead ? kRed : kWhite, kShadow});
         }
         if (out.back().text.empty()) out.pop_back(); // nothing known of it yet
+    }
+    // An item the forges of the fortress whose area the player is in make (refsiegeitemmake's row there): its making price
+    // ("Making price: N Gold"), guild points and time, each 15% less when the guild has a production administrator.
+    if (c.worldMap != nullptr) {
+        const std::uint32_t fortress = AreaFortress(c);
+        const assets::FortressForgeRow* forge = nullptr;
+        for (const assets::FortressForgeRow& r : c.worldMap->forges) {
+            if (fortress != 0 && std::uint32_t(r.fortress) == fortress && r.item == row.refObjId) forge = &r;
+        }
+        if (forge != nullptr) {
+            bool producer = false;
+            if (c.guild != nullptr && c.guild->InGuild()) {
+                for (const proto::GuildMemberRecord& m : c.guild->Guild().members) producer = producer || (m.position & game::kPositionProduction) != 0;
+            }
+            const double factor = producer ? 0.85 : 1.0;
+            out.push_back({{}, kWhite, kShadow});
+            out.push_back({std::format("{}: {} {}", c.Text("UIIT_STT_ITEM_FORMAT_MAKEPRICE"), std::llround(double(forge->gold) * factor), c.Text("UIIT_STT_GOLD")),
+                           kWhite, kShadow});
+            out.push_back({std::format("{}: {} {}", c.Text("UIIT_STT_ITEM_FORMAT_MAKEGP"), std::llround(double(forge->guildPoints) * factor),
+                                       c.Text("UIIT_STT_GUILD_POINT_GP")),
+                           kWhite, kShadow});
+            const long long seconds = std::llround(double(forge->minutes) * 60.0 * factor);
+            const long long minutes = seconds / 60, hours = minutes / 60, days = hours / 24;
+            std::string period;
+            if (days > 0) {
+                period = std::format("{}{} {}{} {}{}", days, c.Text("PARAM_DAY"), hours % 24, c.Text("PARAM_HOUR"), minutes % 60, c.Text("PARAM_MINUTE"));
+            } else if (hours > 0) {
+                period = std::format("{}{} {}{}", hours, c.Text("PARAM_HOUR"), minutes % 60, c.Text("PARAM_MINUTE"));
+            } else if (minutes > 0) {
+                period = std::format("{}{} {}{}", minutes, c.Text("PARAM_MINUTE"), seconds % 60, c.Text("PARAM_SECOND"));
+            } else {
+                period = std::format("{} {}", seconds, c.Text("PARAM_SECOND"));
+            }
+            out.push_back({c.Text("UIIT_STT_ITEM_FORMAT_MAKEPERIOD") + ": " + period, kWhite, kShadow});
+        }
     }
     // While a store is open: what the merchant pays for it, "Price %d".
     if (c.shopPrices) {
