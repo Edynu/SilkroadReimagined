@@ -800,7 +800,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         } else if (clickStep_ < 3 && (clickStep_ > 0 || (host_.Settled() && (page_ != "fortress-map" || fortressMapShown_) &&
                                                          ((page_ != "inventory-full" && !EquipmentPage(page_)) || autoPotionShown_) &&
                                                          ((page_ != "cos" && page_ != "cos-two" && page_ != "cos-pets") || cosShown_) &&
-                                                         ((!page_.starts_with("exchange") && !page_.starts_with("stall")) || exchangeFrames_ >= 10)))) {
+                                                         ((!page_.starts_with("exchange") && !page_.starts_with("stall") && !page_.starts_with("open-market")) || exchangeFrames_ >= 10)))) {
             ui::InputEvent e;
             e.position = at;
             e.type = clickStep_ == 0 ? ui::InputEvent::Type::MouseMove : clickStep_ == 1 ? ui::InputEvent::Type::MouseDown : ui::InputEvent::Type::MouseUp;
@@ -1066,6 +1066,30 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 ShowOpenMarket(hudContext_, true);
                 OpenMarketScript(hudContext_, "om-page", "register");
                 OpenMarketScript(hudContext_, "om-register", "");
+            }
+        }
+        // --page open-market-buy: the Open Market's Search page with one result, chosen and bought (its purchase box).
+        if (page_ == "open-market-buy" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
+            stallShown_ = true;
+            if (tables_->Usable()) {
+                namespace proto = game::proto;
+                hudContext_.items = &tables_->items;
+                proto::OpenMarketResults results;
+                results.pages = 1;
+                results.total = 1;
+                proto::OpenMarketRow row;
+                row.account = 7;
+                row.listing = 1;
+                row.seller = "Zeta";
+                row.price = 450000;
+                row.secondsLeft = 86400 * 3;
+                if (const assets::ItemRow* r = tables_->items.Find(std::string_view("ITEM_CH_BLADE_02_A_RARE"))) row.item = {0, r->refObjId, 5, 0, 40, 1, {}};
+                results.rows = {row};
+                sample_.openMarket.Apply(proto::OpenMarketEvent{results}, context.time);
+                hudContext_.openMarketRequest = [](proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: open market request 0x{:04X}", id); };
+                ShowOpenMarket(hudContext_, true);
+                OpenMarketScript(hudContext_, "om-page", "search");
+                OpenMarketScript(hudContext_, "om-buy", "0");
             }
         }
         // --page stall-network-buy: the stall network's window on a page of one row, its Purchase pressed (the box).

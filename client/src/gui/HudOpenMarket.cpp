@@ -35,6 +35,8 @@ constexpr int kRowNumber = 10, kRowLevel = 11, kRowName = 12, kRowCount = 13, kR
 constexpr int kWindowId = 190, kPriceBoxId = 194;
 constexpr const char* kConfirmLayout = "res_ui\\open_market_1_3.2dt";
 constexpr int kConfirmBoxId = 196;
+constexpr const char* kBuyLayout = "res_ui\\open_market_1_4.2dt";
+constexpr int kBuyBoxId = 199;
 
 template <typename T>
 void Send(HudContext& c, const T& message) {
@@ -123,6 +125,47 @@ public:
                     c_.systemLine(c_.Text("UIIT_STT_OPEN_MARKET_CHECKBOX_ERROR"));
                 }
             }
+            if (ui_ != nullptr) ui_->Close(this);
+            return true;
+        }
+        return MainFrame::OnNotice(n);
+    }
+
+private:
+    HudContext& c_;
+    ui::Interface* ui_ = nullptr;
+};
+
+// A search row's purchase asked (CNIFOpenMarketSearchPriceMsgBox, open_market_1_4.2dt): the item's icon (10), its name
+// (15), its count (17) and price (16) shown, not typed; Confirm (3) buys, Cancel (4) closes.
+class BuyBox : public ui::MainFrame {
+public:
+    BuyBox(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+    std::function<void()> confirmed;
+    void Created(ui::Interface& ui) override {
+        MainFrame::Created(ui);
+        ui_ = &ui;
+        const auto* records = c_.layout2dt ? c_.layout2dt(kBuyLayout) : nullptr;
+        if (records == nullptr || records->empty()) return;
+        Build2dt(ui, *this, *records, {});
+    }
+    void Ask(const proto::OpenMarketRow& row) {
+        const assets::ItemRow* item = c_.items != nullptr ? c_.items->Find(row.item.item) : nullptr;
+        if (auto* w = ui::As<ui::Static>(Find(10))) w->texture = item != nullptr && !item->iconPath.empty() ? "icon\\" + item->iconPath : std::string();
+        if (ui::Widget* w = Find(15)) w->SetText(item != nullptr ? c_.Text(item->nameKey) : std::string());
+        if (auto* w = ui::As<ui::Edit>(Find(17))) {
+            w->SetValue(std::to_string(std::max<int>(1, row.item.quantity)));
+            w->enabled = false;
+        }
+        if (auto* w = ui::As<ui::Edit>(Find(16))) {
+            w->SetValue(std::to_string(row.price));
+            w->enabled = false;
+        }
+        visible = true;
+    }
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && (n.control == 3 || n.control == 4)) {
+            if (n.control == 3 && confirmed) confirmed();
             if (ui_ != nullptr) ui_->Close(this);
             return true;
         }
@@ -405,10 +448,15 @@ public:
         if (r == nullptr || c_.hud == nullptr) return;
         HudContext* c = &c_;
         const proto::OpenMarketRow row = *r;
-        c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(c_.Text("UIIT_MSG_WARENETWORK_BUY_CONFIRM"), {ItemName(row.item.item), GoldText(row.price)})},
-                        [c, row](bool yes) {
-                            if (yes) Send(*c, proto::OpenMarketBuy{row.account, row.listing});
-                        });
+        // The market's own purchase box (open_market_1_4.2dt): the item, its count and its price.
+        if (ui_ == nullptr) return;
+        if (ui::Widget* open = ui_->Window(kBuyBoxId)) ui_->Close(open);
+        const auto node = RootNode2dt(c_, kBuyLayout, "CNIFOpenMarketSearchPriceMsgBox", kBuyBoxId);
+        auto* box = node ? dynamic_cast<BuyBox*>(ui_->Open(*node)) : nullptr;
+        if (box == nullptr) return;
+        ui_->Centre(*box, ui_->screen());
+        box->confirmed = [c, row] { Send(*c, proto::OpenMarketBuy{row.account, row.listing}); };
+        box->Ask(row);
     }
     void Choose(int row) {
         chosen_ = row;
@@ -603,6 +651,7 @@ MarketWindow* WindowOf(HudContext& c) {
 void RegisterOpenMarketWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CNIFOpenMarket", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<MarketWindow>(n, *c); });
     ui.Register("CNIFOpenMarketRegistrationPriceMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<PriceBox>(n, *c); });
+    ui.Register("CNIFOpenMarketSearchPriceMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<BuyBox>(n, *c); });
     ui.Register("CNIFOpenMarketRegistrationConfirmationMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<RegisterConfirmBox>(n, *c); });
 }
 
