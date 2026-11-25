@@ -573,9 +573,11 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 hud_.OpenPage(hud::kPageSkills);
             }
             // The guild window on its sample guild, and its Grant name box.
-            if (page_ == "guild" || page_ == "guild-title") {
+            if (page_ == "guild" || page_ == "guild-title" || page_ == "guild-grant") {
                 ShowGuildPage(hud_.Show(hud::kCommunity), 0);
                 if (page_ == "guild-title") AskGuildTitle(hudContext_, 2, "Beta");
+                // The fortress positions' grant window (--mouse on a row: its help).
+                if (page_ == "guild-grant") OpenGuildPosition(hudContext_, 2);
             }
             // The Community side of the same window.
             if (page_ == "community" || page_ == "community-block" || page_ == "community-letter") {

@@ -269,6 +269,27 @@ public:
         Show();
     }
 
+    void Update(ui::Frame& frame) override {
+        FrameBorder::Update(frame);
+        // A position's own help over its box and its name (the original's UIIT_MSG_TP_FORT_GUILD_*, its name's key's
+        // help form); "no position" has none.
+        if (!c_.text) return;
+        // The mouse on this window: on it or one of its parts, or on a decoration of it (nothing hovered).
+        bool over = frame.pointer.hovered == nullptr && ScreenRect().Contains(frame.input.mouse());
+        for (const ui::Widget* p = frame.pointer.hovered; p != nullptr && !over; p = p->parent()) over = p == this;
+        for (int i = 0; i < 6; ++i) {
+            const std::uint8_t position = kPositionChoices[i];
+            if (position == game::kPositionNone) continue;
+            for (ui::Widget* w : {Child(kFirstBox + i), Child(kFirstLabel + i)}) {
+                // The name is a decoration (never the hovered control): the mouse over its place.
+                if (w == nullptr || (frame.pointer.hovered != w && !(over && w->ScreenRect().Contains(frame.input.mouse())))) continue;
+                std::string key = game::GuildPositionKey(position);
+                if (key.starts_with("UIIT_STT_")) key = "UIIT_MSG_TP_" + key.substr(9);
+                frame.interface.ShowTooltip(c_.text(key), w->ScreenRect());
+            }
+        }
+    }
+
     bool OnNotice(const ui::Notice& n) override {
         if (n.kind != ui::Notice::Kind::Clicked || n.source == nullptr || n.source->parent() != this) return FrameBorder::OnNotice(n);
         if (n.control >= kFirstBox && n.control < kFirstBox + 6) {
