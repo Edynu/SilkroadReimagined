@@ -145,6 +145,7 @@ bool IsWorldMessage(proto::MessageId id) {
     case proto::SkillUseAnswer::kId:
     case proto::ActionHeld::kId:
     case proto::WeatherNow::kId:
+    case proto::WorldClock::kId:
     case proto::AccountRestricted::kId:
     case proto::Cooldown::kId:
     case proto::PartyInvited::kId:
@@ -226,6 +227,7 @@ const char* WorldMessageName(proto::MessageId id) {
     case proto::SkillUseAnswer::kId: return "SkillUseAnswer";
     case proto::ActionHeld::kId: return "ActionHeld";
     case proto::WeatherNow::kId: return "WeatherNow";
+    case proto::WorldClock::kId: return "WorldClock";
     case proto::AccountRestricted::kId: return "AccountRestricted";
     case proto::Cooldown::kId: return "Cooldown";
     case proto::ViewLimitsAnswer::kId: return "ViewLimitsAnswer";
@@ -330,6 +332,7 @@ bool DecodeWorldEvent(proto::MessageId id, std::span<const std::byte> payload, T
     case proto::SkillUseAnswer::kId: return As<proto::SkillUseAnswer>(payload, out);
     case proto::ActionHeld::kId: return As<proto::ActionHeld>(payload, out);
     case proto::WeatherNow::kId: return As<proto::WeatherNow>(payload, out);
+    case proto::WorldClock::kId: return As<proto::WorldClock>(payload, out);
     case proto::AccountRestricted::kId: return As<proto::AccountRestricted>(payload, out);
     case proto::Cooldown::kId: return As<proto::Cooldown>(payload, out);
     case proto::ViewLimitsAnswer::kId: return As<proto::ViewLimitsAnswer>(payload, out);

@@ -3,8 +3,9 @@
 // The original's game clock ("Time of day, sky and fog"): it starts at 00:00 when the
 // client starts and a game second lasts 20 ms, so a game day passes in 28.8 real minutes. Its
 // hour maps unevenly to the environment's time of day (assets::EnvironmentTimeFromClock): the
-// day's 16 hours from 04:00 to 20:00 are the environment's 12 day hours. No server message sets
-// it in v1.150; the day count picks the moon's phase.
+// day's 16 hours from 04:00 to 20:00 are the environment's 12 day hours. The server restarts it
+// from its own clock (proto::WorldClock, the original's 0x3027) about every 10 minutes; the day
+// count picks the moon's phase.
 
 #include <cstdint>
 

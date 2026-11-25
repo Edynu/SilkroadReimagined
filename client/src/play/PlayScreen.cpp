@@ -926,6 +926,12 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
             }
             player_.Post(game::GameMessage::Kind::General, line, context.time);
         }
+    } else if (const auto* clock = std::get_if<proto::WorldClock>(&event)) {
+        // The server's game clock (the original's 0x3027): the client's restarts from it and runs on.
+        clockHours_ = double(std::min<int>(clock->hour, 23)) + double(std::min<int>(clock->minute, 59)) / 60.0;
+        clockDay_ = clock->day;
+        if (world_) world_->SetClock(clockHours_, clockDay_);
+        core::LogInfo("game: the world's clock day {} {:02}:{:02}", clock->day, clock->hour, clock->minute);
     } else if (const auto* weather = std::get_if<proto::WeatherNow>(&event)) {
         // The weather where it stands (its region's climate); the world eases into it over 5 s. Kept for the next
         // place's world too (a teleport makes a new one).
@@ -1293,6 +1299,8 @@ void PlayScreen::Arrive(ScreenContext& context, FrameSnapshot& snapshot) {
     const bool teleport = world_ != nullptr;
     if (teleport) holdForGate_ = waitingForGate_ = false;
     if (world_) {
+        clockHours_ = world_->ClockHours(); // the clock runs on in the next place
+        clockDay_ = world_->ClockDay();
         // Everything of the old place goes; the loading screen covers the new one coming in.
         view_.SetNavigation(nullptr);
         world_->Exit(context, snapshot);
@@ -1349,6 +1357,9 @@ void PlayScreen::Arrive(ScreenContext& context, FrameSnapshot& snapshot) {
         return out;
     };
     world_->Enter(context);
+    // The game clock: carried from the last place, else the client's own from 00:00 (--clock H for a run).
+    if (clockHours_ < 0.0) clockHours_ = std::max(0.0, context.config.GetDouble("clock", 0.0));
+    world_->SetClock(clockHours_, clockDay_);
     view_.SetNavigation(&world_->Navigation());
     std::mt19937 random(std::random_device{}());
     loading_.End(context.assets);

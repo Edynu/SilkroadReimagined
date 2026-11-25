@@ -224,6 +224,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         bool inTemples = false;
         // The weather it was last told (proto::WeatherNow, as game::ClimateWeather::Packed); 0 none yet.
         std::uint16_t weatherSent = 0;
+        // When it is next told the world's clock (proto::WorldClock); none yet: its place in the round is given at its first tick.
+        std::chrono::steady_clock::time_point clockNext{};
         // Its account's trade and chat punishments (loaded at the entry; RestrictionOf, Restricted).
         AccountRestrictions restrictions;
         // The system menu's Restart / Exit: counting down until it leaves.
@@ -5335,6 +5337,34 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // --- The Roc (Roc.h): run by the server holding the Peak; its shard-wide notices on sr_roc_<shard>.
     std::unique_ptr<Roc> roc;
     std::string rocChannel;
+    // --- The world's game clock (the original's): day 0 at 00:00 from the start, its hour set by a GM (/gametime, every game
+    // server of the shard: sr_clock_<shard>); each player told it about every 10 minutes (the original's round of its sub-regions
+    // over 600 s, each player at its place in it), every player at once when a GM sets it. The client restarts its clock from it.
+    proto::WorldClock worldClock{};
+    std::string clockChannel;
+    void TellClock(std::uint64_t peerId) {
+        if (Peer* peer = peers->Find(peerId)) peer->connection->Send(proto::WorldClock::kId, proto::Encode(worldClock));
+    }
+    void TickClock(Clock::time_point now) {
+        for (auto& [peerId, p] : players) {
+            if (p.entity == 0) continue;
+            if (p.clockNext == Clock::time_point{}) {
+                p.clockNext = now + std::chrono::seconds(p.entity % 600u);
+                continue;
+            }
+            if (now < p.clockNext) continue;
+            p.clockNext = now + std::chrono::seconds(600);
+            TellClock(peerId);
+        }
+    }
+    // A GM's hour (the original keeps the minute and the day): every player here told at once.
+    void SetGameHour(int hour) {
+        worldClock.hour = std::uint8_t(std::clamp(hour, 0, 23));
+        core::LogInfo("{}: the game time set to {}:{:02}", config.name, worldClock.hour, worldClock.minute);
+        for (auto& [peerId, p] : players) {
+            if (p.entity != 0) TellClock(peerId);
+        }
+    }
     // A counted deed of a character (sr_char_records; the beta quests' `start record`, game/BetaQuests.h): saved, and the
     // count kept on the player raised when it plays here.
     void AddDeed(std::int64_t character, std::string name) {
@@ -10966,7 +10996,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (command == "/help" || command == "/?") {
             return "commands: /notice TEXT, /kick NAME, /online, /where NAME, /give CODENAME [COUNT] [NAME], /quest done CODENAME [NAME], /academy rank, "
                    "/siege STARTREQ|ENDREQ|STARTWAR|ENDWAR|STARTTAX|ENDTAX, /flagworld OPEN|START|END|CANCEL, /arena OPEN [MODE]|START|END|CANCEL, "
-                   "/roc OPEN|SHUT|END|BREAK, /qin OPEN|SHUT|END, /temple OPEN|CLOSE 9|10|11, /temple REP ANUBIS|HAROERIS TRADER|THIEF N";
+                   "/roc OPEN|SHUT|END|BREAK, /qin OPEN|SHUT|END, /temple OPEN|CLOSE 9|10|11, /temple REP ANUBIS|HAROERIS TRADER|THIEF N, "
+                   "/gametime HOUR";
         }
         if (command == "/temple") {
             // The job temples' developer switches (ours): OPEN|CLOSE 9|10|11, REP ANUBIS|HAROERIS TRADER|THIEF N.
@@ -11054,6 +11085,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             fortresses->Dev(*action);
             core::LogInfo("{}: {} switches the fortress war's periods: {}", config.name, by, what);
             return "siege " + what;
+        }
+        if (command == "/gametime") {
+            // The world's game hour (the original's GM time command), on every game server of the shard (the bus brings it back
+            // here too).
+            int hour = -1;
+            if (std::sscanf(rest.c_str(), "%d", &hour) != 1 || hour < 0 || hour > 23) return "/gametime HOUR (0..23)";
+            database.Submit([channel = clockChannel, hour](Database& db) { Notify(db, channel, std::to_string(hour)); });
+            return std::format("game time {}:00", hour);
         }
         if (command == "/notice") {
             if (rest.empty()) return "/notice needs a text";
@@ -13325,6 +13364,7 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
             state->adminChannel = "sr_admin_" + config.shardSchema;
             state->uniqueChannel = "sr_uniques_" + config.shardSchema;
             state->rocChannel = "sr_roc_" + config.shardSchema;
+            state->clockChannel = "sr_clock_" + config.shardSchema;
             state->qinChannel = "sr_qin_" + config.shardSchema;
             state->templeChannel = "sr_temples_" + config.shardSchema;
             if (state->stalls) state->stallChannel = "sr_stalls_" + config.shardSchema;
@@ -13343,6 +13383,7 @@ bool GameServer::Start(const GameServerConfig& config, std::string& error) {
                 (!state->instanceChannel.empty() && !state->busListener->Listen(state->instanceChannel)) ||
                 !state->busListener->Listen(state->adminChannel) || !state->busListener->Listen(state->uniqueChannel) ||
                 !state->busListener->Listen(state->rocChannel) || !state->busListener->Listen(state->templeChannel) ||
+                !state->busListener->Listen(state->clockChannel) ||
                 !state->busListener->Listen(state->qinChannel)) {
                 error = "database: the shard's bus: LISTEN refused";
                 return false;
@@ -13441,6 +13482,7 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
             if (n.channel == s.adminChannel) s.AdminNotice(n.payload);
             if (n.channel == s.uniqueChannel) s.UniqueBusMessage(n.payload);
             if (n.channel == s.rocChannel) s.RocBusMessage(n.payload);
+            if (n.channel == s.clockChannel) s.SetGameHour(std::atoi(n.payload.c_str()));
             if (n.channel == s.qinChannel) s.QinBusMessage(n.payload);
             if (n.channel == s.templeChannel) s.TempleBusMessage(n.payload);
             if (n.channel == s.fortressChannel && s.fortresses) s.fortresses->BusMessage(n.payload);
@@ -13511,6 +13553,7 @@ void GameServer::Poll(std::chrono::milliseconds wait) {
         s.TickTax(Clock::now());
         s.TickBargain(Clock::now());
         s.TickWeather(Clock::now());
+        s.TickClock(Clock::now());
         s.TickPvp(Clock::now());
         s.parties->Tick(Clock::now());
     }

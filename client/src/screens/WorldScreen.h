@@ -210,6 +210,10 @@ public:
     void SetStageOpacity(std::size_t slot, float opacity);
     // The weather (the server's, where the player stands): eased into over game::Weather::kRampSeconds.
     void SetWeather(game::WeatherKind kind, int amount) { weather_.Set(kind, amount); }
+    // The game clock: the server's (proto::WorldClock) or one carried from the last place; it runs on from there.
+    void SetClock(double hours, int day) { clock_.Set(hours, day); }
+    double ClockHours() const { return clock_.Hours(); }
+    int ClockDay() const { return clock_.Day(); }
     // Its model's material colour now (a skill's SCT_MAT: every light on it times the colour; null: none).
     void SetStageTint(std::size_t slot, const glm::vec3* colour);
     void SetStage(std::size_t slot, const std::string& model, float x, float y, float z, float yaw) {

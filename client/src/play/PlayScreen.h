@@ -229,6 +229,10 @@ private:
     double HeldUntil(double now) const;
     // The weather the server last told (proto::WeatherNow), given to each new place's world.
     game::proto::WeatherNow weather_;
+    // The game clock carried from place to place (the original's runs on through teleports): hours and day; < 0 hours: not
+    // yet (the client's own from 00:00 at its first place, as the original's starts, until the server's WorldClock).
+    double clockHours_ = -1.0;
+    int clockDay_ = 0;
     // The action list's count the server told (proto::ActionHeld): two held, an attack
     // click and a queued skill are not sent, a ground click sends no stop; and when the player last
     // sent an attack or a skill (a walk kept waits 500 ms after it).

@@ -141,13 +141,14 @@ struct Server {
         REQUIRE_MESSAGE(game->Start(config, error), error);
     }
 
-    // `enter` false: made and chosen, but not in the world yet (Enter does that).
-    Player Join(const std::string& name, int level = 30, bool enter = true) {
+    // `enter` false: made and chosen, but not in the world yet (Enter does that); `gm` its account a game master's.
+    Player Join(const std::string& name, int level = 30, bool enter = true, bool gm = false) {
         Player p;
         p.name = name;
         const std::string account = "acc" + name;
         bool ok = false;
         REQUIRE(server::CreateAccount(t.Db(), account, "secret1", error) == server::CreateAccountResult::Created);
+        if (gm) REQUIRE(t.Db().Query("UPDATE sro_vt_account.tb_user SET sec_primary = 1 WHERE struserid = $1", {account}).Ok());
         const std::int64_t id = server::FindAccount(t.Db(), account, ok)->id;
         p.c = std::make_unique<Client>(net, game->Port(), pump);
         REQUIRE(p.c->Greet());
@@ -289,6 +290,28 @@ TEST_CASE("Two game servers: a whisper goes to the other server, and is refused 
     CHECK(Say(bob, proto::ChatKind::Whisper, 2, "Ann", "and back").result == proto::ChatResult::Ok);
     CHECK(Next<proto::ChatLine>(ann).name == "Bob");
     CHECK(Say(ann, proto::ChatKind::Whisper, 3, "Nobody", "anyone?").result == proto::ChatResult::TargetNotFound);
+}
+
+TEST_CASE("Two game servers: the world's clock: a game master's hour reaches the players of both servers") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    Pair pair(t);
+    Player keeper = pair.a.Join("Keeper", 30, true, true), bob = pair.b.Join("Bob");
+    CHECK(Say(keeper, proto::ChatKind::All, 1, "", "/gametime 14").result == proto::ChatResult::Ok);
+    CHECK(Next<proto::ChatLine>(keeper).text == "game time 14:00");
+    // Both servers' players told at once (the original's day and minute kept: 0, 00).
+    const auto here = Next<proto::WorldClock>(keeper);
+    CHECK(here.hour == 14);
+    CHECK(here.minute == 0);
+    CHECK(here.day == 0);
+    CHECK(Next<proto::WorldClock>(bob).hour == 14);
+    // Past 23: refused, nothing told.
+    CHECK(Say(keeper, proto::ChatKind::All, 2, "", "/gametime 24").result == proto::ChatResult::Ok);
+    CHECK(Next<proto::ChatLine>(keeper).text == "/gametime HOUR (0..23)");
+    // Not a game master's: never a command.
+    CHECK(Say(bob, proto::ChatKind::All, 1, "", "/gametime 3").result == proto::ChatResult::Ok);
+    proto::WorldClock none;
+    CHECK_FALSE(bob.c->Expect(none, std::chrono::milliseconds(300)));
 }
 
 TEST_CASE("Two game servers: friends made across servers: asked by name, both told, the refusals, and parted on both sides") {

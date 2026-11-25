@@ -1449,6 +1449,19 @@ struct AccountRestricted {
         v("until", until);
     }
 };
+// The world's game clock (the original's 0x3027): the server's day, hour and minute, from which the client restarts its own
+// clock (it runs on between). Told to each player about every 10 minutes and to all when a GM sets the hour.
+struct WorldClock {
+    static constexpr MessageId kId = 0x1007;
+    std::uint16_t day = 0;
+    std::uint8_t hour = 0, minute = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("day", day);
+        v("hour", hour);
+        v("minute", minute);
+    }
+};
 struct WeatherNow {
     static constexpr MessageId kId = 0x1005;
     std::uint8_t kind = 1; // game::WeatherKind: 1 clear, 2 rain, 3 snow

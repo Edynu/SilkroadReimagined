@@ -54,7 +54,7 @@ using TitleEvent = std::variant<proto::ServerList, proto::Notices, proto::LoginR
                                 proto::NpcMenu, proto::StorageRefused, proto::StorageList, proto::StorageMoved, proto::StorageGoldChanged,
                                 proto::ShopAnswer, proto::NpcRepaired, proto::EntityAction, proto::EntitySwing, proto::EntityCastCancelled, proto::EntityBlink, proto::EntityDamaged, proto::EntityStates, proto::EntityBuffs, proto::SkillObjectStruck, proto::EntityKnocked,
                                 proto::Vitals, proto::Progress, proto::ExperienceGained, proto::EntityLevelUp, proto::SkillBookList,
-                                proto::SkillBookAnswer, proto::SkillUseAnswer, proto::ActionHeld, proto::WeatherNow, proto::AccountRestricted, proto::Cooldown, proto::ViewLimitsAnswer, proto::RevivalOffered, proto::SkillTook, proto::EntityLook,
+                                proto::SkillBookAnswer, proto::SkillUseAnswer, proto::ActionHeld, proto::WeatherNow, proto::WorldClock, proto::AccountRestricted, proto::Cooldown, proto::ViewLimitsAnswer, proto::RevivalOffered, proto::SkillTook, proto::EntityLook,
                                 proto::LinkAdded, proto::LinkPosition, proto::BerserkAnswer, proto::BerserkPoints, proto::EntityBerserk,
                                 // The Action page's motions and marks
                                 proto::EntityMotion, proto::EntityMarks, proto::EntityEmote, proto::FreePvpAnswer, proto::EntityFreePvp,
