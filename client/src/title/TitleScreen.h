@@ -12,7 +12,9 @@
 // their certificate carries; default localhost). Automated runs: --account, --password, --server
 // (an id) log in once the server list arrives; --intro-at S starts the intro flight S seconds in.
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "frame/GameUi.h"
@@ -75,6 +77,15 @@ private:
     bool quitAsked_ = false; // the login box's Cancel: the game ends
     bool autoLogin_ = false;
     std::string message_;
+    // A login refusal waiting for the text table to be put in words (the original's, by its login answer's codes).
+    struct Refusal {
+        game::proto::LoginStatus status = game::proto::LoginStatus::Busy;
+        std::uint8_t attempts = 0, attemptLimit = 0;
+        std::string reason;
+        std::int64_t blockedUntil = 0;
+    };
+    std::optional<Refusal> refusal_;
+    static std::string RefusalWords(const UiData& d, const Refusal& r);
     // The shard turned this client away as out of date (its words, ClientGate.h on the servers): a box over the title
     // instead of the login, with the download page and Exit.
     std::string outdated_;

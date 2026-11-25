@@ -1047,7 +1047,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         return;
     } else if (const auto* bye = std::get_if<proto::Disconnected>(&event)) {
         // The server is closing the connection and says why (a blocked account, a game master's kick): the title says it.
-        const std::string why = TitleShared::FarewellOf(*bye);
+        const std::string why = TitleShared::FarewellOf(shared_->data, *bye);
         core::LogWarning("game: {}", why);
         context.handoff[TitleShared::kFarewell] = std::make_shared<std::string>(why);
         return;

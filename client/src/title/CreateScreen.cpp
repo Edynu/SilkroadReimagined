@@ -7,6 +7,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "audio/GameAudio.h"
 #include "sr/assets/Dress.h"
 #include "sr/core/Log.h"
 #include "sr/core/Trace.h"
@@ -624,20 +625,24 @@ void CreateScreen::Draw(ScreenContext& context, float height) {
         }
     }
 
-    // Confirm (the name first, then a weapon) opens the warning; Cancel goes back.
+    // Confirm opens the warning; Cancel goes back. The original's order: Europe's armour, the weapon, then the name;
+    // a refusal sounds snd_error.
     const float by = B + 27;
     if (const auto* ok = layout_->Find("GDR_BTN_OK")) {
         if (kit_->Button("##ok", *ok, {W - 209, by, 92, 41}, !busy_ && !warning_)) {
             const game::NameCheck check = tables_->Dressable() ? tables_->rules.names.Check(name_) : game::NameCheck::BadLength;
-            if (check == game::NameCheck::BadLength) {
+            if (europe_ && value_[kArmour] == 0) {
+                message_ = "UIO_MSG_ERROR_CHARACTER_SELECTARMOR";
+            } else if (value_[kWeapon] == 0) {
+                message_ = "UIO_MSG_ERROR_CHARACTER_SELECTWEAPON";
+            } else if (check == game::NameCheck::BadLength) {
                 message_ = "UIO_MSG_ERROR_CHARACTER_NAME_STRING";
             } else if (check != game::NameCheck::Ok) {
                 message_ = "UIO_MSG_ERROR_CHARACTER_WRONGSTRING";
-            } else if (value_[kWeapon] == 0) {
-                message_ = "UIO_MSG_ERROR_CHARACTER_SELECTWEAPON";
             } else {
                 warning_ = true;
             }
+            if (!warning_ && context.audio != nullptr) context.audio->PlayUi("SND_ERROR");
         }
     }
     if (const auto* back = layout_->Find("GDR_BTN_BACK")) {
@@ -664,7 +669,7 @@ void CreateScreen::Draw(ScreenContext& context, float height) {
     }
     if (!message_.empty()) {
         const bool blink = std::fmod(context.time, 1.0) < 0.85;
-        kit_->Text(data.Text(message_), {26, B + 29, W - 26 - 330, 24}, blink ? ui::Rgba(255, 220, 140) : ui::Rgba(255, 220, 140, 160), 0, 0);
+        kit_->RichText(data.Text(message_), {26, B + 29, W - 26 - 330, 100}, blink ? ui::Rgba(255, 220, 140) : ui::Rgba(255, 220, 140, 160), 0, 0);
     }
 }
 

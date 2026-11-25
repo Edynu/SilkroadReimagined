@@ -74,7 +74,9 @@ void CharactersScreen::Exit(ScreenContext& context, FrameSnapshot& snapshot) {
     shared_.reset();
 }
 
-std::string CharactersScreen::StatusText(proto::LobbyStatus status) const { return LobbyStatusText(shared_->data, status); }
+std::string CharactersScreen::StatusText(proto::LobbyStatus status) const {
+    return LobbyStatusText(shared_->data, status, list_ ? int(list_->maxCharacters) : 4);
+}
 
 void CharactersScreen::Create(const std::string& name, Race race, bool male) {
     if (!tables_->Dressable()) {
@@ -157,7 +159,7 @@ void CharactersScreen::HandleEvents(ScreenContext& context) {
             busy_ = false;
         } else if (auto* bye = std::get_if<proto::Disconnected>(&event)) {
             // The server closes the connection and says why: kept over the lost connection's words.
-            message_ = TitleShared::FarewellOf(*bye);
+            message_ = TitleShared::FarewellOf(shared_->data, *bye);
             kicked_ = true;
             core::LogWarning("characters: {}", message_);
         }
@@ -638,7 +640,7 @@ void CharactersScreen::Draw(ScreenContext& context, float width, float height) {
                     if (list_->characters.size() < list_->maxCharacters) {
                         GoToPedestal();
                     } else {
-                        message_ = "UIO_MSG_ERROR_CHARACTER_OVER";
+                        message_ = CharacterLimitText(shared_->data, int(list_->maxCharacters));
                     }
                 }
             }

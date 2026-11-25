@@ -172,28 +172,12 @@ void TitleScreen::HandleEvents() {
                 Submit();
             }
         } else if (auto* result = std::get_if<proto::LoginResult>(&event)) {
-            const UiData& d = shared_->data;
-            switch (result->status) {
-            case proto::LoginStatus::Accepted: message_ = "Connecting to " + shared_->serverName + "..."; break;
-            case proto::LoginStatus::WrongPassword: {
-                char text[256];
-                std::snprintf(text, sizeof(text), d.Text("UIIT_STT_GLOBAL_PASSWORD_INPUT_ERROR").c_str(), int(result->attempts),
-                              int(result->attemptLimit));
-                message_ = text;
-                break;
-            }
-            case proto::LoginStatus::UnknownAccount: message_ = "No such account."; break; // ours: the original's text is about missing details
-            case proto::LoginStatus::Blocked:
-                message_ = TitleShared::BlockedWords(result->reason, result->blockedUntil);
-                break;
-            case proto::LoginStatus::AlreadyLoggedIn: message_ = d.Text("UIO_MSG_ERROR_OVERLAP"); break;
-            case proto::LoginStatus::ServerFull: message_ = d.Text("UIO_MSG_ERROR_SERVER_BUSY_CONNECT_IMPOSSIBILE"); break;
-            case proto::LoginStatus::ServerUnavailable: message_ = d.Text("UIO_MSG_ERROR_ACCOUNT_CONNECT_IMPOSSIBILE"); break;
-            case proto::LoginStatus::TooManyAttempts: message_ = d.Text("UIO_MSG_ERROR_CONTENT_FAIL_INSUFFICIENT_IP"); break;
-            case proto::LoginStatus::Invalid: message_ = "Enter an ID of 3-32 letters or digits and a password of 6-64."; break;
-            case proto::LoginStatus::Busy: message_ = d.Text("UIO_MSG_ERROR_SEVER_CONNECT"); break;
-            }
-            if (result->status != proto::LoginStatus::Accepted) {
+            if (result->status == proto::LoginStatus::Accepted) {
+                message_ = "Connecting to " + shared_->serverName + "...";
+            } else {
+                // Its words once the text table is in (a scripted login can be answered before it is read).
+                refusal_ = Refusal{result->status, result->attempts, result->attemptLimit, result->reason, result->blockedUntil};
+                message_.clear();
                 busy_ = false;
                 password_.clear();
             }
@@ -205,9 +189,7 @@ void TitleScreen::HandleEvents() {
                 fade_.Out(0.5f);
             } else {
                 busy_ = false;
-                message_ = entered->status == proto::LobbyEnterStatus::AlreadyLoggedIn
-                               ? shared_->data.Text("UIO_MSG_ERROR_OVERLAP")
-                               : shared_->data.Text("UIO_MSG_ERROR_SEVER_CONNECT");
+                message_ = LobbyEnterText(shared_->data, entered->status);
             }
         } else if (auto* error = std::get_if<game::TitleError>(&event)) {
             core::LogWarning("title: {} connection: {}", error->where == game::TitleError::Where::Gateway ? "gateway"
@@ -227,6 +209,33 @@ void TitleScreen::HandleEvents() {
     }
 }
 
+// The original's login answer's words (its code 2 the password's count, 3 a block with its reason and end, 4 the
+// account on already, 6 the server full, 0xB the address's limit, 5 and 7..10 the connection's line); ours: an
+// offline server its inspection line (the original's block reason 2), a malformed ID or password the table's
+// "Invalid ID or password.".
+std::string TitleScreen::RefusalWords(const UiData& d, const Refusal& r) {
+    switch (r.status) {
+    case proto::LoginStatus::Accepted: return {};
+    case proto::LoginStatus::WrongPassword: {
+        std::string text = d.Text("UIIT_STT_GLOBAL_PASSWORD_INPUT_ERROR");
+        for (const int n : {int(r.attempts), int(r.attemptLimit)}) {
+            if (const std::size_t at = text.find("%d"); at != std::string::npos) text.replace(at, 2, std::to_string(n));
+        }
+        return text;
+    }
+    // Never sent: an unknown ID is a wrong password, as the original's account check has it (one answer for both).
+    case proto::LoginStatus::UnknownAccount: return d.Text("UIO_MSG_ERROR_PASSWORD");
+    case proto::LoginStatus::Blocked: return TitleShared::BlockedWords(d, r.reason, r.blockedUntil);
+    case proto::LoginStatus::AlreadyLoggedIn: return d.Text("UIO_MSG_ERROR_OVERLAP");
+    case proto::LoginStatus::ServerFull: return d.Text("UIO_MSG_ERROR_SERVER_BUSY_CONNECT_IMPOSSIBILE");
+    case proto::LoginStatus::ServerUnavailable: return d.Text("UIO_MSG_ERROR_ACCOUNT_CONNECT_IMPOSSIBILE");
+    case proto::LoginStatus::TooManyAttempts: return d.Text("UIO_MSG_ERROR_CONTENT_FAIL_INSUFFICIENT_IP");
+    case proto::LoginStatus::Invalid: return d.Text("UIO_MSG_ERROR_PASSWORD");
+    case proto::LoginStatus::Busy: return d.Text("UIO_MSG_ERROR_SEVER_CONNECT");
+    }
+    return {};
+}
+
 void TitleScreen::Submit() {
     if (account_.empty()) {
         message_ = "Enter your ID.";
@@ -237,6 +246,7 @@ void TitleScreen::Submit() {
         message_ = "Choose a server first.";
     } else {
         busy_ = true;
+        refusal_.reset();
         message_ = "Logging in...";
         shared_->session->LogIn(account_, password_, shared_->server, lobbyServer_);
     }
@@ -352,12 +362,24 @@ void TitleScreen::Draw(ScreenContext& context, float width, float height) {
     const core::DesignPoint corner = kit_->grid().ToDesign({5.0f, height - 25.0f});
     // The original prints its client's version here; ours: SroReimagined's, and the game data it reads (vSRO 1.188).
     kit_->Text("SroReimagined " SR_CLIENT_VERSION " (1.188)", Rect(corner.x, corner.y, 240, 20), ui::Rgba(255, 128, 128));
+    if (refusal_ && shared_->data.Ready()) {
+        message_ = RefusalWords(shared_->data, *refusal_);
+        refusal_.reset();
+    }
     if (!message_.empty()) {
         const core::DesignPoint below = kit_->grid().ToDesign({0.0f, bottom});
         const bool blink = std::fmod(context.time, 1.0) < 0.85;
-        // A text key resolved now: it may have been set before the text table was read.
-        kit_->Text(shared_->data.Text(message_), Rect(0, below.y + 24.0f, core::DesignGrid::kWidth, 30),
-                   blink ? ui::Rgba(255, 220, 140) : ui::Rgba(255, 220, 140, 160), 0, 1);
+        // A text key resolved now: it may have been set before the text table was read. Its lines one under another
+        // (a blocked account's words are three).
+        const std::string text = WithLineBreaks(shared_->data.Text(message_));
+        float y = below.y + 24.0f - 10.0f * float(std::count(text.begin(), text.end(), '\n')); // centred on one line's place
+        for (std::size_t start = 0; start <= text.size(); y += 20.0f) {
+            std::size_t end = text.find('\n', start);
+            if (end == std::string::npos) end = text.size();
+            kit_->Text(std::string_view(text).substr(start, end - start), Rect(0, y, core::DesignGrid::kWidth, 30),
+                       blink ? ui::Rgba(255, 220, 140) : ui::Rgba(255, 220, 140, 160), 0, 1);
+            start = end + 1;
+        }
     }
 }
 

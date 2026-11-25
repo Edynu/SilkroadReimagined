@@ -88,23 +88,23 @@ struct TitleShared {
     static constexpr const char* kHandoff = "title";
     // Why the server closed the connection (proto::Disconnected), for the title screen to say (a std::string).
     static constexpr const char* kFarewell = "farewell";
-    static std::string FarewellOf(const game::proto::Disconnected& bye) {
-        if (bye.reason == game::proto::DisconnectReason::Blocked) return BlockedWords(bye.text, bye.until);
+    static std::string FarewellOf(const UiData& d, const game::proto::Disconnected& bye) {
+        if (bye.reason == game::proto::DisconnectReason::Blocked) return BlockedWords(d, bye.text, bye.until);
         if (bye.reason == game::proto::DisconnectReason::Replaced) return "The character entered the game from another connection.";
         return "Disconnected by a game master" + (bye.text.empty() ? std::string(".") : " (" + bye.text + ").");
     }
-    // A blocked account's words (the login's refusal, a kick's): until when (local time; 0: no end) and why.
-    static std::string BlockedWords(const std::string& reason, std::int64_t until) {
-        std::string words = "The account is blocked";
-        if (until > 0) {
-            const std::time_t t = static_cast<std::time_t>(until);
-            std::tm local{};
-            localtime_s(&local, &t);
-            char date[32] = {};
-            std::strftime(date, sizeof date, "%Y-%m-%d %H:%M", &local);
-            words += std::string(" until ") + date;
-        }
-        return words + (reason.empty() ? std::string(".") : ": " + reason + ".");
+    // A blocked account's words (the login's refusal, a kick's), as the original's login answer puts them: the
+    // stop's line, then "Blocking reason:" and why, then "Completion time:" and until when (local time). No end (0):
+    // the text table's permanent ban line in place of the time's (ours: the original names a date there).
+    static std::string BlockedWords(const UiData& d, const std::string& reason, std::int64_t until) {
+        std::string words = d.Text("UIO_MSG_ERROR_ACCOUNT_STOP") + "\n" + d.Text("UIO_MSG_ERROR_ACCOUNT_STOP_BLOCK") + reason + "\n";
+        if (until <= 0) return words + d.Text("UIO_MSG_ERROR_ACCOUNT_BLOCK_MSG");
+        const std::time_t t = static_cast<std::time_t>(until);
+        std::tm local{};
+        localtime_s(&local, &t);
+        char date[32] = {};
+        std::strftime(date, sizeof date, "%Y-%m-%d %H:%M", &local);
+        return words + d.Text("UIO_MSG_ERROR_ACCOUNT_BLOCK_TIME") + date;
     }
     static std::shared_ptr<TitleShared> From(ScreenContext& context) {
         const auto it = context.handoff.find(kHandoff);
@@ -215,24 +215,53 @@ inline void TitleShared::LoadCharacters(core::JobSystem& jobs, const assets::Fil
 }
 
 // A lobby refusal as the original's text.
-inline std::string LobbyStatusText(const UiData& d, game::proto::LobbyStatus status) {
+// The lobby's character limit in the original's words ("A maximum of %d characters can be created.").
+inline std::string CharacterLimitText(const UiData& d, int maxCharacters) {
+    std::string text = d.Text("UIO_MSG_ERROR_CHARACTER_OVER_3");
+    if (const std::size_t at = text.find("%d"); at != std::string::npos) text.replace(at, 2, std::to_string(maxCharacters));
+    return text;
+}
+
+// A lobby refusal in the original's words: its lobby error codes 0x402 .. 0x418 (each status's comment in
+// LobbyProtocol.h names its code); the delete's refusals the lobby's own lines.
+inline std::string LobbyStatusText(const UiData& d, game::proto::LobbyStatus status, int maxCharacters = 4) {
     using game::proto::LobbyStatus;
     switch (status) {
     case LobbyStatus::Ok: return {};
     case LobbyStatus::InvalidCreation: return d.Text("UIO_SMERR_INVALID_CHARGEN_INFO");
     case LobbyStatus::NoWeapon: return d.Text("UIO_MSG_ERROR_CHARACTER_SELECTWEAPON");
-    case LobbyStatus::TooManyCharacters: return d.Text("UIO_MSG_ERROR_CHARACTER_OVER");
+    case LobbyStatus::TooManyCharacters: return CharacterLimitText(d, maxCharacters);
     case LobbyStatus::Failed: return d.Text("UIO_SMERR_FAILED_TO_CREATE_CHARACTER");
     case LobbyStatus::BadName: return d.Text("UIO_MSG_ERROR_CHARACTER_NAME_STRING");
     case LobbyStatus::NameNotAllowed: return d.Text("UIO_SMERR_NOT_ALLOWED_CHARNAME");
     case LobbyStatus::NameTaken: return d.Text("UIO_MSG_ERROR_ID");
-    case LobbyStatus::NotFound: return "No such character.";
-    case LobbyStatus::Deleting: return "The character is being deleted: restore it first.";
-    case LobbyStatus::NotDeleting: return "The character is not being deleted.";
+    case LobbyStatus::NotFound: return d.Text("UIO_MSG_ERROR_CHARACTER_INFO");
+    case LobbyStatus::Deleting: return d.Text("UIO_STT_CHAR_DEL_WAITING");
+    case LobbyStatus::NotDeleting: return d.Text("UIO_MSG_ERROR_CHARACTER_INFO");
     case LobbyStatus::Busy: return d.Text("UIO_MSG_ERROR_SEVER_CONNECT");
-    case LobbyStatus::GuildMaster: return "A guild's master cannot be deleted: leave the guild or hand it on first.";
+    case LobbyStatus::GuildMaster: return d.Text("UIO_MSG_CHAR_DEL_WANNING_CONFIRM_MASTER");
     }
     return {};
+}
+
+// The original's lobby entry refusals: 0x411 the account on already, 0x414 the server full, 0x415 the lobby not
+// entered (our ticket refused), the others the connection's line.
+inline std::string LobbyEnterText(const UiData& d, game::proto::LobbyEnterStatus status) {
+    using game::proto::LobbyEnterStatus;
+    switch (status) {
+    case LobbyEnterStatus::Accepted: return {};
+    case LobbyEnterStatus::InvalidTicket: return d.Text("UIO_SMERR_FAILED_TO_ENTERLOBBY");
+    case LobbyEnterStatus::AlreadyLoggedIn: return d.Text("UIO_MSG_ERROR_OVERLAP");
+    case LobbyEnterStatus::ServerFull: return d.Text("UIO_SMERR_MAX_USER_EXCEEDED");
+    case LobbyEnterStatus::Busy: return d.Text("UIO_MSG_ERROR_SEVER_CONNECT");
+    }
+    return {};
+}
+
+// The text table's line breaks ("\n" written out) made real ones.
+inline std::string WithLineBreaks(std::string text) {
+    for (std::size_t at = 0; (at = text.find("\\n", at)) != std::string::npos;) text.replace(at, 2, "\n");
+    return text;
 }
 
 // The layouts the title screens read.
