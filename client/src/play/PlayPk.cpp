@@ -55,15 +55,19 @@ ui::Color PlayScreen::PlayerNameColour(std::uint32_t id, const game::WorldView::
     return ui::Argb(self ? 0xFFFEAD2E : 0xFFFFFFFF);
 }
 
-void PlayScreen::ClickPlayer(ScreenContext& context, std::uint32_t other, bool ctrl, bool alt) {
+void PlayScreen::ClickPlayer(ScreenContext& context, std::uint32_t other, bool ctrl, bool alt, std::uint32_t mount) {
     // Another player, living or dead: selected (its target window; a heal, a buff or a resurrection from the quick slots
     // goes to it). No walk: the first click only selects; the selected one clicked again, or a click with Alt (the help's
     // UIIT_STT_FORCEPK "=+ Mouse Left Button : Force PK"), attacks: without Alt only an enemy (PvP state 1 or 2, a job's
     // foe, a free PvP foe, a guild at war, the fortress war's enemy), with Alt anyone; never a member of one's party.
     // Ctrl changes nothing here: the original's Ctrl + click attacks at once only monsters, structures and guards; a player
-    // is attacked once selected, or with Alt.
-    const bool again = player_.target.entity == other || alt;
-    SelectPlayer(other);
+    // is attacked once selected, or with Alt. A rider: his mount selected (its window), the attack sent on him.
+    const bool again = player_.target.entity == other || (mount != 0 && player_.target.entity == mount) || alt;
+    if (mount != 0) {
+        SelectCos(mount);
+    } else {
+        SelectPlayer(other);
+    }
     // A booth: walked up to and visited.
     if (!ctrl && !alt && ClickBooth(context, other)) return;
     pendingNpc_ = 0;

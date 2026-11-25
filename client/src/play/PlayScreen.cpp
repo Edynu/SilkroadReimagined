@@ -45,12 +45,14 @@ namespace proto = game::proto;
 namespace {
 
 // The original's entity pick: nine rays, the cursor's and eight about
-// it at 1.6 % of the screen across and down; the nearest on the cursor's own ray wins, the side rays count only when it
-// meets nothing. `pick(rx, ry, distance)` gives the nearest on one ray (0 none).
+// it at 1.6 % of the screen's width across and of its height down; the nearest on the cursor's own ray wins, the side
+// rays count only when it meets nothing (`centre` says which; across the kinds too, ClickWorld). `pick(rx, ry, distance)`
+// gives the nearest on one ray (0 none).
 template <typename Pick>
-std::uint32_t OverNineRays(float x, float y, float width, float height, Pick pick, float* outDistance) {
+std::uint32_t OverNineRays(float x, float y, float width, float height, Pick pick, float* outDistance, bool* centre = nullptr) {
     float best = 1e9f;
     std::uint32_t id = pick(x, y, best);
+    if (centre != nullptr) *centre = id != 0;
     if (id == 0) {
         const float dx = width * 0.016f, dy = height * 0.016f;
         for (int i = -1; i <= 1; ++i) {
@@ -1490,7 +1492,7 @@ bool PlayScreen::RayHitsEntity(float x, float y, float width, float height, std:
     return slot != StageEffects::kNone && world_->RayHitsStage(x, y, width, height, slot, distance);
 }
 
-std::uint32_t PlayScreen::NpcUnder(float x, float y, float width, float height, float* outDistance) const {
+std::uint32_t PlayScreen::NpcUnder(float x, float y, float width, float height, float* outDistance, bool* centre) const {
     if (!world_) return 0;
     return OverNineRays(x, y, width, height, [&](float rx, float ry, float& bestDistance) {
         std::uint32_t best = 0;
@@ -1508,51 +1510,41 @@ std::uint32_t PlayScreen::NpcUnder(float x, float y, float width, float height, 
             }
         }
         return best;
-    }, outDistance);
+    }, outDistance, centre);
 }
 
-std::uint32_t PlayScreen::MonsterUnder(float x, float y, float width, float height, float* outDistance) const {
+std::uint32_t PlayScreen::MonsterUnder(float x, float y, float width, float height, float* outDistance, bool* centre) const {
     if (!world_ || !tables_ || !tables_->Usable()) return 0;
-    // Its model's box as it stands, at its size (the original's pick).
+    // Its model's box as it stands, at its size (the original's pick); a fortress's structure too.
     return OverNineRays(x, y, width, height, [&](float rx, float ry, float& bestDistance) {
         std::uint32_t best = 0;
         for (const auto& [id, e] : view_.Entities()) {
             if (e.kind != proto::EntityKind::Monster || IsDead(e)) continue;
             float distance = 0;
-            bool hit = false;
-            // A fortress's structure: the whole of its model as the server gives it (ours).
-            if (const proto::EntityStructure* structure = fortress_.Structure(id); structure != nullptr && structure->pickRadius > 0) {
-                hit = world_->RayHitsCylinder(rx, ry, width, height, e.position, float(structure->pickRadius), float(structure->pickHeight), distance);
-            } else {
-                hit = RayHitsEntity(rx, ry, width, height, id, distance);
-            }
-            if (hit && distance < bestDistance && !world_->Occluded(x, y, width, height, distance)) {
+            if (RayHitsEntity(rx, ry, width, height, id, distance) && distance < bestDistance && !world_->Occluded(x, y, width, height, distance)) {
                 best = id;
                 bestDistance = distance;
             }
         }
         return best;
-    }, outDistance);
+    }, outDistance, centre);
 }
 
-std::uint32_t PlayScreen::PlayerUnder(float x, float y, float width, float height, float* outDistance) const {
+std::uint32_t PlayScreen::PlayerUnder(float x, float y, float width, float height, float* outDistance, bool* centre) const {
     if (!world_) return 0;
-    // A standing player's model box (the original's pick); a dead one lies: a low, wider cylinder (ours: its box is
-    // the standing one's).
+    // Its model's box as it stands, living or dead (the original's: a body lying keeps its model's box).
     return OverNineRays(x, y, width, height, [&](float rx, float ry, float& bestDistance) {
         std::uint32_t best = 0;
         for (const auto& [id, e] : view_.Entities()) {
             if (id == view_.Self() || e.kind != proto::EntityKind::Character || IsNpc(e) || e.look.name.empty()) continue;
             float distance = 0;
-            const bool hit = IsDead(e) ? world_->RayHitsCylinder(rx, ry, width, height, e.position, 12.0f, 6.0f, distance)
-                                       : RayHitsEntity(rx, ry, width, height, id, distance);
-            if (hit && distance < bestDistance && !world_->Occluded(x, y, width, height, distance)) {
+            if (RayHitsEntity(rx, ry, width, height, id, distance) && distance < bestDistance && !world_->Occluded(x, y, width, height, distance)) {
                 best = id;
                 bestDistance = distance;
             }
         }
         return best;
-    }, outDistance);
+    }, outDistance, centre);
 }
 
 void PlayScreen::SelectPlayer(std::uint32_t entity) {
@@ -1590,13 +1582,13 @@ void PlayScreen::SelectMonster(std::uint32_t entity) {
     player_.target = t;
 }
 
-std::uint32_t PlayScreen::CosUnder(float x, float y, float width, float height, float* outDistance) const {
+std::uint32_t PlayScreen::CosUnder(float x, float y, float width, float height, float* outDistance, bool* centre) const {
     if (!world_) return 0;
+    const std::uint32_t own = OwnMount();
     return OverNineRays(x, y, width, height, [&](float rx, float ry, float& bestDistance) {
         std::uint32_t best = 0;
         for (const auto& [id, e] : view_.Entities()) {
-            if (e.kind != proto::EntityKind::Cos || IsDead(e)) continue;
-            if (const auto rides = riders_.find(e.amount); rides != riders_.end() && rides->second == id) continue; // its rider's
+            if (e.kind != proto::EntityKind::Cos || IsDead(e) || (own != 0 && id == own)) continue; // the player's own mount: never
             float distance = 0;
             if (RayHitsEntity(rx, ry, width, height, id, distance) && distance < bestDistance) {
                 best = id;
@@ -1604,7 +1596,7 @@ std::uint32_t PlayScreen::CosUnder(float x, float y, float width, float height, 
             }
         }
         return best;
-    }, outDistance);
+    }, outDistance, centre);
 }
 
 void PlayScreen::SelectCos(std::uint32_t entity) {
@@ -2637,25 +2629,47 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
     // What is under the cursor: the nearest along the ray of every kind (the original orders no kind before another);
     // an item's name under the mouse first.
     float itemAt = 1e9f, npcAt = 1e9f, monsterAt = 1e9f, playerAt = 1e9f, cosAt = 1e9f;
+    bool npcCentre = false, monsterCentre = false, playerCentre = false, cosCentre = false;
     std::uint32_t item = replay_ ? 0 : GroundUnder(up.x, up.y, width, height, &itemAt);
-    std::uint32_t npc = replay_ ? 0 : NpcUnder(up.x, up.y, width, height, &npcAt);
-    std::uint32_t nearestMonster = replay_ ? 0 : MonsterUnder(up.x, up.y, width, height, &monsterAt);
-    std::uint32_t nearestPlayer = replay_ ? 0 : PlayerUnder(up.x, up.y, width, height, &playerAt);
-    std::uint32_t nearestCos = replay_ ? 0 : CosUnder(up.x, up.y, width, height, &cosAt);
+    std::uint32_t npc = replay_ ? 0 : NpcUnder(up.x, up.y, width, height, &npcAt, &npcCentre);
+    std::uint32_t nearestMonster = replay_ ? 0 : MonsterUnder(up.x, up.y, width, height, &monsterAt, &monsterCentre);
+    std::uint32_t nearestPlayer = replay_ ? 0 : PlayerUnder(up.x, up.y, width, height, &playerAt, &playerCentre);
+    std::uint32_t nearestCos = replay_ ? 0 : CosUnder(up.x, up.y, width, height, &cosAt, &cosCentre);
     {
+        // The cursor's own ray's hit beats the side rays' across the kinds too (the original casts the nine over every
+        // character at once).
+        if (npcCentre || monsterCentre || playerCentre || cosCentre) {
+            if (!npcCentre) npc = 0;
+            if (!monsterCentre) nearestMonster = 0;
+            if (!playerCentre) nearestPlayer = 0;
+            if (!cosCentre) nearestCos = 0;
+        }
         const float nearest = std::min({item != 0 ? itemAt : 1e9f, npc != 0 ? npcAt : 1e9f, nearestMonster != 0 ? monsterAt : 1e9f,
                                         nearestPlayer != 0 ? playerAt : 1e9f, nearestCos != 0 ? cosAt : 1e9f});
-        // A player standing before a structure is the one clicked (a structure's cylinder is wide).
-        const bool playerOverStructure = nearestMonster != 0 && nearestPlayer != 0 && fortress_.Structure(nearestMonster) != nullptr;
         if (item != 0 && itemAt > nearest) item = 0;
         if (npc != 0 && npcAt > nearest) npc = 0;
-        if (nearestMonster != 0 && (monsterAt > nearest || playerOverStructure)) nearestMonster = 0;
-        if (nearestPlayer != 0 && playerAt > nearest && !playerOverStructure) nearestPlayer = 0;
+        if (nearestMonster != 0 && monsterAt > nearest) nearestMonster = 0;
+        if (nearestPlayer != 0 && playerAt > nearest) nearestPlayer = 0;
         if (nearestCos != 0 && cosAt > nearest) nearestCos = 0;
         if (item != 0) npc = nearestMonster = nearestPlayer = nearestCos = 0; // a tie: the item, the NPC, the monster, the player, a COS
         if (npc != 0) nearestMonster = nearestPlayer = nearestCos = 0;
         if (nearestMonster != 0) nearestPlayer = nearestCos = 0;
         if (nearestPlayer != 0) nearestCos = 0;
+    }
+    // A rider, or the ride under him: his mount is the one picked (the original's), the click the rider's (who may be
+    // attacked is his question; the server's hit on a rider lands on his mount).
+    std::uint32_t mount = 0;
+    if (nearestPlayer != 0) {
+        if (const auto r = riders_.find(nearestPlayer); r != riders_.end() && view_.Find(r->second) != nullptr) mount = r->second;
+    } else if (nearestCos != 0) {
+        for (const auto& [rider, ride] : riders_) {
+            if (ride == nearestCos && rider != view_.Self() && view_.Find(rider) != nullptr) {
+                nearestPlayer = rider;
+                mount = ride;
+                nearestCos = 0;
+                break;
+            }
+        }
     }
     if (nearestCos != 0) {
         // A COS: selected, its target window (no walk, as a player's click); a job foe's transport or pet clicked again
@@ -2689,7 +2703,7 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
     const assets::TeleportGate* gate = replay_ || npc != 0 || monster != 0 || other != 0 ? nullptr : GateUnder(up.x, up.y, width, height, ground ? &target : nullptr);
     lastClick_ = item != 0 ? "an item" : monster != 0 ? "a monster" : npc != 0 ? "an NPC" : other != 0 ? "a player" : gate != nullptr ? "a gate" : ground ? "the ground" : "nothing";
     if (other != 0) {
-        ClickPlayer(context, other, ctrl, alt); // PlayPk.cpp
+        ClickPlayer(context, other, ctrl, alt, mount); // PlayPk.cpp
         return;
     }
     if (item != 0) {

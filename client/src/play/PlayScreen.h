@@ -149,19 +149,20 @@ private:
     bool goldBox_ = false; // --gold-box
     bool IsNpc(const game::WorldView::Entity& e) const;
     bool IsPlayer(const game::WorldView::Entity& e) const; // a character with a name that is no NPC
-    // Another player under (x, y), living or dead (an upright cylinder about its body), and its selection.
-    std::uint32_t PlayerUnder(float x, float y, float width, float height, float* distance = nullptr) const;
+    // Another player under (x, y), living or dead (its model's box, as the original's), and its selection. The picks
+    // below cast the original's nine rays; `centre` says the hit is the cursor's own ray's (it beats the others' rays).
+    std::uint32_t PlayerUnder(float x, float y, float width, float height, float* distance = nullptr, bool* centre = nullptr) const;
     void SelectPlayer(std::uint32_t entity);
-    // Monsters (C10a): the one under a point (an upright cylinder about its body), selected into the
+    // Monsters (C10a): the one under a point (its model's box; a fortress structure's too), selected into the
     // target window (its health kept up to date while it is in view).
-    std::uint32_t MonsterUnder(float x, float y, float width, float height, float* distance = nullptr) const;
+    std::uint32_t MonsterUnder(float x, float y, float width, float height, float* distance = nullptr, bool* centre = nullptr) const;
     // The camera ray through a screen point against an entity's model box on the stage (none on it: no).
     bool RayHitsEntity(float x, float y, float width, float height, std::uint32_t id, float& distance) const;
     void SelectMonster(std::uint32_t entity);
     // A COS (a pet, horse or transport; anyone's) under a point, and its selection: the target window's common look
     // (1.188 CIFTargetWindowCommonEnemy, a pet without a health bar, a horse or transport with
-    // one). A mount under its rider is not picked (the rider is).
-    std::uint32_t CosUnder(float x, float y, float width, float height, float* distance = nullptr) const;
+    // one). The player's own mount is not picked; another's is, and a click on its rider takes it (the original's).
+    std::uint32_t CosUnder(float x, float y, float width, float height, float* distance = nullptr, bool* centre = nullptr) const;
     void SelectCos(std::uint32_t entity);
     void RefreshTarget(double now);
     // Fights (C10b): what each walker plays for a while (a swing's clip, a hit's flinch), each swing
@@ -295,7 +296,7 @@ private:
     bool IsDead(const game::WorldView::Entity& e) const;
     // Under a stealth or an invisibility (its buffs: the player's own, others' EntityBuffs).
     bool Hidden(std::uint32_t entity) const;
-    std::uint32_t NpcUnder(float x, float y, float width, float height, float* distance = nullptr) const;
+    std::uint32_t NpcUnder(float x, float y, float width, float height, float* distance = nullptr, bool* centre = nullptr) const;
     void Npcs(double now);
     bool StandingNear(std::uint32_t entity, float reach) const;
     double pendingUntil_ = 0; // a clicked NPC or item is given up after this
@@ -661,7 +662,8 @@ private:
     std::unordered_map<std::uint32_t, std::uint8_t> entityPk_;
     std::uint8_t PvpStateOf(std::uint32_t entity) const;
     void HandlePk(ScreenContext& context, const game::proto::PkEvent& e);
-    void ClickPlayer(ScreenContext& context, std::uint32_t other, bool ctrl, bool alt);
+    // `mount`: the ride the player sits on, the one selected (the original's pick gives a rider's mount).
+    void ClickPlayer(ScreenContext& context, std::uint32_t other, bool ctrl, bool alt, std::uint32_t mount = 0);
     bool MurdererScrollRefused(std::uint8_t place, double time);
     void PkRefusal(game::proto::SkillUseStatus status, double time);
     ui::Color PlayerNameColour(std::uint32_t id, const game::WorldView::Entity& e) const;
