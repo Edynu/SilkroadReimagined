@@ -194,6 +194,12 @@ struct RepairPrice {
 };
 RepairPrice PriceRepair(const assets::ItemRow& row, std::uint32_t durability, std::uint32_t most, std::uint64_t budget, bool rounded);
 
+// An item a shop never sells back once sold (the 1.188 client's list, made as its item table loads): TID 3/3 with TID3 8,
+// every COS item (3/2), an avatar (3/1/13), a quest's or an event's item by its codename (ITEM_QNO, ITEM_QTUTORIAL,
+// ITEM_QSP, ITEM_QCX, ITEM_ETC_E...) or name (SN_ITEM_EVENT..., SN_ITEM_ETC_TAIWAN_50000_GOLD). Its sale is asked first
+// ("This item is not available for repurchase. Are you sure you want to sell the item?").
+bool NoBuyBack(const assets::ItemRow& row);
+
 // A magic option's place in its range, 0..100 (the tooltip's "(+X%)"): the row of its code at the
 // item's degree gives the range. -1 when the option is unknown.
 int OptionPercent(const std::vector<assets::MagicOptionRow>& options, const ItemInstance::Option& option, int degree);

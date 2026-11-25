@@ -1,6 +1,7 @@
 #include "sr/game/Items.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string_view>
 
@@ -376,6 +377,21 @@ bool Repairable(const assets::ItemRow& row, const ItemInstance& item, const std:
         if (m->optionName == "MATTR_REPAIR" && o.value < 2) return false;
     }
     return true;
+}
+
+bool NoBuyBack(const assets::ItemRow& row) {
+    const auto& t = row.typeId;
+    if (t[0] == 3 && ((t[1] == 3 && t[2] == 8) || t[1] == 2 || (t[1] == 1 && t[2] == 13))) return true;
+    // The names' starts, as the original compares them (case ignored).
+    const auto starts = [](std::string_view text, std::string_view start) {
+        return text.size() >= start.size() && std::equal(start.begin(), start.end(), text.begin(), [](char a, char b) {
+                   return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+               });
+    };
+    for (const std::string_view start : {"ITEM_QNO", "ITEM_QTUTORIAL", "ITEM_QSP", "ITEM_QCX", "ITEM_ETC_E"}) {
+        if (starts(row.codename, start)) return true;
+    }
+    return starts(row.nameKey, "SN_ITEM_EVENT") || starts(row.nameKey, "SN_ITEM_ETC_TAIWAN_50000_GOLD");
 }
 
 RepairPrice PriceRepair(const assets::ItemRow& row, std::uint32_t durability, std::uint32_t most, std::uint64_t budget, bool rounded) {

@@ -887,8 +887,8 @@ bool InventoryWindow::OnNotice(const ui::Notice& notice) {
         }
         return true;
     }
-    // Ctrl + click with a store open: the whole stack sold once the box asking it is answered (the original's quick sale);
-    // a mall item is never sold so.
+    // Ctrl + click with a store open: the whole stack sold at once (the original's quick sale); one a shop never sells
+    // back asked first; a mall item never sold so.
     if (notice.kind == ui::Notice::Kind::Clicked && notice.value == 2 && context_.hud != nullptr && context_.state != nullptr &&
         context_.state->shopNpc != 0) {
         const int place = PlaceOf(notice.source);
@@ -896,12 +896,14 @@ bool InventoryWindow::OnNotice(const ui::Notice& notice) {
         const assets::ItemRow* row = item != nullptr && context_.items != nullptr ? context_.items->Find(item->refId) : nullptr;
         if (row != nullptr && row->cashItem) {
             context_.state->Post(game::GameMessage::Kind::General, context_.Text("UIIT_MSG_STRGERR_CANT_QUICKSELL_CASHITEM"), context_.time);
-        } else if (item != nullptr) {
+        } else if (row != nullptr && game::NoBuyBack(*row)) {
             HudContext* c = &context_;
-            const std::string name = row != nullptr ? context_.Text(row->nameKey) : std::string();
-            context_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(context_.Text("UIIT_MSG_SELL_RECONFIRM"), {name})}, [c, place](bool yes) {
+            const std::string text = FormatText(context_.Text("UIIT_MSG_CANNOT_BUYBACK_ITEM_SELL"), {context_.Text(row->nameKey)});
+            context_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {text}, [c, place](bool yes) {
                 if (yes && c->hud != nullptr && c->state != nullptr && c->state->shopNpc != 0) c->hud->Request({HudRequest::Kind::ShopSell, place});
             });
+        } else if (item != nullptr) {
+            context_.hud->Request({HudRequest::Kind::ShopSell, place});
         }
         return true;
     }
@@ -1303,6 +1305,15 @@ void StoreWindow::Created(ui::Interface& ui) {
         deal.unitPrice = row->sellPrice;
         deal.count = deal.most = std::max<int>(1, item->count);
         deal.place = place;
+        if (game::NoBuyBack(*row)) {
+            // One a shop never sells back: asked first (the original's box), then the sale as any other (inferred).
+            HudContext* c = &context_;
+            const std::string text = FormatText(context_.Text("UIIT_MSG_CANNOT_BUYBACK_ITEM_SELL"), {deal.name});
+            context_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {text}, [c, deal](bool yes) {
+                if (yes && c->hud != nullptr && c->state != nullptr && c->state->shopNpc != 0) c->hud->Deal(deal);
+            });
+            return true;
+        }
         context_.hud->Deal(deal);
         return true;
     };

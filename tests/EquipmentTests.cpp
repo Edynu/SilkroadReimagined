@@ -339,3 +339,23 @@ TEST_CASE("the bare hands' reinforcements: as entered, then swapped once a weapo
     CHECK(game::PlayerCombatStats(50, 100, 80, {}, nullptr, sheet, game::BareHands::AfterWeapon).phyAttackMax ==
           doctest::Approx(100.5 * 49.0 / 100.0).epsilon(1e-5));
 }
+
+TEST_CASE("the items a shop never sells back: by type, then by the codename's or the name's start") {
+    const auto row = [](std::array<int, 4> type, const char* codename, const char* name = "SN_TEST") {
+        assets::ItemRow r;
+        r.typeId = type;
+        r.codename = codename;
+        r.nameKey = name;
+        return r;
+    };
+    CHECK(game::NoBuyBack(row({3, 3, 8, 1}, "ITEM_ETC_TRADE_CH_05")));       // 3/3/8
+    CHECK(game::NoBuyBack(row({3, 2, 1, 1}, "ITEM_COS_P_WOLF_SCROLL")));     // a COS item
+    CHECK(game::NoBuyBack(row({3, 1, 13, 1}, "ITEM_MALL_AVATAR_M_HAT")));    // an avatar
+    CHECK(game::NoBuyBack(row({3, 3, 9, 1}, "ITEM_QNO_CH_WOLF_SKIN")));      // a quest's
+    CHECK(game::NoBuyBack(row({3, 3, 9, 1}, "item_qsp_any")));               // the case ignored
+    CHECK(game::NoBuyBack(row({3, 3, 9, 1}, "ITEM_ETC_E060209_X")));         // an event's
+    CHECK(game::NoBuyBack(row({3, 3, 9, 1}, "ITEM_X", "SN_ITEM_EVENT_30EXP")));
+    CHECK_FALSE(game::NoBuyBack(row({3, 3, 1, 1}, "ITEM_ETC_HP_POTION_01")));
+    CHECK_FALSE(game::NoBuyBack(row({3, 1, 6, 2}, "ITEM_CH_SWORD_01_A")));
+    CHECK_FALSE(game::NoBuyBack(row({3, 3, 9, 1}, "ITEM_Q_LIKE", "SN_ITEM_ETC")));
+}
