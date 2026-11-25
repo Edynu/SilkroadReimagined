@@ -281,14 +281,35 @@ public:
             // (frame/Portraits.h).
             if (auto* face = ui::As<ui::PictureClip>(slot->Child(1))) face->mask = "interface\\quickparty\\qpt_face.ddj";
         }
-        Show(Child(10), false); // the lock (the order of the slots: ours, not kept)
+        // The lock (10): the slots' order changes only while it is open (the original's "Change Quick Party Window
+        // Sequence"), shown in a party; 20 x 20 at 0, -7 (the layout gives it no size).
+        if (ui::Widget* lock = Child(10)) {
+            lock->rect = {0.0f, -7.0f, 20.0f, 20.0f};
+            lock->visible = false;
+        }
     }
 
     void Update(ui::Frame& frame) override {
         const game::PlayerState* state = context_.state;
         if (state == nullptr) return;
         const game::PartyView& party = state->party;
-        const std::vector<const proto::PartyMemberRecord*> others = party.Others();
+        // The members in the player's order (a member new to it at the end).
+        std::vector<const proto::PartyMemberRecord*> others = party.Others();
+        for (const proto::PartyMemberRecord* m : others) {
+            if (std::find(order_.begin(), order_.end(), m->id) == order_.end()) order_.push_back(m->id);
+        }
+        std::stable_sort(others.begin(), others.end(), [&](const proto::PartyMemberRecord* a, const proto::PartyMemberRecord* b) {
+            return std::find(order_.begin(), order_.end(), a->id) < std::find(order_.begin(), order_.end(), b->id);
+        });
+        // The lock: its picture and its tooltip by its state.
+        if (auto* lock = ui::As<ui::Static>(Child(10)); lock != nullptr) {
+            lock->visible = party.InParty();
+            lock->texture = unlocked_ ? "interface\\ifcommon\\quickparty_move_unlock.ddj" : "interface\\ifcommon\\quickparty_move_lock.ddj";
+            Tooltip(frame, lock,
+                    context_.Text("UIIT_STT_QUICKPARTY_MOVE") + "\n" +
+                        FormatText(context_.Text("UIIT_STT_QUICKPARTY_MOVE_STATE"),
+                                   {context_.Text(unlocked_ ? "UIIT_STT_QUICKPARTY_MOVE_UNLOCK" : "UIIT_STT_QUICKPARTY_MOVE_LOCK")}));
+        }
         // Only the slots shown take the mouse; out of a party it lets every click through to the world.
         const int shown = party.InParty() ? std::min<int>(kSlots, int(others.size())) : 0;
         const float spacing = Spacing();
@@ -301,6 +322,8 @@ public:
             slot->rect.y = spacing * float(i);
             const proto::PartyMemberRecord* m = party.InParty() && std::size_t(i) < others.size() ? others[std::size_t(i)] : nullptr;
             entities_[std::size_t(i)] = m != nullptr ? m->entity : 0;
+            if (i == 0) shownIds_.clear();
+            if (m != nullptr) shownIds_.push_back(m->id);
             slot->visible = m != nullptr;
             if (m == nullptr) continue;
             Put(slot->Child(4), m->name);
@@ -333,14 +356,35 @@ public:
     }
 
     void Mouse(ui::Frame& frame) override {
-        if (!frame.input.Pressed(ui::MouseButton::Left) || context_.hud == nullptr) return;
-        for (int i = 0; i < kSlots; ++i) {
-            ui::Widget* slot = Child(1 + i);
-            if (slot != nullptr && slot->visible && entities_[std::size_t(i)] != 0 && slot->Hit(frame.pointer.position)) {
-                context_.hud->Request({HudRequest::Kind::SelectEntity, int(entities_[std::size_t(i)])});
-                return;
+        // The lock toggled; with it open a slot dragged onto another swaps the two members' places.
+        const auto slotAt = [&](ui::Vec2 at) {
+            for (int i = 0; i < kSlots; ++i) {
+                ui::Widget* slot = Child(1 + i);
+                if (slot != nullptr && slot->visible && slot->Hit(at)) return i;
             }
+            return -1;
+        };
+        if (frame.input.Released(ui::MouseButton::Left) && dragFrom_ >= 0) {
+            const int to = slotAt(frame.pointer.position), from = std::exchange(dragFrom_, -1);
+            if (unlocked_ && to >= 0 && to != from && std::size_t(std::max(from, to)) < shownIds_.size()) {
+                auto a = std::find(order_.begin(), order_.end(), shownIds_[std::size_t(from)]);
+                auto b = std::find(order_.begin(), order_.end(), shownIds_[std::size_t(to)]);
+                if (a != order_.end() && b != order_.end()) std::iter_swap(a, b);
+            }
+            return;
         }
+        if (!frame.input.Pressed(ui::MouseButton::Left) || context_.hud == nullptr) return;
+        if (ui::Widget* lock = Child(10); lock != nullptr && lock->visible && lock->Hit(frame.pointer.position)) {
+            unlocked_ = !unlocked_;
+            return;
+        }
+        const int i = slotAt(frame.pointer.position);
+        if (i < 0 || entities_[std::size_t(i)] == 0) {
+            if (i >= 0 && unlocked_) dragFrom_ = i;
+            return;
+        }
+        if (unlocked_) dragFrom_ = i;
+        context_.hud->Request({HudRequest::Kind::SelectEntity, int(entities_[std::size_t(i)])});
     }
 
 private:
@@ -381,6 +425,10 @@ private:
     HudContext& context_;
     std::array<std::uint32_t, kSlots> entities_{};
     double phase_ = 0.0; // the caution glows' sheet (ms)
+    bool unlocked_ = false;              // the lock open: the slots may be reordered
+    std::vector<std::uint32_t> order_;   // the members' order (character ids)
+    std::vector<std::uint32_t> shownIds_; // the members shown, slot by slot
+    int dragFrom_ = -1;                  // the slot a drag began on
 };
 
 // --- The settings box (CIFSetPartyMode) ----------------------------------------------------------------
