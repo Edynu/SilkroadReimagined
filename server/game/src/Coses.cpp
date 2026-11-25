@@ -604,6 +604,7 @@ void Coses::Hurt(std::uint32_t pet, std::uint32_t monster, const game::HitResult
                         std::uint64_t(std::max<std::int64_t>(0, c.row.experience)));
         c.row.experience -= std::int64_t(lost);
     }
+    if (lost > 0) Send(c.owner, proto::CosExperience{c.entity, std::uint64_t(std::max<std::int64_t>(0, c.row.experience)), 0, lost});
     if (const auto o = host_.CosOwner(c.owner)) core::LogInfo("cos: {}'s pet {} dies ({} experience lost)", o->name, c.row.id, lost);
     Dismiss(pet, false, true);
 }

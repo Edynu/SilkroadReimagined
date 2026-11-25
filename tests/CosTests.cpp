@@ -562,6 +562,13 @@ TEST_CASE("Game server: an attack pet fights a monster: its hits, the monster's 
         if (a.client->Expect(hit, 50ms) && hit.target == weak.entity && (hit.flags & proto::kDamageKilled) != 0) died = true;
     }
     REQUIRE(died);
+    // Its owner told what it lost (the original's negative change: "You have lost [%d]amount of pet experience.").
+    std::uint64_t lostTold = 0;
+    for (int i = 0; i < 20 && lostTold == 0; ++i) {
+        proto::CosExperience e;
+        if (a.client->Expect(e, 200ms) && e.entity == weak.entity) lostTold = e.lost;
+    }
+    CHECK(lostTold == 10'000);
     CHECK(Next<proto::CosDismissed>(a).entity == weak.entity);
     for (int i = 0; i < 300 && t.Db().Query("SELECT state FROM _charcos WHERE id = $1", {petRow}).Int(0, 0) != 4; ++i) s.game.Poll(10ms);
     CHECK(t.Db().Query("SELECT state FROM _charcos WHERE id = $1", {petRow}).Int(0, 0) == std::int64_t(game::CosState::Dead));

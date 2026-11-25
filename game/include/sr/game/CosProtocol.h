@@ -70,11 +70,13 @@ struct CosExperience {
     static constexpr MessageId kId = 0x1308;
     std::uint32_t entity = 0;
     std::uint64_t experience = 0, gained = 0;
+    std::uint64_t lost = 0; // taken by its death (the original's negative change: "You have lost [%d]amount of pet experience.")
     template <typename V>
     void Visit(V& v) {
         v("entity", entity);
         v("experience", experience);
         v("gained", gained);
+        v("lost", lost);
     }
 };
 

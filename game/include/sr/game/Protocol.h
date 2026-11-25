@@ -43,7 +43,8 @@ using MessageId = std::uint16_t;
 // 2: the moves packed (EntityMoved's places, a tick's moves in one frame).
 // 3: a ground item's owner in EntityAppeared.
 // 4: the lobby's characters' academy role (CharacterSummary.academyRank).
-inline constexpr std::uint32_t kProtocolVersion = 4;
+// 5: a pet's experience lost by its death (CosExperience.lost).
+inline constexpr std::uint32_t kProtocolVersion = 5;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

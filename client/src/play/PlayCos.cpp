@@ -17,6 +17,7 @@
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "play/PlayScreen.h"
+#include "audio/GameAudio.h"
 #include "sr/core/Log.h"
 #include "sr/game/Cos.h"
 #include "sr/game/Inventory.h"
@@ -27,6 +28,13 @@ namespace proto = game::proto;
 
 void PlayScreen::HandleCos(ScreenContext& context, const proto::CosEvent& event) {
     if (const auto* summoned = std::get_if<proto::CosSummoned>(&event)) {
+        // A growth or pick pet just summoned: SND_COS_SUMMON (the original's CICCos::vf_068 for a fresh one; ours the
+        // owner's alone, the world shown: not the pets already out when the player enters).
+        const bool fresh = std::none_of(ownCoses_.begin(), ownCoses_.end(), [&](const OwnCos& c) { return c.entity == summoned->entity; });
+        const auto kind = game::CosKind(summoned->kind);
+        if (fresh && shown_ && !replay_ && context.audio != nullptr && (kind == game::CosKind::AttackPet || kind == game::CosKind::GrabPet)) {
+            context.audio->PlayUi("SND_COS_SUMMON");
+        }
         std::erase_if(ownCoses_, [&](const OwnCos& c) { return c.entity == summoned->entity; });
         OwnCos own{summoned->entity, summoned->model, summoned->item, summoned->kind, summoned->hp, summoned->maxHp, summoned->name,
                    summoned->level, summoned->hgp, summoned->option};
@@ -72,6 +80,10 @@ void PlayScreen::HandleCos(ScreenContext& context, const proto::CosEvent& event)
             if (c.entity == exp->entity) c.experience = exp->experience;
         }
         // "You gained [%d] pet experience." (the 1.188 client's, on the original's 0x30C9 type 3)
+        // "You have lost [%d]amount of pet experience." (the same, a negative change: its death's)
+        if (!replay_ && exp->lost > 0) {
+            player_.Post(game::GameMessage::Kind::General, FormatText(gui_.data().Text("UIIT_MSG_COSPET_LOST_EXP"), {std::to_string(exp->lost)}), context.time);
+        }
         if (!replay_ && exp->gained > 0) {
             player_.Post(game::GameMessage::Kind::General, FormatText(gui_.data().Text("UIIT_MSG_COSPET_GAIN_EXP"), {std::to_string(exp->gained)}), context.time);
         }
