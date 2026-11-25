@@ -252,10 +252,24 @@ std::vector<ui::TooltipLine> Requirements(const assets::ItemRow& row, const HudC
         const int type = row.requirementTypes[i], value = row.requirementLevels[i];
         if (type == 1 && value > 0) {
             needs.push_back({c.Text("PARAM_REQ_LV") + " " + std::to_string(value), c.wearer.level >= value ? kWhite : kRed, kShadow});
+        } else if (type >= 2 && type <= 4 && value > 0) {
+            // A job's grade (2 trader, 3 thief, 4 hunter): "Job level: Novice Trader" by the item's race's names; met by the
+            // player's job level, whatever the job.
+            const char* job = type == 2 ? "MERCHANT" : type == 3 ? "THIEF" : "HUNTER";
+            const std::string key = std::format("UIIT_STT_CLASS_{}{}_{}", row.country == 1 ? "EU_" : "", job, value);
+            const int have = c.state != nullptr ? c.state->job.level : 0;
+            needs.push_back({c.Text("UIIT_STT_CHAR_JOBGRADE") + ": " + c.Text(key), have >= value ? kWhite : kRed, kShadow});
+        } else if (type == 10 && value > 0) {
+            // The guild's level.
+            const int have = c.guild != nullptr && c.guild->InGuild() ? c.guild->Guild().level : 0;
+            needs.push_back({c.Text("UIIT_STT_GUILD_REQUIRE_LEVEL") + " " + std::to_string(value), have >= value ? kWhite : kRed, kShadow});
         } else if (type > 1 && value > 0 && c.skills != nullptr) {
             if (const assets::MasteryRow* m = c.skills->Mastery(std::uint32_t(type))) {
+                // Red below the mastery's level, once the player's masteries are known.
+                const auto known = c.wearer.masteries.find(std::uint32_t(type));
+                const bool met = !c.wearer.masteriesKnown || (known != c.wearer.masteries.end() && known->second >= value);
                 needs.push_back({c.Text("PARAM_MASTERY") + ": " + c.Text(m->nameKey) + " " + c.Text("PARAM_MASTERY_LEVEL") + " " + std::to_string(value),
-                                 kWhite, kShadow});
+                                 met ? kWhite : kRed, kShadow});
             }
         }
     }
