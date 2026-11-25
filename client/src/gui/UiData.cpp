@@ -60,7 +60,7 @@ void UiData::Load(core::JobSystem& jobs, const assets::FileSystem& files, std::v
                 }
             }
             // The 1.188 windows built from binary layouts.
-            for (const char* path : {"res_ui\\guild.2dt", "res_ui\\guild_r.2dt", "res_ui\\guild_w.2dt", "res_ui\\guild_gp.2dt", "res_ui\\guild_intro.2dt", "res_ui\\cumunity_friend.2dt", "res_ui\\cumunity_cut.2dt", "res_ui\\cumunity_note.2dt", "res_ui\\worldmapguide.2dt", "res_ui\\stallnetwork.2dt", "res_ui\\open_market_main.2dt", "res_ui\\open_market_1_1.2dt", "res_ui\\reputation.2dt", "res_ui\\frpvp.2dt", "res_ui\\questlist.2dt", "res_ui\\quest_re.2dt", "res_ui\\questminilist.2dt",
+            for (const char* path : {"res_ui\\guild.2dt", "res_ui\\guild_r.2dt", "res_ui\\guild_w.2dt", "res_ui\\guild_gp.2dt", "res_ui\\guild_intro.2dt", "res_ui\\cumunity_friend.2dt", "res_ui\\cumunity_cut.2dt", "res_ui\\cumunity_note.2dt", "res_ui\\worldmapguide.2dt", "res_ui\\stallnetwork.2dt", "res_ui\\open_market_main.2dt", "res_ui\\open_market_1_1.2dt", "res_ui\\reputation.2dt", "res_ui\\frpvp.2dt", "res_ui\\questlist.2dt", "res_ui\\quest_re.2dt", "res_ui\\corfim.2dt", "res_ui\\questminilist.2dt",
                                      "res_ui\\nifsummonpartyuserwnd.2dt", "res_ui\\nifcollectionwnd.2dt", "res_ui\\nifcollectionitemstory.2dt",
                                      "res_ui\\nifcollectionmsgbox.2dt", "res_ui\\nifundermenubar.2dt",
                                      "res_ui\\nifenchantwnd.2dt", "res_ui\\nifenchantalchemymsgbox.2dt", "res_ui\\silksearch.2dt",

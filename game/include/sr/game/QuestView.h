@@ -41,6 +41,7 @@ public:
     void Reset();
 
     const QuestDef* Find(std::uint32_t quest) const;
+    const std::map<std::uint32_t, QuestDef>& Defs() const { return defs_; }
     const std::map<std::uint32_t, proto::QuestState>& Active() const { return active_; }
     // Quest -> how often it has been finished.
     const std::map<std::uint32_t, std::uint16_t>& Finished() const { return finished_; }

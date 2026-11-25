@@ -13,6 +13,7 @@
 #include "sr/core/Text.h"
 #include "sr/ui/Controls.h"
 #include "gui/HudParty.h"
+#include "sr/game/BetaQuests.h"
 #include "title/TitleShared.h"
 
 namespace sr::client {
@@ -1189,6 +1190,24 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             ShowQuestGuide(hudContext_, {{1, "SN_QNO_CH_SMITH_1", "SN_NN_QNO_CH_SMITH_1", "SN_NC_QNO_CH_SMITH_1"},
                                          {2, "SN_QNO_CH_POTION_1", "SN_NN_QNO_CH_POTION_1", "SN_NC_QNO_CH_POTION_1"}});
             if (page_ == "quest-guide:window") hud_.Show(45);
+        }
+        // --page quest-reward[:confirm]: the reward window at its finisher on a beta quest's definition (one weapon to
+        // choose), and with its first item picked and "Reward" pressed, the confirm (res_ui\corfim.2dt).
+        if (page_.starts_with("quest-reward") && !rewardShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+            host_.data().Layout2dt("res_ui\\corfim.2dt") != nullptr) {
+            rewardShown_ = true;
+            const std::string text = game::BetaQuestDefinitions();
+            const std::size_t next = text.find("\nquest ");
+            sampleQuests_.Apply(game::proto::QuestDefinition{text.substr(0, next == std::string::npos ? std::string::npos : next + 1)});
+            hudContext_.quests = &sampleQuests_;
+            if (tables_->Usable()) hudContext_.items = &tables_->items;
+            const game::QuestDef* q = sampleQuests_.Defs().empty() ? nullptr : &sampleQuests_.Defs().begin()->second;
+            core::LogInfo("gallery: quest-reward: {} definitions, {} reward items, text '{}'", sampleQuests_.Defs().size(),
+                          q != nullptr ? q->reward.items.size() : 0, q != nullptr ? q->rewardText.literal : std::string());
+            if (q != nullptr) {
+                OpenQuestReward(hudContext_, q->id, 1);
+                if (page_ == "quest-reward:confirm") OpenQuestRewardConfirm(hudContext_, q->id, 1, {0});
+            }
         }
         // --page arena-rule | arena-guild | arena-score | arena-flag | arena-result | arena-desk[:cancel]: the Battle Arena's
         // windows on a sample match: the rule window with both kinds (score selected), the

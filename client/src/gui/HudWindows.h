@@ -1465,6 +1465,8 @@ void ShowQuestGuide(HudContext& context, std::vector<game::proto::QuestGuide::Ro
 void OpenQuestReward(HudContext& context, std::uint32_t quest, std::uint32_t npc);
 // The reward window's item of that codename picked and its button pressed (the quests' tests; false: no such item).
 bool PickQuestReward(HudContext& context, const std::string& item);
+// The reward's confirm (res_ui\corfim.2dt) on those picked items, as "Reward" opens it (the gallery's page).
+void OpenQuestRewardConfirm(HudContext& context, std::uint32_t quest, std::uint32_t npc, const std::vector<std::uint8_t>& picked);
 void ShowQuestQuick(HudContext& context);
 // A 1.188 CNIF window's layout (res_ui\*.2dt) as widgets under `root` (HudQuest.cpp), and its root node.
 std::vector<ui::Widget*> Build2dt(ui::Interface& ui, ui::Widget& root, const std::vector<assets::Ui2dtRecord>& records,

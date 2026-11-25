@@ -24,6 +24,7 @@
 #include "sr/assets/Terrain.h"
 #include "sr/assets/Gacha.h"
 #include "sr/core/Jobs.h"
+#include "sr/game/QuestView.h"
 
 namespace sr::client {
 
@@ -62,6 +63,8 @@ private:
     std::vector<std::uint32_t> masteryCosts_;
     game::WorldView sampleWorld_;
     HudContext hudContext_;
+    game::QuestView sampleQuests_; // --page quest-reward: a beta quest's definition
+    bool rewardShown_ = false;
     game::CommunityView sampleCommunity_; // the Community pages' sample friends, blocks and letters
     game::GuildView sampleGuild_; // the guild window's sample guild and union
     game::FortressView sampleFortress_; // the fortress official's window on sample data

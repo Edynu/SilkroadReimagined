@@ -28,7 +28,7 @@ constexpr int kChat = 1, kMinimap = 10, kPlayerInfo = 11, kUnderBar = 12, kStore
               kPets = 39, kDelayGauges = 40, kEventGuide = 41, kQuestNotice = 42, kAlchemy = 44, kItemMall = 167, kGlobalChat = 56,
               kSystemMessages = 68, kRegionView = 83, kHelpBubble = 97, kSystemMenu = 98, kDragged = 99, kPetWindow = 120,
               kPartyMatch = 130, kExtQuickSlots = 133, kAutoPotion = 135, kStallNetwork = 150, kSupporterChat = 161,
-              kFreePvp = 187, kMenuBar = 175, kEnchant = 168, kAlchemyAlert = 172, kQuestQuick = 173, kQuestReward = 188, kQuestList = 1076, kCollection = 210, kCollectionBox = 211, kCollectionStory = 212, kSummon = 214, kEventRank = 400, kTimer = 410, kQuickState = 420, kQuickStateHalf = 421, kEventGuideSecond = 30006,
+              kFreePvp = 187, kMenuBar = 175, kEnchant = 168, kAlchemyAlert = 172, kQuestQuick = 173, kQuestReward = 188, kQuestRewardConfirm = 189, kQuestList = 1076, kCollection = 210, kCollectionBox = 211, kCollectionStory = 212, kSummon = 214, kEventRank = 400, kTimer = 410, kQuickState = 420, kQuickStateHalf = 421, kEventGuideSecond = 30006,
               kTempleGuide = 165, kEquipState = 157;
 // Ours: the performance panel (HudWindows.h PerformancePanel), an id no layout uses.
 constexpr int kPerformance = 9000;

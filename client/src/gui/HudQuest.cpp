@@ -7,7 +7,9 @@
 // - CNIFQuestReward (res_ui\quest_re.2dt): the quest's page (its SN_PAYCON_* rich text), its reward's numbers in four
 //   rows (EXP, Gold, SP EXP, SP, AP, the non-zero ones in that order), its items, and a button: "Abandon
 //   quest" for one under way, "Reward" at its finisher (the items chosen first: "You must select your reward.",
-//   "You must select all items.", "You cannot select more.").
+//   "You must select all items.", each as a line and on the warning banner; "You cannot select more."). With items
+//   to choose, "Reward" opens CNIFQuestReward_ConfirmWnd (res_ui\corfim.2dt): the items picked, five to a page, and
+//   Confirm (the reward taken, both windows closed) or Cancel (back to the choice).
 // - CNIFMiniQuestWnd (res_ui\questminilist.2dt): the quick window, up to three quests ("Max. of three quests can be
 //   listed in quick window."), each "[On] name" with its goals under it, "[On] goal (n/m)" / "[Done] ...",
 //   folded and unfolded by its button (qst_list_open/close_button).
@@ -29,6 +31,7 @@ namespace {
 
 constexpr const char* kListLayout = "res_ui\\questlist.2dt";
 constexpr const char* kRewardLayout = "res_ui\\quest_re.2dt";
+constexpr const char* kConfirmLayout = "res_ui\\corfim.2dt";
 constexpr const char* kMiniLayout = "res_ui\\questminilist.2dt";
 constexpr int kMostQuick = 3;
 const ui::Color kGoalOn = ui::Argb(0xFFEFDAA4), kGoalDone = ui::Argb(0xFFFF9C68), kMiniText = ui::Argb(0xFFFFF9BA);
@@ -234,6 +237,8 @@ private:
 
 // --- The reward window -----------------------------------------------------------------------------------------
 
+void OpenRewardConfirm(HudContext& c, std::uint32_t quest, std::uint32_t npc, const std::vector<std::uint8_t>& picked);
+
 class QuestRewardWindow : public ui::MainFrame {
 public:
     QuestRewardWindow(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
@@ -252,6 +257,8 @@ public:
             if (r.id == 96) page_ = made[i];
             if (r.id == 38) button_ = made[i];
             if (r.className == "CNIFGoldSlot") golds_.push_back(made[i]);
+            if (r.id == 121) goldWindow_ = made[i];
+            if (r.id == 120) itemWindow_ = made[i];
             if (r.className == "CIFSlotWithHelpEx") {
                 if (auto* slot = ui::As<ui::Slot>(made[i])) {
                     slot->pickable = false;
@@ -268,7 +275,13 @@ public:
         picked_.clear();
         const game::QuestDef* q = DefOf(c_, quest);
         if (q == nullptr) return;
-        if (page_ != nullptr) page_->SetText(TextOf(c_, q->rewardText.Empty() ? q->name : q->rewardText));
+        if (page_ != nullptr) {
+            // The page reads only the original's <sml2> markup (its SN_PAYCON_* texts); our own quests' plain words are
+            // put in it.
+            std::string page = TextOf(c_, q->rewardText.Empty() ? q->name : q->rewardText);
+            if (!page.starts_with("<sml2>")) page = "<sml2>" + page + "</sml2>";
+            page_->SetText(page);
+        }
         if (auto* page = dynamic_cast<QuestPage*>(page_)) page->scroll = 0.0f;
         // The numbers, the non-zero ones in the original's order, into the four rows.
         const std::pair<const char*, std::uint64_t> rows[] = {{"UIIT_STT_QUESTREWARD_EXP", q->reward.exp},
@@ -285,6 +298,9 @@ public:
             ++g;
         }
         for (; g < golds_.size(); ++g) golds_[g]->visible = false;
+        // The gold window only for a reward with numbers, the item window only for one with items (the original's fill).
+        if (goldWindow_ != nullptr) goldWindow_->visible = std::any_of(golds_.begin(), golds_.end(), [](const ui::Widget* w) { return w->visible; });
+        if (itemWindow_ != nullptr) itemWindow_->visible = !q->reward.items.empty();
         // The items.
         for (std::size_t i = 0; i < items_.size(); ++i) {
             ui::Slot* slot = items_[i].second;
@@ -315,9 +331,11 @@ public:
         if (q == nullptr || npc_ == 0) return false;
         for (std::size_t i = 0; i < q->reward.items.size(); ++i) {
             if (q->reward.items[i].item != item) continue;
+            // Picked, "Reward" pressed, then the confirm's Confirm, as the player's three clicks.
             picked_ = {std::uint8_t(i)};
             if (c_.questRequest) c_.questRequest(proto::QuestHandIn::kId, proto::Encode(proto::QuestHandIn{npc_, quest_, picked_}));
             if (c_.hud != nullptr) c_.hud->Hide(hud::kQuestReward);
+            if (c_.hud != nullptr) c_.hud->Hide(hud::kQuestRewardConfirm);
             return true;
         }
         return false;
@@ -347,9 +365,18 @@ public:
         }
         if (n.source == button_) {
             if (npc_ != 0) {
-                // At its finisher: the choice complete first.
-                if (q->reward.choose > 0 && picked_.empty()) return line("UIIT_STT_QUESTREWARD_MSG01"), true;
-                if (q->reward.choose > 0 && picked_.size() < q->reward.choose) return line("UIIT_STT_QUESTREWARD_MSG04"), true;
+                // At its finisher: the choice complete first (a line and the warning banner), then the confirm with
+                // the items picked; nothing to choose, taken at once.
+                const auto refuse = [&](const char* key) {
+                    line(key);
+                    if (c_.state != nullptr) c_.state->Notify(game::Banner::Kind::Warning, c_.Text(key), c_.time);
+                };
+                if (q->reward.choose > 0 && picked_.empty()) return refuse("UIIT_STT_QUESTREWARD_MSG01"), true;
+                if (q->reward.choose > 0 && picked_.size() < q->reward.choose) return refuse("UIIT_STT_QUESTREWARD_MSG04"), true;
+                if (q->reward.choose > 0) {
+                    OpenRewardConfirm(c_, quest_, npc_, picked_);
+                    return true;
+                }
                 if (c_.questRequest) c_.questRequest(proto::QuestHandIn::kId, proto::Encode(proto::QuestHandIn{npc_, quest_, picked_}));
                 if (c_.hud != nullptr) c_.hud->Hide(hud::kQuestReward);
                 return true;
@@ -379,9 +406,89 @@ public:
 
 private:
     HudContext& c_;
-    ui::Widget *page_ = nullptr, *button_ = nullptr;
+    ui::Widget *page_ = nullptr, *button_ = nullptr, *goldWindow_ = nullptr, *itemWindow_ = nullptr;
     std::vector<ui::Widget*> golds_;
     std::vector<std::pair<int, ui::Slot*>> items_;
+    std::uint32_t quest_ = 0, npc_ = 0;
+    std::vector<std::uint8_t> picked_;
+};
+
+// --- The reward's confirm ---------------------------------------------------------------------------------------
+
+class QuestRewardConfirm : public ui::MainFrame {
+public:
+    QuestRewardConfirm(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+
+    void Created(ui::Interface& ui) override {
+        ui::MainFrame::Created(ui);
+        const auto* records = c_.layout2dt ? c_.layout2dt(kConfirmLayout) : nullptr;
+        if (records == nullptr || records->empty()) return;
+        if (ui::Widget* title = Child(0)) title->SetText(c_.Text(records->front().textKey));
+        const std::vector<ui::Widget*> made = Build(ui, *this, *records, [](const assets::Ui2dtRecord& r, assets::UiLayoutNode& n) {
+            if (r.className == "CIFSlotWithHelpEx") n.type = "CIFSlotWithHelp";
+        });
+        for (std::size_t i = 0; i < records->size(); ++i) {
+            const assets::Ui2dtRecord& r = (*records)[i];
+            if (r.id == 52) made[i]->SetText(c_.Text("UIIT_STT_QUESTREWARD_MSG02"));
+            if (r.id == 7) (confirm_ = made[i])->SetText(c_.Text("UIIT_CTL_CONFIRM"));
+            if (r.id == 8) (cancel_ = made[i])->SetText(c_.Text("UIIT_CTL_CANCEL"));
+            if (r.id == 204) scroll_ = made[i];
+            if (r.className == "CIFSlotWithHelpEx") {
+                if (auto* slot = ui::As<ui::Slot>(made[i])) {
+                    slot->pickable = false;
+                    icons_.push_back({r.id, slot});
+                }
+            }
+        }
+        std::sort(icons_.begin(), icons_.end(), [](const auto& a, const auto& b) { return a.first < b.first; }); // 26..30 in order
+    }
+
+    // The items picked, five to a page (the first page; ours: no quest lets choose more than five).
+    void Show(std::uint32_t quest, std::uint32_t npc, const std::vector<std::uint8_t>& picked) {
+        quest_ = quest;
+        npc_ = npc;
+        picked_ = picked;
+        const game::QuestDef* q = DefOf(c_, quest);
+        if (scroll_ != nullptr) scroll_->visible = picked.size() > icons_.size();
+        for (std::size_t i = 0; i < icons_.size(); ++i) {
+            ui::Slot* slot = icons_[i].second;
+            const std::size_t index = i < picked.size() ? picked[i] : ~std::size_t{0};
+            const bool has = q != nullptr && index < q->reward.items.size();
+            const assets::ItemRow* row = has && c_.items != nullptr ? c_.items->Find(std::string_view(q->reward.items[index].item)) : nullptr;
+            slot->icon = row != nullptr ? "icon\\" + row->iconPath : std::string();
+            slot->count = has ? int(q->reward.items[index].count) : 0;
+            slot->tooltipLines = [this, row, index, q] {
+                if (row == nullptr || q == nullptr) return std::vector<ui::TooltipLine>{};
+                game::ItemInstance item;
+                item.refId = row->refObjId;
+                item.count = std::uint16_t(q->reward.items[index].count);
+                return ItemTooltip(*row, item, c_);
+            };
+        }
+    }
+
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind != ui::Notice::Kind::Clicked || n.source == nullptr) return ui::MainFrame::OnNotice(n);
+        if (n.source == confirm_) {
+            // The reward taken: the hand-in with the items picked, both windows closed.
+            if (c_.questRequest) c_.questRequest(proto::QuestHandIn::kId, proto::Encode(proto::QuestHandIn{npc_, quest_, picked_}));
+            if (c_.hud != nullptr) {
+                c_.hud->Hide(hud::kQuestRewardConfirm);
+                c_.hud->Hide(hud::kQuestReward);
+            }
+            return true;
+        }
+        if (n.source == cancel_) {
+            if (c_.hud != nullptr) c_.hud->Hide(hud::kQuestRewardConfirm);
+            return true;
+        }
+        return ui::MainFrame::OnNotice(n);
+    }
+
+private:
+    HudContext& c_;
+    ui::Widget *confirm_ = nullptr, *cancel_ = nullptr, *scroll_ = nullptr;
+    std::vector<std::pair<int, ui::Slot*>> icons_;
     std::uint32_t quest_ = 0, npc_ = 0;
     std::vector<std::uint8_t> picked_;
 };
@@ -509,6 +616,20 @@ std::optional<assets::UiLayoutNode> RootNode(const HudContext& c, const char* la
     return node;
 }
 
+void OpenRewardConfirm(HudContext& c, std::uint32_t quest, std::uint32_t npc, const std::vector<std::uint8_t>& picked) {
+    ui::Interface* ui = c.hud != nullptr ? c.hud->interface() : nullptr;
+    if (ui == nullptr) return;
+    ui::Widget* w = ui->Window(hud::kQuestRewardConfirm);
+    if (w == nullptr) {
+        const auto node = RootNode(c, kConfirmLayout, "CNIFQuestReward_ConfirmWnd", hud::kQuestRewardConfirm);
+        if (!node) return;
+        w = ui->Open(*node);
+    } else {
+        c.hud->Show(hud::kQuestRewardConfirm);
+    }
+    if (auto* confirm = dynamic_cast<QuestRewardConfirm*>(w)) confirm->Show(quest, npc, picked);
+}
+
 } // namespace
 
 std::vector<ui::Widget*> Build2dt(ui::Interface& ui, ui::Widget& root, const std::vector<assets::Ui2dtRecord>& records,
@@ -630,6 +751,7 @@ void RegisterQuestWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CNIFQuest", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<QuestListWindow>(n, *c); });
     ui.Register("CNIFQuestPage", [](const assets::UiLayoutNode& n) { return std::make_unique<QuestPage>(n); });
     ui.Register("CNIFQuestReward", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<QuestRewardWindow>(n, *c); });
+    ui.Register("CNIFQuestReward_ConfirmWnd", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<QuestRewardConfirm>(n, *c); });
     ui.Register("CNIFMiniQuestWnd", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<QuestQuickWindow>(n, *c); });
 }
 
@@ -655,6 +777,10 @@ void OpenQuestReward(HudContext& c, std::uint32_t quest, std::uint32_t npc) {
         c.hud->Show(hud::kQuestReward);
     }
     if (auto* reward = dynamic_cast<QuestRewardWindow*>(w)) reward->Show(quest, npc);
+}
+
+void OpenQuestRewardConfirm(HudContext& c, std::uint32_t quest, std::uint32_t npc, const std::vector<std::uint8_t>& picked) {
+    OpenRewardConfirm(c, quest, npc, picked);
 }
 
 bool PickQuestReward(HudContext& c, const std::string& item) {
