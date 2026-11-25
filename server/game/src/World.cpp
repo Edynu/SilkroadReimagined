@@ -1392,6 +1392,13 @@ WorldStats World::TakeStats() {
 
 WorldClock::time_point World::NextTick() const { return s_->started ? s_->nextTick : WorldClock::now(); }
 
+bool World::Turn(std::uint32_t entity, float yaw) {
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end() || !it->second.placed || it->second.moving) return false;
+    it->second.yaw = yaw;
+    return true;
+}
+
 std::optional<World::Place> World::Where(std::uint32_t entity) const {
     const auto it = s_->entities.find(entity);
     if (it == s_->entities.end() || !it->second.placed) return std::nullopt;

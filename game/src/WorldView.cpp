@@ -149,6 +149,12 @@ void WorldView::Apply(const TitleEvent& event) {
         }
     } else if (const auto* m = std::get_if<proto::EntityDamaged>(&event)) {
         if (const auto it = entities_.find(m->target); it != entities_.end()) it->second.look.hp = m->hp;
+    } else if (const auto* m = std::get_if<proto::EntityTurned>(&event)) {
+        // A turn where it stands (a walker's leg keeps the facing of its way).
+        if (const auto it = entities_.find(m->entity); it != entities_.end() && !it->second.moving) {
+            it->second.yaw = proto::YawOf(m->heading);
+            it->second.turnTo = 0;
+        }
     } else if (const auto* m = std::get_if<proto::EntitySwing>(&event)) {
         // A swing turns the attacker toward its target: now when it stands, else when its walk stops.
         if (const auto a = entities_.find(m->attacker); a != entities_.end() && m->target != m->attacker) {

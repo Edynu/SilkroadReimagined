@@ -11814,6 +11814,15 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                     }
                 }
                 return;
+            case proto::Turn::kId:
+                // A turn where it stands (toward an NPC it talks to, an item it picks up in reach): kept, and told to
+                // those who see it. Not from the dead, the knocked down, the frozen, asleep or stunned, nor a walker.
+                if (proto::Turn turn; decode(turn) && player.entity != 0 && !player.dead) {
+                    if (player.knocked != game::Knock::None && Clock::now() < player.knockedUntil) return;
+                    if (player.combat.states.Locked()) return;
+                    if (world->Turn(player.entity, proto::YawOf(turn.heading))) Broadcast(player.entity, proto::EntityTurned{player.entity, turn.heading});
+                }
+                return;
             case proto::WorldLeave::kId: return LeaveWorld(peer.id, true);
             case proto::ChatSend::kId:
                 if (proto::ChatSend send; decode(send) && player.entity != 0) Chat(peer, player, send);

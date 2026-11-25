@@ -163,6 +163,40 @@ struct MoveToward {
     }
 };
 
+// A facing on the wire: the full turn in 65,536 steps (the original's turn messages carry it so), from a yaw (radians,
+// atan2(dx, dz)) and back.
+inline std::uint16_t HeadingOf(float yaw) {
+    constexpr float kTurn = 6.28318531f;
+    float t = std::fmod(yaw, kTurn);
+    if (t < 0.0f) t += kTurn;
+    return std::uint16_t(std::lround(t / kTurn * 65536.0f) & 0xFFFF);
+}
+inline float YawOf(std::uint16_t heading) { return float(heading) / 65536.0f * 6.28318531f; }
+
+// The player turned where it stands, toward what it acts on in reach with no walk and no swing (an NPC's talk, an
+// item's pick-up): its new facing (the original's turn, sent from 1 degree on). The server keeps it for those who come
+// into sight and tells those who see the player (EntityTurned); a walk's leg sets its own.
+struct Turn {
+    static constexpr MessageId kId = 0x1016;
+    std::uint16_t heading = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("heading", heading);
+    }
+};
+
+// Another turned where it stands (Turn).
+struct EntityTurned {
+    static constexpr MessageId kId = 0x1017;
+    std::uint32_t entity = 0;
+    std::uint16_t heading = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("entity", entity);
+        v("heading", heading);
+    }
+};
+
 namespace detail {
 
 // A leg's values packed (EntityMoved): x and z (0 to 2048) in 1/32ths, y (-2048 to 2048) in 1/16ths, the speed (0 to

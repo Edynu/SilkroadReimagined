@@ -2196,11 +2196,27 @@ bool PlayScreen::StandingNear(std::uint32_t entity, float reach) const {
     return std::hypot(a.x - b.x, a.z - b.z) <= reach;
 }
 
+void PlayScreen::FaceToward(std::uint32_t target) {
+    if (replay_ || !shared_ || !shared_->session || OwnMount() != 0) return; // a rider turns with his mount
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    const game::WorldView::Entity* it = view_.Find(target);
+    if (self == nullptr || it == nullptr || self->moving || IsDead(*self)) return;
+    const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat(it->position);
+    if (std::hypot(b.x - a.x, b.z - a.z) < 0.5) return;
+    const float yaw = float(std::atan2(b.x - a.x, b.z - a.z));
+    float diff = std::fmod(std::abs(yaw - self->yaw), 6.2831853f);
+    if (diff > 3.1415926f) diff = 6.2831853f - diff;
+    if (diff < 0.017453292f) return; // under a degree: as it stands
+    view_.Apply(proto::EntityTurned{view_.Self(), proto::HeadingOf(yaw)});
+    shared_->session->Turn(yaw);
+}
+
 void PlayScreen::Npcs(double now) {
     AskGaps();
     if (pendingNpc_ == 0 || replay_ || heldMove_) return; // its walk kept through a swing: not there yet
     // Near and standing: its menu (a gap's or an exit's question); given up when the walk did not get there.
     if (StandingNear(pendingNpc_, UseReach(pendingNpc_, kNpcReach))) {
+        FaceToward(pendingNpc_);
         if (UsedNear(pendingNpc_)) UseAt(pendingNpc_);
         else shared_->session->TalkToNpc(pendingNpc_);
         pendingNpc_ = 0;
@@ -2716,7 +2732,10 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
         // (as the original's does), behind a swing or a cast running. Two commands held: not sent.
         pendingNpc_ = 0;
         pendingGate_ = 0;
-        if (actionsHeld_ < 2) shared_->session->PickUp(item);
+        if (actionsHeld_ < 2) {
+            if (StandingNear(item, 15.0f)) FaceToward(item); // picked up from where it stands (the server's reach)
+            shared_->session->PickUp(item);
+        }
     }
     const assets::TeleportGate* gate = replay_ || npc != 0 || monster != 0 || other != 0 ? nullptr : GateUnder(up.x, up.y, width, height, ground ? &target : nullptr);
     lastClick_ = item != 0 ? "an item" : monster != 0 ? "a monster" : npc != 0 ? "an NPC" : other != 0 ? "a player" : gate != nullptr ? "a gate" : ground ? "the ground" : "nothing";

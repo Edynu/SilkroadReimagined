@@ -186,6 +186,9 @@ public:
     // than `most`), its observers told it stands there; where it ends (none: not in the world, or no
     // way on the navigation).
     std::optional<game::proto::WorldPosition> Blink(std::uint32_t entity, const game::proto::WorldPosition& to, float most);
+    // A turn where it stands (proto::Turn): its facing kept for those who come into sight; false when it is not in
+    // the world or walks (a leg faces its way).
+    bool Turn(std::uint32_t entity, float yaw);
     // Runs the ticks due by `now`, then works out what each player is told.
     void Update(WorldClock::time_point now, std::vector<WorldMessage>& out);
     WorldClock::time_point NextTick() const;

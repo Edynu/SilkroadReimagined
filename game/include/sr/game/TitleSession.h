@@ -47,7 +47,7 @@ struct TitleError {
 
 using TitleEvent = std::variant<proto::ServerList, proto::Notices, proto::LoginResult, proto::LobbyEntered, proto::CharacterList,
                                 proto::LobbyResult, TitleError, proto::WorldEntered, proto::WorldLeft, proto::EntityAppeared,
-                                proto::EntityGone, proto::EntityMoved, proto::GateRefused, proto::LogoutAnswer,
+                                proto::EntityGone, proto::EntityMoved, proto::EntityTurned, proto::GateRefused, proto::LogoutAnswer,
                                 proto::QuickSlotList, proto::ChatAnswer, proto::ChatLine, proto::InventoryList, proto::ItemMoved,
                                 proto::EquipmentChanged, proto::GateMenu, proto::ReturnPointSet, proto::GoldChanged,
                                 proto::ReturnStarted, proto::ReturnCancelled, proto::BuffAdded, proto::BuffRemoved,
@@ -137,6 +137,8 @@ public:
     void EnterWorld();
     // `toward`: a click on the sky, that way until something stops the walker (proto::MoveToward).
     void MoveTo(const proto::WorldPosition& target, bool toward = false);
+    // The player turned where it stands (proto::Turn).
+    void Turn(float yaw);
     void LeaveWorld();
     // The system menu's Restart / Exit: the server counts down, then the character leaves.
     void RequestLogout(proto::LogoutKind kind);

@@ -299,6 +299,9 @@ private:
     std::uint32_t NpcUnder(float x, float y, float width, float height, float* distance = nullptr, bool* centre = nullptr) const;
     void Npcs(double now);
     bool StandingNear(std::uint32_t entity, float reach) const;
+    // The player turned where it stands toward what it acts on in reach with no walk and no swing (an NPC's talk, an
+    // item's pick-up): at once on its own screen, and told to the server (proto::Turn) from a degree on, as the original's.
+    void FaceToward(std::uint32_t target);
     double pendingUntil_ = 0; // a clicked NPC or item is given up after this
     // Items on the ground (C7i): their models kept with the view, the one clicked picked up once the
     // character stands near it, their names while the key is held.

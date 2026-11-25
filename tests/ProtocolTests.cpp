@@ -205,6 +205,24 @@ TEST_CASE("Protocol: the version check") {
     CHECK(welcomeBack.reason == refused.reason);
 }
 
+TEST_CASE("Protocol: a facing as the full turn in 65,536 steps, either way round") {
+    CHECK(HeadingOf(0.0f) == 0);
+    CHECK(HeadingOf(3.1415926f) == 32768);
+    CHECK(HeadingOf(-1.5707963f) == 49152);     // a quarter left is three quarters right
+    CHECK(HeadingOf(6.2831853f + 0.0f) == 0);   // a whole turn wraps
+    CHECK(std::abs(YawOf(16384) - 1.5707963f) < 1e-5f);
+    for (float yaw : {0.1f, 1.0f, 2.5f, 4.0f, 6.0f}) CHECK(std::abs(YawOf(HeadingOf(yaw)) - yaw) < 6.2831853f / 65536.0f);
+    Turn turn{HeadingOf(1.0f)};
+    Turn back;
+    REQUIRE(Decode(Encode(turn), back));
+    CHECK(back.heading == turn.heading);
+    EntityTurned other{0x10000007, 12345};
+    EntityTurned otherBack;
+    REQUIRE(Decode(Encode(other), otherBack));
+    CHECK(otherBack.entity == other.entity);
+    CHECK(otherBack.heading == 12345);
+}
+
 TEST_CASE("Protocol: a leg's places go packed, those out of range as floats") {
     // In range: within 1/64 of a unit across, 1/32 up, 1/200 of the speed; 23 bytes.
     EntityMoved leg{0x10000005, {25000, 1220.31f, -32.62f, 1123.66f}, {25000, 1300.0f, -30.0f, 1180.5f}, 47.3f};

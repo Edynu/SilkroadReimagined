@@ -242,6 +242,38 @@ TEST_CASE("Game server: an emote is told as it is to those who see the player an
     s.game.Stop();
 }
 
+TEST_CASE("Game server: a turn where the player stands, seen by those around and by newcomers; none from the dead") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    ActionServer s(t);
+    s.config.devCommands = true;
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    auto a = s.Make("Turner", 30, 1000);
+    auto b = s.Make("Watcher", 30, 1040);
+    proto::EntityAppeared seen;
+    REQUIRE(ExpectAbout(*b.client, a.entered.entity, seen));
+
+    // A quarter turn: the other sees it.
+    const std::uint16_t quarter = proto::HeadingOf(1.5707963f);
+    CHECK(quarter == 16384);
+    a.client->Send(proto::Turn{quarter});
+    proto::EntityTurned turned;
+    REQUIRE(ExpectAbout(*b.client, a.entered.entity, turned));
+    CHECK(turned.heading == quarter);
+
+    // One who comes into sight later sees it facing that way.
+    auto c = s.Make("Latecomer", 30, 1020);
+    proto::EntityAppeared late;
+    REQUIRE(ExpectAbout(*c.client, a.entered.entity, late));
+    CHECK(std::abs(late.yaw - 1.5707963f) < 0.001f);
+
+    // Not from the dead.
+    a.client->Send(proto::DevDie{});
+    a.client->Send(proto::Turn{proto::HeadingOf(3.1415926f)});
+    CHECK_FALSE(ExpectAbout(*b.client, a.entered.entity, turned, 1500ms));
+    s.game.Stop();
+}
+
 TEST_CASE("Game server: free PvP: a team after its wait, seen by others; the original's refusals; foes by team") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);

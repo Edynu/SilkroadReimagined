@@ -84,6 +84,8 @@ void TitleSession::MoveTo(const proto::WorldPosition& target, bool toward) {
     }
 }
 
+void TitleSession::Turn(float yaw) { Send(game_, proto::Turn{proto::HeadingOf(yaw)}); }
+
 void TitleSession::LeaveWorld() { Send(game_, proto::WorldLeave{}); }
 
 void TitleSession::RequestLogout(proto::LogoutKind kind) { Send(game_, proto::LogoutRequest{kind}); }
