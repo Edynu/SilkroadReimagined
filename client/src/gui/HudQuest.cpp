@@ -361,6 +361,13 @@ public:
                 HudContext* c = &c_;
                 const char* warning = q->giveUpLocks ? "UIIT_MSG_QUEST_GIVEUP_WINDOW_1" : "UIIT_MSG_QUEST_GIVEUP_WINDOW_2";
                 c_.hud->Confirm("UIIT_STT_AGREEMENT_BOX", {c_.Text(warning)}, [c, quest](bool yes) {
+                    // Not while an NPC's talk is open: the original's server refuses it (its code 5, "NPC chat window
+                    // is on. Therefore unable to process other requests."); ours never hears of the talk's end, so the
+                    // client keeps the rule.
+                    if (yes && c->hud != nullptr && c->hud->Shown(hud::kNpc)) {
+                        if (c->systemLine) c->systemLine(c->Text("UIIT_STT_QUEST_GIVEUP_1"));
+                        return;
+                    }
                     if (yes && c->questRequest) c->questRequest(proto::QuestAbandon::kId, proto::Encode(proto::QuestAbandon{quest}));
                     if (yes && c->hud != nullptr) c->hud->Hide(hud::kQuestReward);
                 });

@@ -75,7 +75,9 @@ void PlayScreen::HandleQuest(ScreenContext& context, const proto::QuestEvent& ev
         case Kind::Refused:
             if (line.code == proto::QuestCode::TooMany) post(data.Text("SN_TALK_COMMON_MAXQUEST"));
             else if (line.code == proto::QuestCode::BagFull) post(data.Text("UIIT_MSG_STRGERR_INVENTORY_FULL"));
-            else if (line.code == proto::QuestCode::BadChoice) post(data.Text("UIIT_STT_QUESTREWARD_MSG04"));
+            // The reward refused by the server (the reward window checks the choice first, MSG01 / MSG04): the
+            // original's answer to the choice, "The reward was not given due to an unknown error."
+            else if (line.code == proto::QuestCode::BadChoice) post(data.Text("UIIT_STT_QUESTREWARD_ERROR"));
             core::LogInfo("game: quest {}: refused ({})", line.quest, int(line.code));
             break;
         case Kind::Rewarded: {
