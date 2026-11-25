@@ -587,10 +587,10 @@ void PlayScreen::ItemGlows(ScreenContext& context) {
         for (const gfx::EffectSystem::Handle h : glow.effects) effects.Stop(h);
         glow.effects.clear();
     };
-    // Those no longer shown, or shown in another slot: their glows go with them.
+    // Those no longer shown, shown in another slot or hidden by a quest scene: their glows go with them.
     for (auto it = itemGlows_.begin(); it != itemGlows_.end();) {
         const auto slot = slots_.find(it->first);
-        if (slot != slots_.end() && slot->second == it->second.slot) {
+        if (slot != slots_.end() && slot->second == it->second.slot && !SceneHides(it->first)) {
             ++it;
             continue;
         }
@@ -601,7 +601,7 @@ void PlayScreen::ItemGlows(ScreenContext& context) {
     std::vector<std::uint8_t> plus;
     for (const auto& [id, slot] : slots_) {
         const game::WorldView::Entity* e = view_.Find(id);
-        if (e == nullptr || e->kind != proto::EntityKind::Character || IsNpc(*e)) continue; // one fading out keeps what it had
+        if (e == nullptr || e->kind != proto::EntityKind::Character || IsNpc(*e) || SceneHides(id)) continue; // one fading out keeps what it had
         auto known = itemGlows_.find(id);
         if (known != itemGlows_.end() && known->second.lookVersion == e->lookVersion) continue;
         // Dressed anew: the old glows go at once, the new ones come when the model wearing them shows.

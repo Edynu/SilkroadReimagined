@@ -415,7 +415,11 @@ private:
         bool hideSelf = false;
         bool bars = false;
         std::string name;              // its script's name
-        std::minstd_rand random{std::random_device{}()}; // its #rand(a,b)
+        // S_ObjectCreateIndex's crowd: the players there (the player, its party, the others in sight), the next to place.
+        std::vector<std::uint32_t> crowd;
+        std::size_t crowdNext = 0;
+        bool crowdListed = false;
+        bool castsPlayers = false; // it has S_ObjectCreateIndex: the players its crowd, the player shown
         GameAudio* music = nullptr;    // its music started there (S_SetBGM): the area's again at its end
         float barsSeconds = 2.0f, barsHeight = 120.0f;
         double barsShown = 0; // 0..1, sliding
@@ -440,7 +444,8 @@ private:
             bool hidden = false; // *SCR_OBJ_NODRAW
             bool noIdle = false; // *SCR_OBJ_NOIDLE: a clip played through holds its last frame
             double clipFrom = 0; // S_ObjectAniToName's clip started then (scene time)
-            std::uint32_t figure = 0; // S_ObjectCreateIndex's player figure (its RefObjID), dressed by S_ObjectEquipSetIndex
+            std::uint32_t person = 0; // S_ObjectCreateIndex's: the player (its entity) it shows
+            bool glowing = false;     // its copy wears the player's glows
             std::vector<std::uint32_t> effects; // S_DecoEftAdd's on its bones, until S_DecoEftClear
         };
         std::map<std::string, Placed> looks;
@@ -478,6 +483,8 @@ private:
     // A clip for it from now (scene time `at`): a state of a set (empty: its stance; WorldScreen::kClipFile: a file).
     static void PlayClip(QuestSceneRun::Placed& placed, std::string set, std::uint32_t state, float at);
     std::size_t QuestSceneSlot(const std::string& name) const; // StageEffects::kNone: not shown
+    // A walker the quest scene hides (the player under INVISIBLE_USER, a player shown in its crowd): its glows off.
+    bool SceneHides(std::uint32_t entity) const;
     struct CameraShake {
         double from = 0, until = 0, next = 0;
         float amplitude = 0, step = 0.02f;

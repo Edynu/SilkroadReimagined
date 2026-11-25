@@ -4,9 +4,9 @@
 // (S_CameraShake), the player hidden (S_Start's INVISIBLE_USER) and the names left out, the cinema's bars (S_SubTitle
 // STITLE_START / STITLE_FINISH), its sounds (S_SoundPlay), its characters (S_ObjectCreate in a free stage slot, its
 // animation by S_ObjectAniToIndex, gone at S_ObjectRelease), over at S_End.
-// The scene's music (S_SetBGM; the Roc's own track for the name it gives). A crowd of adventurers: S_ObjectCreateIndex
-// (a player figure by an index) dressed by S_ObjectEquipSetIndex (a weapon, a shield, armour by level and kinds, as 1.188
-// names them). Not shown yet (logged once): the berserk quests' shots (S_DecoSkillTarget).
+// The scene's music (S_SetBGM, and a scene sound naming a Music.pk2 track: the Roc's own track). The Roc's crowd of
+// adventurers (S_ObjectCreateIndex): the players there in their own looks. Not shown yet (logged once): the berserk
+// quests' shots (S_DecoSkillTarget).
 // The screen washed with a colour: S_Lighting (a flash, a dip to black before a cut).
 // Its texts on the screen: S_StaticCreateEx / S_StaticRelease (the dialogue's lines in the White Viper's scenes).
 // Its characters, its own and the player (*player, over where the game has it until S_End): S_Teleport, S_ObjectTurn,
@@ -16,15 +16,14 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <format>
+#include <optional>
 
 #include "audio/GameAudio.h"
 #include "play/PlayScreen.h"
-#include "sr/assets/Dress.h"
 #include "sr/assets/FileSystem.h"
 #include "sr/assets/SkillAnimation.h"
 #include "sr/core/Log.h"
+#include "sr/core/Path.h"
 #include "sr/core/Text.h"
 #include "title/CameraKeys.h"
 
@@ -36,7 +35,6 @@ namespace {
 
 constexpr std::uint32_t kSceneStand = 0, kSceneWalk = 1, kSceneRun = 7; // animation states (STAND1, WALK, RUN)
 constexpr float kDegrees = 3.14159265f / 180.0f;
-constexpr std::uint8_t kSceneShape = 0x22; // a crowd figure's height and build: the middle ones
 constexpr float kSceneGroundReach = 30.0f; // how far over a scene character's height its floor is looked for (ours)
 
 // A place of the script, <sectorX> <sectorY> <x> <y> <z> from argument `i`, against the world's origin region.
@@ -48,55 +46,6 @@ glm::vec3 ScenePlace(const assets::SceneCommand& c, std::size_t i, int originX, 
 // The region of the script's <sectorX> <sectorY> from argument `i`.
 std::uint16_t SceneRegion(const assets::SceneCommand& c, std::size_t i) {
     return std::uint16_t((int(c.Number(i)) & 0xFF) | (int(c.Number(i + 1)) & 0xFF) << 8);
-}
-
-// A number of the script, or "#rand(a,b)": one from a to b.
-int SceneNumber(const std::string& v, std::minstd_rand& random) {
-    int a = 0, b = 0;
-    if (std::sscanf(v.c_str(), "#rand(%d,%d)", &a, &b) == 2) {
-        if (b < a) std::swap(a, b);
-        return std::uniform_int_distribution<int>(a, b)(random);
-    }
-    return std::atoi(v.c_str());
-}
-
-// The player figures (characterdata 1.1, CHAR_CH_* and CHAR_EU_*, in service) by RefObjID: S_ObjectCreateIndex's
-// index. 1.188 takes the index as a RefObjID, and none of 1..50 is one (its crowd never shows); ours takes the n-th
-// figure (the user's call, 2026-11-25).
-std::vector<const assets::ObjectRow*> PlayerFigures(const assets::CharacterTable& characters) {
-    std::vector<const assets::ObjectRow*> out;
-    for (const auto& [codename, row] : characters.rows()) {
-        if (row.inService && row.typeId[0] == 1 && row.typeId[1] == 1 && (codename.starts_with("CHAR_CH_") || codename.starts_with("CHAR_EU_"))) {
-            out.push_back(&row);
-        }
-    }
-    std::sort(out.begin(), out.end(), [](const auto* a, const auto* b) { return a->refObjId < b->refObjId; });
-    return out;
-}
-
-// S_ObjectEquipSetIndex's gear as 1.188 names it: the degree by the level (its table of each degree's first level), a
-// weapon of the race's kind (China 2..6, Europe 7..15, else one at random) and a shield with the one-handed ones (2, 3,
-// 7, 15), rare when asked; armour of the kind (1 clothes, 2 light, 3 heavy), the head piece CA or HA at random.
-std::vector<std::string> CrowdGear(bool europe, bool man, int level, int armour, int weapon, bool rare, std::minstd_rand& random) {
-    constexpr int kDegreeFrom[] = {1, 8, 16, 24, 32, 42, 52, 64, 76, 90, 104, 120, 141, 164};
-    int degree = 1;
-    while (degree < 14 && level >= kDegreeFrom[degree]) ++degree;
-    const char* race = europe ? "EU" : "CH";
-    if (europe ? (weapon < 7 || weapon > 15) : (weapon < 2 || weapon > 6)) {
-        weapon = europe ? std::uniform_int_distribution<int>(7, 15)(random) : std::uniform_int_distribution<int>(2, 6)(random);
-    }
-    constexpr const char* kWeapons[] = {"SWORD", "BLADE", "SPEAR", "TBLADE", "BOW", "SWORD", "TSWORD", "AXE", "DARKSTAFF", "TSTAFF", "CROSSBOW", "DAGGER", "HARP", "STAFF"};
-    const char* tail = rare ? "_RARE" : "";
-    std::vector<std::string> out{std::format("ITEM_{}_{}_{:02}_A{}", race, kWeapons[weapon - 2], degree, tail)};
-    if (weapon == 2 || weapon == 3 || weapon == 7 || weapon == 15) out.push_back(std::format("ITEM_{}_SHIELD_{:02}_A{}", race, degree, tail));
-    if (armour >= 1 && armour <= 3) {
-        const char* kind = armour == 1 ? "CLOTHES" : armour == 2 ? "LIGHT" : "HEAVY";
-        const char* head = std::uniform_int_distribution<int>(0, 1)(random) == 1 ? "HA" : "CA";
-        for (const char* piece : {head, "SA", "BA", "LA", "AA", "FA"}) {
-            out.push_back(std::format("ITEM_{}_{}_{}_{:02}_{}_A", race, man ? 'M' : 'W', kind, degree, piece));
-        }
-    }
-    return out;
 }
 
 // The scene's POS_ anchors: POS_LEFT / TOP 0, POS_CENTER 1, POS_RIGHT / BOTTOM 2.
@@ -117,6 +66,7 @@ void PlayScreen::PlayQuestScene(ScreenContext& context, const std::string& name)
     run.active = true;
     run.started = context.time;
     run.name = name;
+    run.castsPlayers = std::any_of(run.commands.begin(), run.commands.end(), [](const auto& c) { return c.verb == "S_ObjectCreateIndex"; });
     scene_ = std::move(run);
     core::LogInfo("game: quest scene {} ({} commands)", name, scene_.commands.size());
 }
@@ -132,6 +82,9 @@ void PlayScreen::EndQuestScene() {
             if (slot < slotUsed_.size()) slotUsed_[slot] = false;
         }
         if (scene_.music != nullptr) scene_.music->SceneMusic({});
+        for (const std::uint32_t person : scene_.crowd) {
+            if (const std::size_t own = SlotOf(person); own != StageEffects::kNone) world_->SetStageOpacity(own, 1.0f);
+        }
         // The player back where the game has it (PlaceWalkers puts it there again), shown.
         if (const std::size_t self = SlotOf(view_.Self()); self != StageEffects::kNone) world_->SetStageOpacity(self, 1.0f);
     }
@@ -156,7 +109,8 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
         const assets::SceneCommand& c = scene_.commands[scene_.next++];
         const auto arg = [&](std::size_t i) { return i < c.args.size() ? c.args[i] : std::string(); };
         if (c.verb == "S_Start") {
-            scene_.hideSelf = arg(1) == "INVISIBLE_USER";
+            // INVISIBLE_USER hides the player, but not in a scene that casts the players (its crowd): it stands in front.
+            scene_.hideSelf = arg(1) == "INVISIBLE_USER" && !scene_.castsPlayers;
         } else if (c.verb == "S_End") {
             EndQuestScene();
             return;
@@ -206,7 +160,16 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
             shake_.step = std::max(0.005f, c.Number(3, 10.0f) / 1000.0f);
             shake_.next = context.time;
         } else if (c.verb == "S_SoundPlay") {
-            if (context.audio != nullptr && world_) {
+            // A music track the script names by a path the game lacks (the Roc's "Prim\Snd\Mob_Roc\roc_entrance.ogg" at
+            // 3 s): the scene's music from then, as Music.pk2 has it.
+            const std::string sound = arg(0);
+            const std::size_t cut = sound.find_last_of("\\/");
+            const std::string track = cut == std::string::npos ? sound : sound.substr(cut + 1);
+            if (context.audio != nullptr && sound.size() > 4 && core::NormalizeAssetPath(sound).ends_with(".ogg") && !context.files.Exists(sound) &&
+                context.files.Exists(track)) {
+                context.audio->SceneMusic(track);
+                scene_.music = context.audio;
+            } else if (context.audio != nullptr && world_) {
                 assets::CameraKey key;
                 if (QuestSceneCamera(t, key)) {
                     const glm::vec3 at(key.position[0] + float(key.sectorX - originX_) * assets::kRegionSize, key.position[1],
@@ -215,46 +178,64 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
                 }
             }
         } else if (c.verb == "S_ObjectCreate" || c.verb == "S_ObjectCreateIndex") {
-            // <name> <codename> <sectorX> <sectorY> <x> <y> <z> <yaw (degrees)> <shown>; CreateIndex: an index (1-based)
-            // of the player figures instead of the codename, standing bare until S_ObjectEquipSetIndex dresses it.
-            const bool figure = c.verb == "S_ObjectCreateIndex";
+            // <name> <codename> <sectorX> <sectorY> <x> <y> <z> <yaw (degrees)> <shown>. CreateIndex (the Roc's crowd
+            // of adventurers; its index 1.188 takes as a RefObjID none of 1..50 is, so its crowd never shows): ours the
+            // players there, each place the next of them in their own look and glows (its party first, then the others
+            // in sight), their own figures hidden while the scene shows them; no one left, the place stays empty. The
+            // player itself is shown then, at its own place in the scene (in front: S_Teleport *player), though the
+            // script hides it (the user's call, 2026-11-25).
+            const bool crowd = c.verb == "S_ObjectCreateIndex";
             const assets::ObjectRow* row = nullptr;
-            if (tables_ && tables_->Usable()) {
-                if (figure) {
-                    const auto figures = PlayerFigures(tables_->characters);
-                    const int index = SceneNumber(arg(1), scene_.random);
-                    if (!figures.empty()) row = figures[std::size_t(std::max(1, index) - 1) % figures.size()];
-                } else {
-                    row = tables_->characters.Find(std::string_view(arg(1)));
+            std::optional<WorldScreen::StageLook> personLook;
+            std::uint32_t person = 0;
+            if (crowd) {
+                if (!scene_.crowdListed) {
+                    scene_.crowdListed = true;
+                    const auto add = [&](std::uint32_t id) {
+                        const game::WorldView::Entity* e = id != 0 ? view_.Find(id) : nullptr;
+                        if (e != nullptr && id != view_.Self() && IsPlayer(*e) && std::find(scene_.crowd.begin(), scene_.crowd.end(), id) == scene_.crowd.end()) {
+                            scene_.crowd.push_back(id);
+                        }
+                    };
+                    for (const proto::PartyMemberRecord* m : player_.party.Others()) add(m->entity);
+                    std::vector<std::uint32_t> others;
+                    for (const auto& [id, e] : view_.Entities()) {
+                        if (IsPlayer(e)) others.push_back(id);
+                    }
+                    std::sort(others.begin(), others.end());
+                    for (const std::uint32_t id : others) add(id);
                 }
-            }
-            std::string model = row != nullptr && !figure ? assets::CharacterTable::ResolveModel(context.files, *row) : std::string();
-            WorldScreen::StageLook dressedLook;
-            if (row != nullptr && figure) {
-                assets::DressedCharacter dressed;
-                std::string error;
-                if (assets::Dress(context.files, tables_->characters, tables_->items, row->refObjId, {}, kSceneShape, dressed, error)) {
-                    model = dressed.Key();
-                    dressedLook.stance = dressed.stance;
-                    dressedLook.volume = dressed.volume;
-                    dressedLook.height = dressed.height;
+                while (!personLook && scene_.crowdNext < scene_.crowd.size()) {
+                    person = scene_.crowd[scene_.crowdNext++];
+                    const game::WorldView::Entity* e = view_.Find(person);
+                    if (const WorldScreen::StageLook* look = e != nullptr ? LookOf(context, *e) : nullptr) personLook = *look;
                 }
+                if (!personLook) {
+                    unshown("S_ObjectCreateIndex (no one left for its place)");
+                    continue;
+                }
+            } else if (tables_ && tables_->Usable()) {
+                row = tables_->characters.Find(std::string_view(arg(1)));
             }
+            const std::string model = crowd ? personLook->model : row != nullptr ? assets::CharacterTable::ResolveModel(context.files, *row) : std::string();
             const auto walkers = slotUsed_.begin() + std::ptrdiff_t(std::min(kWalkerSlots, slotUsed_.size()));
             const auto free = std::find(slotUsed_.begin(), walkers, false);
             if (model.empty() || free == walkers || !world_) {
                 core::LogWarning("game: quest scene: {} ({}) not placed ({})", arg(0), arg(1),
-                                 row == nullptr ? "no such character" : model.empty() ? "no model" : "no free stage slot");
+                                 !crowd && row == nullptr ? "no such character" : model.empty() ? "no model" : "no free stage slot");
                 continue;
             }
             *free = true;
             const std::size_t slot = std::size_t(free - slotUsed_.begin());
             WorldScreen::StageLook look{model};
-            look.height = float(row->scalePercent) / 100.0f;
-            if (figure) {
-                look.stance = dressedLook.stance;
-                look.volume = dressedLook.volume;
-                look.height = dressedLook.height;
+            if (crowd) {
+                look = *personLook;
+                look.state = kSceneStand;
+                look.clipSet.clear();
+                look.cycleSet.clear();
+                look.once = false;
+            } else {
+                look.height = float(row->scalePercent) / 100.0f;
             }
             const float x = c.Number(4) + float(int(c.Number(2)) - originX_) * assets::kRegionSize;
             const float z = c.Number(6) + float(int(c.Number(3)) - originY_) * assets::kRegionSize;
@@ -267,35 +248,12 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
             placed.x = x, placed.y = c.Number(5), placed.z = z, placed.yaw = yaw;
             placed.region = SceneRegion(c, 2);
             placed.placed = true;
-            placed.walkSpeed = row->walkSpeed, placed.runSpeed = row->runSpeed;
-            placed.figure = figure ? row->refObjId : 0;
+            if (row != nullptr) placed.walkSpeed = row->walkSpeed, placed.runSpeed = row->runSpeed;
+            placed.person = person;
             scene_.looks[arg(0)] = std::move(placed);
         } else if (c.verb == "S_ObjectEquipSetIndex") {
-            // <name> <level> <armour kind> <weapon kind> <rare>: a figure of S_ObjectCreateIndex dressed in that gear (its
-            // pieces the item data lacks left off).
-            QuestSceneRun::Placed* placed = QuestScenePlaced(arg(0));
-            const assets::ObjectRow* row = placed != nullptr && placed->figure != 0 && tables_ ? tables_->characters.Find(placed->figure) : nullptr;
-            if (row != nullptr) {
-                const bool europe = row->codename.starts_with("CHAR_EU_");
-                const bool man = row->codename.find("_MAN_") != std::string::npos;
-                const int level = SceneNumber(arg(1), scene_.random), armour = SceneNumber(arg(2), scene_.random);
-                const int weapon = SceneNumber(arg(3), scene_.random);
-                std::vector<std::uint32_t> worn;
-                for (const std::string& item : CrowdGear(europe, man, level, armour, weapon, SceneNumber(arg(4), scene_.random) != 0, scene_.random)) {
-                    if (const assets::ItemRow* i = tables_->items.Find(std::string_view(item))) worn.push_back(i->refObjId);
-                }
-                assets::DressedCharacter dressed;
-                std::string error;
-                if (assets::Dress(context.files, tables_->characters, tables_->items, row->refObjId, worn, kSceneShape, dressed, error, {}, &tables_->equipGlows,
-                                  tables_->visuals.Size() > 0 ? &tables_->visuals : nullptr)) {
-                    placed->look.model = dressed.Key();
-                    placed->look.stance = dressed.stance;
-                    placed->look.volume = dressed.volume;
-                    placed->look.height = dressed.height;
-                } else {
-                    core::LogWarning("game: quest scene: {} not dressed: {}", arg(0), error);
-                }
-            }
+            // <name> <level> <armour kind> <weapon kind> <rare>: 1.188 dresses its crowd's figure in gear of that level and
+            // those kinds; ours' crowd are the players there, in their own gear: nothing to change.
         } else if (c.verb == "S_ObjectAniToIndex") {
             // <name> <blend> <speed> *ANI_...: a state of its own set (*ANI_DIE1, *ANI_ATTREADY, ...); *ANI_EMOTION01..
             // the default set's animation 50 + n, as the emotes. Ours: at its own speed.
@@ -509,6 +467,15 @@ PlayScreen::QuestSceneRun::Placed* PlayScreen::QuestScenePlaced(const std::strin
     return &scene_.looks.emplace(name, std::move(placed)).first->second;
 }
 
+bool PlayScreen::SceneHides(std::uint32_t entity) const {
+    if (!scene_.active) return false;
+    if (entity == view_.Self()) return scene_.hideSelf;
+    for (const auto& [name, placed] : scene_.looks) {
+        if (placed.person == entity) return true;
+    }
+    return false;
+}
+
 std::size_t PlayScreen::QuestSceneSlot(const std::string& name) const {
     if (name == "*player") return SlotOf(view_.Self());
     const auto it = std::find_if(scene_.objects.begin(), scene_.objects.end(), [&](const auto& o) { return o.first == name; });
@@ -590,6 +557,22 @@ void PlayScreen::PlaceQuestSceneActors(ScreenContext& context) {
         }
         world_->SetStage(slot, look, placed.x, y, placed.z, placed.yaw);
         world_->SetStageOpacity(slot, placed.hidden ? 0.0f : 1.0f);
+        // A player in the crowd: its own figure hidden while its copy stands there, the copy wearing its glows once
+        // its model is in.
+        if (placed.person != 0) {
+            if (const std::size_t own = SlotOf(placed.person); own != StageEffects::kNone) world_->SetStageOpacity(own, 0.0f);
+            const game::WorldView::Entity* e = !placed.glowing && tables_ ? view_.Find(placed.person) : nullptr;
+            if (e != nullptr && world_->StageReady(slot)) {
+                placed.glowing = true;
+                std::vector<std::uint32_t> worn;
+                std::vector<std::uint8_t> plus;
+                for (const proto::EquippedItem& item : e->look.equipment) {
+                    worn.push_back(item.item);
+                    plus.push_back(item.plus);
+                }
+                for (const auto h : StageEffects::ItemGlows(*world_, slot, context.files, tables_->items, tables_->itemGlows, worn, plus)) placed.effects.push_back(h);
+            }
+        }
     }
 }
 
