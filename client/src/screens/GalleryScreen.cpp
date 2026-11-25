@@ -486,10 +486,11 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         const char* names[] = {"Gallery", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"};
         const char* titles[] = {"Founder", "Guard", "", "Scout", "", "", "", ""};
         const std::uint8_t positions[] = {game::kPositionCommander, game::kPositionDeputy, 0, game::kPositionEngineer, 0, 0, game::kPositionEngineer, 0};
+        const std::uint32_t warPoints[] = {360, 600, 120, 360, 0, 240, 0, 0}; // the war page's ranks: two share one
         for (std::uint32_t i = 0; i < 8; ++i) {
             g.members.push_back({i + 1, names[i], std::uint8_t(i == 0 ? game::kGuildMaster : game::kGuildMember), std::uint8_t(70 - i * 6),
                                  (8 - i) * 1'250, i == 0 ? game::kGuildPermAll : i == 1 ? 0x13u : 0u, titles[i], i % 2 ? 14875u : 1907u,
-                                 std::uint8_t(i < 5 ? 1 : 0), positions[i], i < 5 ? (5 - i) * 120 : 0});
+                                 std::uint8_t(i < 5 ? 1 : 0), positions[i], warPoints[i]});
         }
         sampleGuild_.Apply(game::proto::GuildEvent{g});
         game::proto::UnionInfo u;

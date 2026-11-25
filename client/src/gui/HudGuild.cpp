@@ -278,9 +278,9 @@ public:
 
     // 0 the guild's info, 1 its relations (the union), 2 its relations' hostile guilds (the wars).
     void ShowPage(int page) {
-        page_ = page;
         if (info_ != nullptr) info_->visible = page == 0;
         if (war_ != nullptr) war_->visible = page == 3;
+        if (page == 3 && page_ != 3) contributionSort_ = 0; // the war page shown: its list by name
         if (relations_ != nullptr) relations_->visible = page == 1 || page == 2;
         if (union_ != nullptr) union_->visible = page == 1;
         if (hostile_ != nullptr) hostile_->visible = page == 2;
@@ -288,6 +288,7 @@ public:
             ShowGrant(false);
             ShowNotice(false);
         }
+        page_ = page;
         static constexpr int kTabs[] = {72, 73, 74};
         const int tabPage = page == 2 ? 1 : page == 3 ? 2 : page; // the hostile guilds are the relations' second sub-page
         for (int i = 0; i < 3; ++i) {
@@ -407,6 +408,12 @@ public:
         }
         if (parent == relations_ && n.control == 88) {
             ShowPage(2);
+            return true;
+        }
+        // The contribution list's heads: by name (248), by rank (247), by points (63).
+        if (parent == war_ && (n.control == 248 || n.control == 247 || n.control == 63)) {
+            contributionSort_ = n.control == 248 ? 0 : n.control == 247 ? 1 : 2;
+            Refresh();
             return true;
         }
         for (std::size_t i = 0; i < warRows_.size(); ++i) {
@@ -745,9 +752,10 @@ private:
     }
     std::vector<const proto::UnionGuildRecord*> UnionRows() const { return SortedRows(c_.guild->Union().guilds, unionSort_); }
 
-    // The war status page (guild_w.2dt): the enemies, the selected one's war, and who
-    // of the guild has won it the most (their Contribution, highest first: ours, the list's source is
-    // not traced).
+    // The war status page (guild_w.2dt): the enemies, the selected one's war, and the guild's
+    // members with their war points (Contribution) and their rank by them: the most points first, equal
+    // points sharing a rank, the next points the next rank (1, 1, 2, ...). The list sorted by the head
+    // pressed: the name, the rank, the points (highest first); by the name when the page is shown.
     void RefreshWar() {
         if (war_ == nullptr || c_.guild == nullptr) return;
         const auto wars = SortedRows(c_.guild->Wars().wars, 0);
@@ -781,11 +789,19 @@ private:
             if (ui::Widget* label = war_->Child(id)) label->visible = w != nullptr;
         }
         ShowWarTime();
-        std::vector<const proto::GuildMemberRecord*> ranked;
-        for (const auto& m : c_.guild->Guild().members) {
-            if (m.contribution > 0) ranked.push_back(&m);
+        struct Ranked {
+            const proto::GuildMemberRecord* member;
+            int rank;
+        };
+        std::vector<Ranked> ranked;
+        for (const auto& m : c_.guild->Guild().members) ranked.push_back({&m, 0});
+        std::stable_sort(ranked.begin(), ranked.end(), [](const Ranked& a, const Ranked& b) { return a.member->contribution > b.member->contribution; });
+        for (std::size_t i = 0; i < ranked.size(); ++i) {
+            ranked[i].rank = i == 0 ? 1 : ranked[i - 1].rank + (ranked[i].member->contribution != ranked[i - 1].member->contribution ? 1 : 0);
         }
-        std::stable_sort(ranked.begin(), ranked.end(), [](const auto* a, const auto* b) { return a->contribution > b->contribution; });
+        if (contributionSort_ == 0) {
+            std::stable_sort(ranked.begin(), ranked.end(), [](const Ranked& a, const Ranked& b) { return a.member->name < b.member->name; });
+        }
         const int mostRanked = std::max(0, int(ranked.size()) - int(contributionRows_.size()));
         contributionScroll_ = std::min(contributionScroll_, mostRanked);
         if (auto* bar = dynamic_cast<ui::ScrollBar*>(war_->Child(256))) bar->SetRange(0, mostRanked);
@@ -795,9 +811,9 @@ private:
             const std::size_t at = std::size_t(contributionScroll_) + i;
             row->visible = at < ranked.size();
             if (!row->visible) continue;
-            Set(row, 503, ranked[at]->name);
-            Set(row, 504, std::to_string(at + 1));
-            Set(row, 505, std::to_string(ranked[at]->contribution));
+            Set(row, 503, ranked[at].member->name);
+            Set(row, 504, std::to_string(ranked[at].rank));
+            Set(row, 505, std::to_string(ranked[at].member->contribution));
         }
     }
 
@@ -872,6 +888,7 @@ private:
     bool showingCommunity_ = false;
     int hostileScroll_ = 0, selectedHostile_ = -1, warScroll_ = 0, selectedWar_ = -1, contributionScroll_ = 0;
     int unionSort_ = 0, hostileSort_ = 0; // the head last pressed (0: as the server listed them)
+    int contributionSort_ = 0;            // the war page's list: 0 by name, 1 by rank, 2 by points
     double warsAt_ = 0.0;                 // when the wars' times were last told
 
     // The hostile guilds (guild_r.2dt's page 2000): ten rows of the wars' enemies (the name 127, the
