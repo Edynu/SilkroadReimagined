@@ -1403,6 +1403,16 @@ bool StoreWindow::OnNotice(const ui::Notice& notice) {
         int tab = 0;
         if (const assets::ShopGood* good = GoodOf(notice.source, &tab)) {
             const assets::ItemRow* row = context_.items->Find(std::string_view(good->itemCodename));
+            // A specialty good without a transport out: "Special products can be put into the transport's inventory
+            // only." (the original's quick buy checks it first).
+            const bool transport = std::any_of(context_.coses.begin(), context_.coses.end(),
+                                               [](const HudContext::CosShown& s) { return s.kind == std::uint8_t(game::CosKind::Transport); });
+            if (row != nullptr && game::IsSpecialtyGood(*row) && !transport) {
+                if (context_.state != nullptr) {
+                    context_.state->Post(game::GameMessage::Kind::General, context_.Text("UIIT_MSG_COS_CANNOT_BUY_SPECIALTY_TO_INVENTORY"), context_.time);
+                }
+                return true;
+            }
             HudRequest r{HudRequest::Kind::ShopBuy, tab | good->slot << 8};
             r.extra = row != nullptr ? game::MaxStack(*row) : 1;
             context_.hud->Request(r);
