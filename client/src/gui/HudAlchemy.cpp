@@ -27,6 +27,7 @@
 #include "sr/game/AlchemyProtocol.h"
 #include "sr/core/Log.h"
 #include "sr/game/Inventory.h"
+#include "sr/game/MallServices.h"
 
 namespace sr::client {
 
@@ -924,6 +925,9 @@ private:
         return n;
     }
 
+    // An elixir, or a magic cube standing for one.
+    static bool ElixirLike(const assets::ItemRow& row) { return alchemy::KindOf(row) == alchemy::Kind::Elixir || game::IsMagicCube(row); }
+
     // The tab's checks (and its siblings): 0 and the slot, or the refusal's code.
     int Accepts(const assets::ItemRow& row, const game::ItemInstance& item, int& key) const {
         const alchemy::Kind kind = alchemy::KindOf(row);
@@ -972,6 +976,12 @@ private:
             key = 1;
             return 0;
         }
+        // A magic cube in the elixir's place, as 1.188 takes it: the server strengthens with its store's first elixir
+        // (and checks that one fits).
+        if (game::IsMagicCube(row)) {
+            key = 1;
+            return 0;
+        }
         if (kind == alchemy::Kind::AdvancedElixir) {
             if (alchemy::Degree(*target) > row.itemClass) return 16;
             if (!alchemy::ElixirFits(row, *target)) return 10;
@@ -992,7 +1002,7 @@ private:
         }
         if (kind == alchemy::Kind::LuckyPowder) {
             const assets::ItemRow* elixir = RowAt(1);
-            if (elixir == nullptr || alchemy::KindOf(*elixir) != alchemy::Kind::Elixir) return 9;
+            if (elixir == nullptr || !ElixirLike(*elixir)) return 9;
             if (row.params[0] != alchemy::Degree(*target)) return 11;
             key = 2;
             return 0;
@@ -1240,7 +1250,7 @@ private:
     // A slot open to an item (a closed one shows skl_mastery_nothing).
     bool Open(int key) const {
         switch (g_tab) {
-        case kStrengthen: return key == 0 || (key == 1 && ItemAt(0) != nullptr) || (key == 2 && RowAt(1) != nullptr && alchemy::KindOf(*RowAt(1)) == alchemy::Kind::Elixir);
+        case kStrengthen: return key == 0 || (key == 1 && ItemAt(0) != nullptr) || (key == 2 && RowAt(1) != nullptr && ElixirLike(*RowAt(1)));
         case kManufacture: return key == 0 || ItemAt(0) != nullptr;
         case kDismantle: return key == 1;
         default: return key >= 1;
