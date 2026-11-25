@@ -403,14 +403,8 @@ public:
     void Played(const proto::PopPlayed& a, double now) {
         answered_ = true;
         if (a.code != 0) {
-            // Ours: the original stays rolling and prints only code 3; ours stops and says why.
-            rolling_ = false;
-            if (effect_ != nullptr) effect_->visible = false;
-            ResetReels();
-            const char* key = a.code == 3 ? "UIIT_MSG_STRGERR_INVALID_TARGET" : a.code == 0x1809 ? "UIIT_MSG_STRGERR_NOT_EXIST_ITEM"
-                              : a.code == 0x183D                                  ? "UIIT_STT_RENT_EXP_ITEM_USED_EROR"
-                                                                                  : "UIIT_MSG_STRGERR_TRADE_FAILURE";
-            Put(Child(kMessage), c_.Text(key));
+            // As the original: the reels go on rolling; only code 3 says so ("invalid target"), the others nothing.
+            if (a.code == 3) Put(Child(kMessage), c_.Text("UIIT_MSG_STRGERR_INVALID_TARGET"));
             return;
         }
         won_ = a.won != 0;

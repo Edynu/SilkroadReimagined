@@ -601,27 +601,12 @@ private:
     }
 
     // An item put in: armour or a weapon of degree 11 or more with socket places (1.188's page;
-    // 1.7). A socket stone right-clicked goes to the first made empty socket (ours: the original's way is a drop).
+    // 1.7). A socket stone goes in only dropped on a socket (the original's); put in so it is no socket material.
     void SocketPut(int place) {
         if (socketRun_.active) return;
         const game::ItemInstance* item = c_.state != nullptr ? c_.state->inventory.At(std::uint8_t(place)) : nullptr;
         const assets::ItemRow* row = item != nullptr && c_.items ? c_.items->Find(item->refId) : nullptr;
         if (row == nullptr) return;
-        if (alchemy::IsSocketStone(*row)) {
-            const game::ItemInstance* target = SocketItem();
-            if (target == nullptr) {
-                Say(c_.Text("UIIT_MSG_ENCHANT_LOAD_EQUIP_FIRST"));
-                return;
-            }
-            for (int k = 0; k < game::kSockets; ++k) {
-                if (target->sockets[std::size_t(k)].made && !target->sockets[std::size_t(k)].Filled()) {
-                    SocketDropStone(place, k);
-                    return;
-                }
-            }
-            Say(c_.Text("UIIT_STT_SOCKETERR_THERE_IS_NO_EMPTY_HOLE"));
-            return;
-        }
         const int tid3 = row->typeId[2];
         const bool weapon = tid3 == 6, armour = tid3 == 1 || tid3 == 2 || tid3 == 3 || tid3 == 9 || tid3 == 10 || tid3 == 11;
         if (alchemy::KindOf(*row) != alchemy::Kind::Equipment || !(weapon || armour)) {
