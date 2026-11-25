@@ -793,7 +793,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         } else if (clickStep_ < 3 && (clickStep_ > 0 || (host_.Settled() && (page_ != "fortress-map" || fortressMapShown_) &&
                                                          ((page_ != "inventory-full" && !EquipmentPage(page_)) || autoPotionShown_) &&
                                                          ((page_ != "cos" && page_ != "cos-two" && page_ != "cos-pets") || cosShown_) &&
-                                                         (!page_.starts_with("exchange") || exchangeFrames_ >= 10)))) {
+                                                         ((!page_.starts_with("exchange") && !page_.starts_with("stall")) || exchangeFrames_ >= 10)))) {
             ui::InputEvent e;
             e.position = at;
             e.type = clickStep_ == 0 ? ui::InputEvent::Type::MouseMove : clickStep_ == 1 ? ui::InputEvent::Type::MouseDown : ui::InputEvent::Type::MouseUp;
@@ -1015,6 +1015,39 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         }
         if (exchangePage && !exchangeShown_) context.holdCapture = true;
         if (exchangeShown_) ++exchangeFrames_; // its windows placed before --click's first
+        // --page stall | stall-buy | stall-price: Zeta's stall open for business beside the bag (a visitor's view; stall-buy:
+        // its second item dragged to the bag, the agreement box), or the player's own being modified with its first item's
+        // price asked (stall-price: its edit button).
+        const bool stallPage = page_ == "stall" || page_ == "stall-buy" || page_ == "stall-price";
+        if (stallPage && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
+            stallShown_ = true;
+            namespace proto = game::proto;
+            if (tables_->Usable()) {
+                hudContext_.items = &tables_->items;
+                hudContext_.stall = &sampleStall_;
+                const auto record = [&](const char* code, std::uint8_t slot, std::uint16_t count, std::uint8_t plus = 0) {
+                    const assets::ItemRow* row = tables_->items.Find(std::string_view(code));
+                    return proto::ItemRecord{slot, row != nullptr ? row->refObjId : 0u, plus, 0, 40, count, {}};
+                };
+                const bool mine = page_ == "stall-price";
+                proto::StallView view;
+                view.owner = mine ? 1 : 7;
+                view.ownerName = mine ? "Gallery" : "Zeta";
+                view.name = mine ? "Gallery's goods" : "Blades and potions";
+                view.open = mine ? 0 : 1;
+                view.items = {{0, record("ITEM_CH_BLADE_02_A_RARE", 0, 1, 5), 450000}, {1, record("ITEM_ETC_HP_POTION_02", 0, 50), 12500},
+                              {3, record("ITEM_CH_BLADE_01_B", 0, 1), 8000}};
+                view.people = {{9, "Beta"}};
+                sampleStall_.Apply(proto::StallEvent{view}, 1);
+                hudContext_.stallRequest = [](proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: stall request 0x{:04X}", id); };
+                hud_.OpenPage(hud::kPageInventory);
+                hud_.Show(hud::kStall);
+                if (page_ == "stall-buy") StallBuyBox(hudContext_, 1);
+                if (page_ == "stall-price") StallRegister(hudContext_, 0, 0);
+            }
+        }
+        if (stallPage && !stallShown_) context.holdCapture = true;
+        if (stallShown_) ++exchangeFrames_; // as the exchange's: its windows placed before --click's first
         // --page magic-pop[:STATE] (HudMagicPop.cpp): the machine's window on a bag of two cards and a
         // coupon. STATE: select (the selection window, the default), choose (the strip of the first prize's kind, nothing
         // chosen: state 0), card (a prize chosen: 1), ready (a card registered: 2), rolling (PLAY pressed), won / lost (the

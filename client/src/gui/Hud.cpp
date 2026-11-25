@@ -229,7 +229,7 @@ void Hud::Deal(const DealBox::Deal& deal) {
     node.name = "GDR_STORE_DEAL";
     node.ddj = "interface\\messagebox\\msgbox2_window_";
     node.subSection = deal.kind == DealBox::Deal::Kind::Buy ? "Buy" : deal.kind == DealBox::Deal::Kind::StallRegister ? "StallRegister" : "Confirm";
-    node.text = deal.kind == DealBox::Deal::Kind::Buy ? "" : "UIIT_STT_CONFIRM_BOX";
+    node.text = deal.kind == DealBox::Deal::Kind::Buy ? "" : deal.kind == DealBox::Deal::Kind::StallBuy ? "UIIT_STT_AGREEMENT_BOX" : "UIIT_STT_CONFIRM_BOX";
     node.rect = {0.0f, 0.0f, 327.0f, deal.kind == DealBox::Deal::Kind::Buy ? 177.0f : 175.0f};
     auto* box = dynamic_cast<DealBox*>(ui_->Open(node));
     if (box == nullptr) return;

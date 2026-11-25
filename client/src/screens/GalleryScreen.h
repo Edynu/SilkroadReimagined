@@ -82,6 +82,8 @@ private:
     assets::GachaTable gacha_;
     bool cosShown_ = false;        // --page cos | cos-two: the COS manager on sample COS
     game::ExchangeView sampleExchange_;
+    game::StallView sampleStall_; // --page stall, stall-buy, stall-price
+    bool stallShown_ = false;
     game::FlagView sampleFlag_;  // --page ctf-*: Capture the Flag's pieces on a sample match (HudFlagWorld.cpp)
     bool ctfShown_ = false;
     game::ArenaView sampleArena_; // --page arena-*: the Battle Arena's windows on a sample match (HudArena.cpp)

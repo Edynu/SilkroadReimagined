@@ -1295,7 +1295,7 @@ class DealBox : public ui::MainFrame {
 public:
     DealBox(const assets::UiLayoutNode& node, HudContext& context) : MainFrame(node), context_(context) {}
     struct Deal {
-        enum class Kind : std::uint8_t { Buy, Sell, Buyback, StallRegister, Deposit };
+        enum class Kind : std::uint8_t { Buy, Sell, Buyback, StallRegister, Deposit, StallBuy };
         Kind kind = Kind::Buy;
         std::string icon, name;
         std::uint64_t unitPrice = 0; // a buy's per piece; a sale's per piece; a buy-back's total
@@ -1303,7 +1303,7 @@ public:
         int tab = 0, slot = 0;       // a buy's good
         int place = 0;               // a sale's inventory place
         int index = 0;               // a buy-back's entry
-        int stallSlot = 0;           // a stall's register: the stall's slot (`place` the bag's)
+        int stallSlot = 0;           // a stall's register (`place` the bag's; 0 a price change) or buy: the stall's slot
         int storageMove = 0;         // a deposit's: its StorageMove request (`unitPrice` the whole fee)
     };
     void Created(ui::Interface& ui) override;
@@ -1532,6 +1532,11 @@ bool CloseArenaResult(HudContext& context);
 // slot of the player's own stall (the inventory's drop on a slot, the scripts).
 const char* StallCodeKey(game::proto::StallCode code);
 void StallRegister(HudContext& context, int slot, int place);
+// A visitor's buy of a stall's slot (its item dragged to the bag): the agreement box, its icon, name, count and
+// price, Buy and Cancel (the original's store money box for a stall's purchase).
+void StallBuyBox(HudContext& context, int slot);
+// The stall's slot (0..9) a widget of the stall window is, -1 another (an item dragged out of it).
+int StallSlotOf(const ui::Widget* slot);
 // The network window's rows as shown and a row chosen (the scripts and tests): its seller and listing.
 struct StallNetworkPick {
     std::string seller;

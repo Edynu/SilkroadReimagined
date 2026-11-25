@@ -7,7 +7,8 @@
 //   208 x 44 each on stl_slot_02.ddj, two to a row in the display, 12) and the chat module (3: the lines,
 //   the input, the people). An item of the bag dropped on a slot of the player's own stall, while it is being
 //   modified, opens the register box (the store's deal box in its stall mode); a press on an item's edit button
-//   takes it back; a visitor's press on an item buys it (asks first).
+//   asks its new price (the same box); the owner's item dragged to the bag is taken back. A visitor drags an item
+//   to the bag to buy it: the agreement box (its icon, name, count and price; Buy and Cancel).
 // - The stall network (CNIFStallNetwork, ginterface.txt 150 from res_ui\stallnetwork.2dt, opens
 //   it): the class, type and degree (fmncategorytreedata.txt), Search, 15 rows a page (number, level, icon,
 //   name, count, price), the pages, the seller of the chosen row, the gold, Whisper and Purchase (asks first,
@@ -79,7 +80,7 @@ public:
                     n.rect.y += y;
                     if (auto* made = Add(ui.Make(n)); made != nullptr) {
                         if (auto* slot = ui::As<ui::Slot>(made)) {
-                            slot->pickable = false;
+                            slot->pickable = false; // an item's (Update)
                             slot->tooltipLines = [this, i] {
                                 const game::StallView* v = c_.stall;
                                 const auto& item = v != nullptr ? v->Items()[std::size_t(i)] : std::nullopt;
@@ -173,7 +174,10 @@ public:
             const auto& item = v->Items()[std::size_t(i)];
             const game::ItemInstance instance = item ? game::Inventory::FromRecord(item->item) : game::ItemInstance{};
             const assets::ItemRow* row = item && c_.items ? c_.items->Find(item->item.item) : nullptr;
-            if (auto* slot = ui::As<ui::Slot>(Child(kSlotIcon + i))) ShowItem(*slot, item ? &instance : nullptr, c_);
+            if (auto* slot = ui::As<ui::Slot>(Child(kSlotIcon + i))) {
+                ShowItem(*slot, item ? &instance : nullptr, c_);
+                slot->pickable = item.has_value(); // dragged to the bag: bought, or (the owner's) taken back
+            }
             std::string name;
             if (row != nullptr) name = c_.Text(row->nameKey) + (instance.plus > 0 ? " (+" + std::to_string(instance.plus) + ")" : "");
             if (ui::Widget* w = Child(kSlotName + i)) w->SetText(name);
@@ -262,19 +266,9 @@ public:
         }
         for (int i = 0; i < int(proto::kStallSlots); ++i) {
             const auto& item = v->Items()[std::size_t(i)];
-            if (n.control == kSlotEdit + i && mine && item) {
-                Send(proto::StallTake{std::uint8_t(i)});
-                return true;
-            }
-            if (n.control == kSlotIcon + i && !mine && item && c_.hud != nullptr) {
-                // A visitor's buy, asked first (ours: the original's purchase goes through the item's slot).
-                const assets::ItemRow* row = c_.items != nullptr ? c_.items->Find(item->item.item) : nullptr;
-                const std::string what = row != nullptr ? c_.Text(row->nameKey) : std::string();
-                HudContext* c = &c_;
-                c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(c_.Text("UIIT_MSG_WARENETWORK_BUY_CONFIRM"), {what, GoldText(item->price)})},
-                                [c, i](bool yes) {
-                                    if (yes && c->stallRequest) c->stallRequest(proto::StallBuy::kId, proto::Encode(proto::StallBuy{std::uint8_t(i)}));
-                                });
+            // The edit button: the item's new price asked (the register box), while the stall is being modified.
+            if (n.control == kSlotEdit + i && mine && item && !v->ForBusiness()) {
+                StallRegister(c_, i, 0);
                 return true;
             }
         }
@@ -725,18 +719,52 @@ void StallPages(ui::Widget& pages, int page, int count) {
 
 void StallRegister(HudContext& context, int slot, int place) {
     if (context.hud == nullptr || context.state == nullptr || context.items == nullptr) return;
-    const game::ItemInstance* item = context.state->inventory.At(std::uint8_t(place));
-    const assets::ItemRow* row = item != nullptr ? context.items->Find(item->refId) : nullptr;
-    if (row == nullptr) return;
     DealBox::Deal deal;
     deal.kind = DealBox::Deal::Kind::StallRegister;
-    deal.icon = "icon\\" + row->iconPath;
-    deal.name = context.Text(row->nameKey);
-    deal.count = std::max<int>(1, item->count);
+    if (place == 0) {
+        // A slot's item: its new price asked, the present one in the box.
+        if (context.stall == nullptr || slot < 0 || slot >= int(proto::kStallSlots)) return;
+        const auto& item = context.stall->Items()[std::size_t(slot)];
+        const assets::ItemRow* row = item ? context.items->Find(item->item.item) : nullptr;
+        if (row == nullptr) return;
+        deal.icon = "icon\\" + row->iconPath;
+        deal.name = context.Text(row->nameKey);
+        deal.count = std::max<int>(1, item->item.quantity);
+        deal.unitPrice = item->price;
+    } else {
+        const game::ItemInstance* item = context.state->inventory.At(std::uint8_t(place));
+        const assets::ItemRow* row = item != nullptr ? context.items->Find(item->refId) : nullptr;
+        if (row == nullptr) return;
+        deal.icon = "icon\\" + row->iconPath;
+        deal.name = context.Text(row->nameKey);
+        deal.count = std::max<int>(1, item->count);
+    }
     deal.most = deal.count;
     deal.place = place;
     deal.stallSlot = slot;
     context.hud->Deal(deal);
+}
+
+void StallBuyBox(HudContext& context, int slot) {
+    if (context.hud == nullptr || context.items == nullptr || context.stall == nullptr || context.stall->Mine()) return;
+    if (slot < 0 || slot >= int(proto::kStallSlots)) return;
+    const auto& item = context.stall->Items()[std::size_t(slot)];
+    const assets::ItemRow* row = item ? context.items->Find(item->item.item) : nullptr;
+    if (row == nullptr) return;
+    DealBox::Deal deal;
+    deal.kind = DealBox::Deal::Kind::StallBuy;
+    deal.icon = "icon\\" + row->iconPath;
+    deal.name = context.Text(row->nameKey);
+    deal.count = deal.most = std::max<int>(1, item->item.quantity);
+    deal.unitPrice = item->price;
+    deal.stallSlot = slot;
+    context.hud->Deal(deal);
+}
+
+int StallSlotOf(const ui::Widget* slot) {
+    if (slot == nullptr || dynamic_cast<const StallWindow*>(slot->parent()) == nullptr) return -1;
+    const int id = slot->id() - kSlotIcon;
+    return id >= 0 && id < int(proto::kStallSlots) ? id : -1;
 }
 
 void StallNetworkSearch(ui::Interface& ui, int classIndex, int typeIndex, int degree) {

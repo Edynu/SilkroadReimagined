@@ -652,6 +652,15 @@ void InventoryWindow::Created(ui::Interface& ui) {
             if (context_.exchangeRequest) context_.exchangeRequest(proto::ExchangeTake::kId, proto::Encode(proto::ExchangeTake{std::uint8_t(offered)}));
             return true;
         }
+        // A stall's item dragged to the bag: a visitor's buy (its box), the owner's taken back (0x70BA 3).
+        if (const int stalled = StallSlotOf(source); stalled >= 0) {
+            if (context_.stall != nullptr && context_.stall->Mine()) {
+                if (context_.stallRequest) context_.stallRequest(proto::StallTake::kId, proto::Encode(proto::StallTake{std::uint8_t(stalled)}));
+            } else {
+                StallBuyBox(context_, stalled);
+            }
+            return true;
+        }
         const int from = PlaceOf(source), to = PlaceOf(target);
         if (to < 13 || dynamic_cast<ui::Slot*>(target) == nullptr) return false;
         if (context_.hud != nullptr && context_.items != nullptr && context_.state != nullptr) {
@@ -1519,6 +1528,18 @@ void DealBox::Set(const Deal& deal) {
     const bool buy = deal.kind == Deal::Kind::Buy;
     if (auto* icon = ui::As<ui::Static>(Named(buy ? "GDR_ITEMMALL_CONFIRM_BUY_ITEM_ICON" : "GDR_MBS_CONFIRM_BUY_ITEM_ICON"))) icon->texture = deal.icon;
     if (ui::Widget* name = Named(buy ? "GDR_ITEMMALL_CONFIRM_EDIT_ITEM_NAME" : "GDR_MBS_CONFIRM_EDIT_ITEM_NAME")) name->SetText(deal.name);
+    if (deal.kind == Deal::Kind::StallBuy) {
+        // The agreement box: the item's count and price as they stand, Buy and Cancel.
+        if (ui::Widget* ok = Named("GDR_MBS_CONFIRM_BTN_SELL")) ok->SetText(context_.Text("UIIT_STT_BUY"));
+        for (const char* spin : {"GDR_MBS_CONFIRM_SPINBTN_UP", "GDR_MBS_CONFIRM_SPINBTN_DOWN"}) {
+            if (ui::Widget* w = Named(spin)) w->visible = false;
+        }
+        if (count_ != nullptr) {
+            count_->interactive = false;
+            count_->SetValue(std::to_string(deal.count));
+        }
+        return;
+    }
     if (deal.kind == Deal::Kind::StallRegister) {
         // "Confirmation window", Register and Cancel.
         if (ui::Widget* ok = Named("GDR_MBS_CONFIRM_BTN_SELL")) ok->SetText(context_.Text("UIIT_CTL_STALL_REGISTER"));
@@ -1568,6 +1589,12 @@ void DealBox::Update(ui::Frame&) {
         if ((context_.stall == nullptr || !context_.stall->Mine()) && ui_ != nullptr) ui_->Close(this);
         return;
     }
+    if (deal_.kind == Deal::Kind::StallBuy) {
+        // Open while the player is in the other's stall.
+        if ((context_.stall == nullptr || !context_.stall->In() || context_.stall->Mine()) && ui_ != nullptr) ui_->Close(this);
+        if (price_ != nullptr) price_->SetText(GoldText(deal_.unitPrice));
+        return;
+    }
     // Only a count over the most is brought back while typing: an empty box or a 0 stays as typed (the deal takes 1 at
     // the least), so 50 can be deleted and 28 typed.
     if (count_ != nullptr && deal_.kind != Deal::Kind::Buyback && deal_.kind != Deal::Kind::Deposit && !count_->text().empty()) {
@@ -1615,6 +1642,9 @@ bool DealBox::OnNotice(const ui::Notice& notice) {
         }
         case Deal::Kind::Buyback: context_.hud->Request({HudRequest::Kind::ShopBuyback, deal_.index}); break;
         case Deal::Kind::Deposit: context_.hud->Request({HudRequest::Kind::StorageMove, deal_.storageMove}); break;
+        case Deal::Kind::StallBuy:
+            if (context_.stallRequest) context_.stallRequest(proto::StallBuy::kId, proto::Encode(proto::StallBuy{std::uint8_t(deal_.stallSlot)}));
+            break;
         case Deal::Kind::StallRegister: {
             const std::uint64_t price = price_ != nullptr ? std::strtoull(price_->text().c_str(), nullptr, 10) : 0;
             if (context_.stallRequest) {
