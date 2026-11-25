@@ -1849,6 +1849,19 @@ bool EquipmentWindow::OnNotice(const ui::Notice& notice) {
             if (slots_[std::size_t(i)] == notice.source) return ServicePick(context_, i);
         }
     }
+    // The Extension Gear's target picked on the dress side: the worn Devil's Spirit refused ("You cannot use this while
+    // you are wearing it."), any other worn avatar the wrong object (the original's use checks; the pick ends).
+    if (context_.servicePick == 2 && context_.state != nullptr && context_.items != nullptr) {
+        const game::ItemInstance* tool = context_.state->inventory.At(std::uint8_t(std::max(0, context_.servicePickTool)));
+        const assets::ItemRow* toolRow = tool != nullptr ? context_.items->Find(tool->refId) : nullptr;
+        for (std::size_t k = 0; toolRow != nullptr && toolRow->typeId == std::array<int, 4>{3, 3, 13, 16} && k < avatarSlots_.size(); ++k) {
+            if (avatarSlots_[k] == nullptr || avatarSlots_[k] != notice.source || avatarShown_[k] < 0) continue;
+            context_.servicePick = 0;
+            const char* key = int(k) == game::avatar::kSpirit ? "UIIT_MSG_NASRUN_WEAR_EXTENSION_ITEM_NOT_USE" : "UIIT_MSG_COSPETERR_CANT_USE_WRONGOBJECT";
+            context_.state->Post(game::GameMessage::Kind::General, context_.Text(key), context_.time);
+            return true;
+        }
+    }
     switch (notice.control) {
     case 10: yaw_ -= frameMs_ * 0.0015f; return true; // a step a click: the frame's ms x 0.0015
     case 11: yaw_ += frameMs_ * 0.0015f; return true;
