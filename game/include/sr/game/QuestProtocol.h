@@ -200,6 +200,18 @@ struct QuestAbandon {
     }
 };
 
+// A member's answer to QuestEnterAsk: 1 taken into the quest's instance, 0 not.
+struct QuestEnterReply {
+    static constexpr MessageId kId = 0x1274;
+    std::uint32_t quest = 0;
+    std::uint8_t yes = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("quest", quest);
+        v("yes", yes);
+    }
+};
+
 enum class QuestCode : std::uint8_t {
     Ok = 0,
     TooFar = 1,      // the NPC is not near
@@ -290,7 +302,21 @@ struct QuestGuide {
 };
 
 // What the server says about quests, as the client's session hands it on.
-using QuestEvent = std::variant<QuestDefinition, QuestList, QuestChanged, QuestGone, NpcQuests, QuestSays, QuestAnswer, QuestRewarded, QuestMarks, QuestGuide>;
+// The quest's instance opened by its party's master, who goes in at once: each other member taken is asked first (the
+// original's invitation 0x3080 kind 7: "For this quest, you will teleport. Continue?"); QuestEnterReply answers, and
+// unanswered after kQuestEnterAskSeconds (the proposals' wait) the member stays where it is.
+constexpr double kQuestEnterAskSeconds = 30.0;
+struct QuestEnterAsk {
+    static constexpr MessageId kId = 0x126A;
+    std::uint32_t quest = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("quest", quest);
+    }
+};
+
+using QuestEvent = std::variant<QuestDefinition, QuestList, QuestChanged, QuestGone, NpcQuests, QuestSays, QuestAnswer, QuestRewarded, QuestMarks, QuestGuide,
+                                QuestEnterAsk>;
 
 // A server's quest message as the session's event; false for another id or a malformed payload.
 inline bool DecodeQuestEvent(MessageId id, std::span<const std::byte> payload, QuestEvent& out) {
@@ -310,6 +336,7 @@ inline bool DecodeQuestEvent(MessageId id, std::span<const std::byte> payload, Q
     case QuestRewarded::kId: return as(QuestRewarded{});
     case QuestMarks::kId: return as(QuestMarks{});
     case QuestGuide::kId: return as(QuestGuide{});
+    case QuestEnterAsk::kId: return as(QuestEnterAsk{});
     default: return false;
     }
 }
@@ -330,6 +357,8 @@ inline const char* QuestMessageName(MessageId id) {
     case QuestAccept::kId: return "QuestAccept";
     case QuestHandIn::kId: return "QuestHandIn";
     case QuestAbandon::kId: return "QuestAbandon";
+    case QuestEnterAsk::kId: return "QuestEnterAsk";
+    case QuestEnterReply::kId: return "QuestEnterReply";
     default: return "Quest?";
     }
 }

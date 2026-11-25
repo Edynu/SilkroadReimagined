@@ -839,6 +839,8 @@ TEST_CASE("Quest item use: ORNAMENT_4's stone takes its party to the four snake 
     CHECK_FALSE(quests.UseItem(1, "ITEM_QNO_TQ_ORNAMENT_4_04")); // the stone kept (refused 2, the original's)
     REQUIRE(quests.Worlds().size() == 1);
     CHECK(host.layers[1] != 0);
+    // The member asked first (the original's invitation), in on its yes.
+    CHECK(quests.Handle(2, proto::QuestEnterReply::kId, proto::Encode(proto::QuestEnterReply{ornament, 1})));
     CHECK(host.layers[2] == host.layers[1]);
     const auto start = std::chrono::steady_clock::now();
     quests.Tick(start + 29s);
@@ -956,6 +958,7 @@ TEST_CASE("Quest talk rule: GENERALORDER_4's secret door takes the party holding
     REQUIRE(Ask(quests, proto::QuestHandIn{7, order, {0}}));
     REQUIRE(quests.Worlds().size() == 1);
     CHECK(host.layers[1] != 0);
+    CHECK(quests.Handle(2, proto::QuestEnterReply::kId, proto::Encode(proto::QuestEnterReply{order, 1}))); // asked first
     CHECK(host.layers[2] == host.layers[1]);
     CHECK(host.layers[3] == 0);
     REQUIRE(host.enteredAt.has_value());

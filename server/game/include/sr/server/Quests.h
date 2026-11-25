@@ -397,6 +397,7 @@ private:
         const game::QuestDef::UseRule* rule = nullptr;
         std::set<std::uint32_t> inside;
         std::map<std::uint32_t, Clock::time_point> leaving; // out of the party: out at that time
+        std::map<std::uint32_t, Clock::time_point> asked;   // members asked to come in (QuestEnterAsk): until then
         // Done: the last one slain, its way out standing until the time's end (World::wayOut).
         enum class Phase : std::uint8_t { Waiting, Opening, Fighting, Done, Ending } phase = Phase::Waiting;
         std::size_t line = 0;    // Opening: the `comes` lines said so far
@@ -412,6 +413,8 @@ private:
     // The instance's entry (the item handler's checks after the rule's own, then the party walker; a talk rule's members
     // those holding the quest, taken to its start): true when opened.
     bool OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, Clock::time_point now);
+    // A member's answer to its QuestEnterAsk: yes, still fit to go, taken in (the rule's start, else the instance's own).
+    void EnterReply(std::uint32_t entity, const game::proto::QuestEnterReply& r);
     // A talk rule of the quest at the NPC fitting the record's state (QuestDef::UseRule::npc; null: none); its question asked,
     // or the checks' words (Talk); its row picked (HandIn).
     const game::QuestDef::UseRule* TalkRule(const game::QuestDef& q, const QuestRecord& r, const std::string& npc) const;

@@ -466,6 +466,8 @@ private:
     bool netOff_ = false; // the lost connection's box is up
     bool quitNow_ = false; // its button pressed: the game ends
     ConfirmBox* recallBox_ = nullptr; // the guild master's recall asked, unanswered (closed at recallUntil_)
+    ConfirmBox* questEnterBox_ = nullptr; // a quest instance's entry asked (QuestEnterAsk), unanswered (closed at questEnterUntil_)
+    double questEnterUntil_ = 0.0;
     double recallUntil_ = 0.0;
     bool hpLow_ = false, mpLow_ = false; // under 30 % at the last frame (the warning's alarm)
     bool turnHeld_ = false;   // this turn holds the cursor (the Game page's camera method 2)

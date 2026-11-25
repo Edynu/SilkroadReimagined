@@ -44,7 +44,8 @@ using MessageId = std::uint16_t;
 // 3: a ground item's owner in EntityAppeared.
 // 4: the lobby's characters' academy role (CharacterSummary.academyRank).
 // 5: a pet's experience lost by its death (CosExperience.lost).
-inline constexpr std::uint32_t kProtocolVersion = 5;
+// 6: a quest instance's members asked first (QuestEnterAsk, QuestEnterReply).
+inline constexpr std::uint32_t kProtocolVersion = 6;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

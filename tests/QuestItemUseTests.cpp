@@ -1020,11 +1020,20 @@ TEST_CASE("Quest item use: a quest's instance: its master's party in, its unique
     CHECK(host.LastSaid() == "SN_T_TRANSPORT");
     host.transport = false;
     CHECK(quests.Worlds().empty());
-    // Opened: the drum kept (the use refused 2, the original's), the master and the members who may come in its layer.
+    // Opened: the drum kept (the use refused 2, the original's), the master in its layer at once; the members who may come
+    // asked first (QuestEnterAsk, the original's invitation), in on their yes.
     CHECK_FALSE(quests.UseItem(1, "ITEM_T_DRUM"));
     REQUIRE(quests.Worlds().size() == 1);
     const std::uint32_t layer = quests.Worlds()[0];
     CHECK(host.layers[1] == layer);
+    CHECK((!host.layers.contains(2) || host.layers[2] == 0));
+    const auto reply = [&](std::uint32_t member, std::uint8_t yes) {
+        return quests.Handle(member, proto::QuestEnterReply::kId, proto::Encode(proto::QuestEnterReply{20130, yes}));
+    };
+    CHECK(reply(2, 1));
+    CHECK(reply(4, 1));
+    CHECK(reply(3, 1)); // never asked: nothing
+    CHECK(reply(2, 1)); // answered already: nothing more
     CHECK(host.layers[2] == layer);
     CHECK(host.layers[4] == layer);
     CHECK((!host.layers.contains(3) || host.layers[3] == 0));

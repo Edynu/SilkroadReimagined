@@ -545,6 +545,12 @@ bool Quests::Handle(std::uint32_t entity, proto::MessageId id, std::span<const s
         Abandon(entity, a.quest, proto::QuestEnd::Abandoned);
         return true;
     }
+    case proto::QuestEnterReply::kId: {
+        proto::QuestEnterReply r;
+        if (!proto::Decode(payload, r)) return false;
+        EnterReply(entity, r);
+        return true;
+    }
     default: return false;
     }
 }
@@ -2049,10 +2055,35 @@ bool Quests::OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const
         }
         const auto at = host_.QuestPlayer(member);
         if (!at || at->position.layer != 0) continue; // in the same world as its master
-        if (u.start ? host_.QuestWorldEnterAt(member, layer, proto::WorldPosition{u.start->region, u.start->x, u.start->y, u.start->z, 0}) : host_.QuestWorldEnter(member, layer)) world.inside.insert(member);
+        // Asked first (the original's invitation, kind 7); the master went in at once.
+        world.asked[member] = now + std::chrono::milliseconds(std::int64_t(proto::kQuestEnterAskSeconds * 1000.0));
+        Send(member, proto::QuestEnterAsk{q.id});
     }
     worlds_.push_back(std::move(world));
     return true;
+}
+
+void Quests::EnterReply(std::uint32_t entity, const proto::QuestEnterReply& r) {
+    for (QuestWorld& w : worlds_) {
+        const auto asked = w.asked.find(entity);
+        if (w.quest != r.quest || asked == w.asked.end()) continue;
+        w.asked.erase(asked);
+        if (r.yes == 0 || w.phase == QuestWorld::Phase::Done || w.phase == QuestWorld::Phase::Ending) return;
+        // Still fit to go: in its master's party, in the shared world, alive, no transport out.
+        const auto who = host_.QuestPlayer(entity);
+        const std::vector<std::uint32_t> party = host_.QuestPartyHere(w.master);
+        if (!who || who->dead || who->position.layer != 0 || std::find(party.begin(), party.end(), entity) == party.end()) return;
+        if (host_.QuestTransportOut(entity)) {
+            if (!w.rule->instance->transport.Empty()) host_.QuestSay(entity, w.rule->instance->transport.key.empty() ? w.rule->instance->transport.literal : w.rule->instance->transport.key);
+            return;
+        }
+        const auto& start = w.rule->start;
+        if (start ? host_.QuestWorldEnterAt(entity, w.layer, proto::WorldPosition{start->region, start->x, start->y, start->z, 0}) : host_.QuestWorldEnter(entity, w.layer)) {
+            w.inside.insert(entity);
+            core::LogInfo("quests: {} comes into {}'s instance", who->name, w.quest);
+        }
+        return;
+    }
 }
 
 void Quests::TickWorlds(Clock::time_point now) {
@@ -2061,6 +2092,7 @@ void Quests::TickWorlds(Clock::time_point now) {
     };
     for (QuestWorld& w : worlds_) {
         const QuestDef::UseRule::World& spec = *w.rule->instance;
+        std::erase_if(w.asked, [&](const auto& kv) { return kv.second <= now; }); // unanswered: not taken
         // Gone by another way (out of the game, a return scroll): no longer inside.
         std::erase_if(w.inside, [&](std::uint32_t m) {
             const auto who = host_.QuestPlayer(m);

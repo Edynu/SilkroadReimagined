@@ -2646,6 +2646,11 @@ void PlayScreen::HandleInput(ScreenContext& context) {
         if (ui::Interface* ui = gui_.interface()) ui->Close(recallBox_);
         recallBox_ = nullptr;
     }
+    // A quest instance's entry unanswered when its time ran out: its box closes (the server forgets it: PlayQuest.cpp).
+    if (questEnterBox_ != nullptr && context.time >= questEnterUntil_) {
+        if (ui::Interface* ui = gui_.interface()) ui->Close(questEnterBox_);
+        questEnterBox_ = nullptr;
+    }
     // HP or MP falling under 30 % (not to 0): the alarm once at the player, with the Game page's warning row for it and
     // its sound row on (the original's CIFPlayerMiniInfo).
     if (world_ && !replay_ && context.options != nullptr) {

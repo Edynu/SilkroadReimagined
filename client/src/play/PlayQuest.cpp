@@ -26,6 +26,25 @@ void PlayScreen::HandleQuest(ScreenContext& context, const proto::QuestEvent& ev
     const auto post = [&](const std::string& line) { player_.Post(game::GameMessage::Kind::General, line, context.time); };
     const auto banner = [&](const std::string& line) { player_.Notify(game::Banner::Kind::Quest, line, context.time); };
     lastTime_ = context.time;
+    // The party's master opened the quest's instance: "For this quest, you will teleport. Continue?" (the original's
+    // invitation kind 7, a Confirm box), the answer sent; --guild-accept / --party-accept answer it yes.
+    if (const auto* ask = std::get_if<proto::QuestEnterAsk>(&event)) {
+        const std::uint32_t quest = ask->quest;
+        const auto answer = [this, quest](bool yes) {
+            questEnterBox_ = nullptr;
+            core::LogInfo("game: quest {}: its instance's entry answered {}", quest, yes ? "yes" : "no");
+            if (!replay_ && shared_ && shared_->session) {
+                shared_->session->SendGame(proto::QuestEnterReply::kId, proto::Encode(proto::QuestEnterReply{quest, std::uint8_t(yes ? 1 : 0)}));
+            }
+        };
+        if (context.config.GetBool("guild-accept", false) || context.config.GetBool("party-accept", false)) {
+            answer(true);
+        } else if (ConfirmBox* box = hud_.Confirm("UIIT_STT_CONFIRM_BOX", {gui_.data().Text("UIIT_MSG_QUEST_ENTER_INSTANCE")}, answer)) {
+            questEnterBox_ = box;
+            questEnterUntil_ = context.time + proto::kQuestEnterAskSeconds;
+        }
+        return;
+    }
     if (const auto* guide = std::get_if<proto::QuestGuide>(&event)) {
         ShowQuestGuide(hudContext_, guide->rows); // the level-up's quest guide
         return;
