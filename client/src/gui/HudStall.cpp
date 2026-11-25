@@ -140,11 +140,24 @@ public:
             return;
         }
         opened_ = true;
+        // The owner's buttons' help (the original's 0x653DC0 on 5 and 6, and each slot's price button).
+        if (const ui::Widget* over = frame.pointer.hovered; over != nullptr && over->visible) {
+            const char* key = over == Child(kChangeTitle) ? "UIIT_STT_TOGGLE_STORE_TITLE_CHANGE"
+                              : over == Child(kOwnerMsg)  ? "UIIT_STT_TOGGLE_STORE_MASTER_MESSAGE"
+                                                          : nullptr;
+            for (int i = 0; key == nullptr && i < int(proto::kStallSlots); ++i) {
+                if (over == Child(kSlotEdit + i)) key = "UIIT_STT_TOGGLE_STORE_PRICE_CHANGE";
+            }
+            if (key != nullptr) frame.interface.ShowTooltip(c_.Text(key), over->ScreenRect());
+        }
         if (v->Revision() == seen_) return;
         seen_ = v->Revision();
         const bool mine = v->Mine(), open = v->ForBusiness();
         if (ui::Widget* w = Child(kTitle)) w->SetText(v->Name());
-        if (ui::Widget* w = Child(kGreeting)) w->SetText(v->Greeting());
+        // No greeting of the owner's: the original's own, "Welcome to [name]'s stall." (UIIT_STT_STALL_DEFAULT_OWNERMSG).
+        if (ui::Widget* w = Child(kGreeting)) {
+            w->SetText(!v->Greeting().empty() ? v->Greeting() : FormatText(c_.Text("UIIT_STT_STALL_DEFAULT_OWNERMSG"), {v->OwnerName()}));
+        }
         // The state: open for business, or being modified; the owner's button the other way.
         if (auto* icon = ui::As<ui::Static>(Child(kStateIcon))) {
             icon->texture = open ? "interface\\stall\\stl_condition_icon_01.ddj" : "interface\\stall\\stl_condition_icon_02.ddj";
