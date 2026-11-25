@@ -110,6 +110,7 @@ constexpr double kShowerWait = 3.0; // ours: a shower still not in by then gives
 } // namespace
 
 void PlayScreen::Enter(ScreenContext& context) {
+    netOff_ = false;
     portraits_.Init(context.device);
     madeFiles_ = context.madeFiles;
     shared_ = TitleShared::From(context);
@@ -1051,6 +1052,13 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         next = "characters";
     } else if (const auto* error = std::get_if<game::TitleError>(&event)) {
         core::LogWarning("game: {}", error->reason);
+        // The game server's connection lost in the world: the original's box (its kind 1, "The connection to the server
+        // has ended."); its button takes the player to the title (ours: the original's ends the program there).
+        if (error->where == game::TitleError::Where::Game && shown_ && gui_.interface() != nullptr && !netOff_ && !replay_) {
+            netOff_ = true;
+            hud_.Inform("UIIT_STT_CONFIRM_BOX", {gui_.data().Text("UIIT_MSG_MSGBOX_NETOFF")}, [this] { next = "title"; });
+            return;
+        }
         next = "title";
         return;
     } else if (const auto* bye = std::get_if<proto::Disconnected>(&event)) {

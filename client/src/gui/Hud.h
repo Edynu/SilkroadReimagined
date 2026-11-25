@@ -161,8 +161,10 @@ public:
     // Escape: closes one thing (section 6.4); with nothing to close, opens the system menu.
     void Escape();
     // A message box (CIFMessageBox) with a title key, lines and Yes / No, centred; `answer` hears
-    // which (No when closed).
-    void Confirm(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void(bool yes)> answer);
+    // which (No when closed). The box made (none without an interface).
+    ConfirmBox* Confirm(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void(bool yes)> answer);
+    // A message box that only tells (one button, Confirm); `done` hears its button or its closing.
+    void Inform(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void()> done);
     // The reverse return scroll's box (ReverseReturnBox), centred: `answer` hears 1 the last recall point, 2 the place
     // of death, 3 a point on the map, 0 cancelled.
     void ReverseReturn(std::function<void(int result)> answer);

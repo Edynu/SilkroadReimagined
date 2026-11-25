@@ -1226,6 +1226,14 @@ bool ConfirmBox::OnNotice(const ui::Notice& notice) {
     return true;
 }
 
+void ConfirmBox::OkOnly(const std::string& label) {
+    ui::Widget* yes = Child(252);
+    if (ui::Widget* no = Child(253)) no->visible = false;
+    if (yes == nullptr) return;
+    yes->SetText(label);
+    yes->rect.x = std::floor((rect.w - yes->rect.w) / 2.0f);
+}
+
 void ConfirmBox::Answer(bool yes) {
     auto answer = std::move(answer_);
     answer_ = nullptr;

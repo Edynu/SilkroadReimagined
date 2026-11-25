@@ -155,8 +155,8 @@ void Hud::Place(ui::Vec2 screen) {
     ui_->PullOntoScreen(screen);
 }
 
-void Hud::Confirm(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void(bool yes)> answer) {
-    if (ui_ == nullptr) return;
+ConfirmBox* Hud::Confirm(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void(bool yes)> answer) {
+    if (ui_ == nullptr) return nullptr;
     // The message box's frame and size (ours: the size of each kind is set in code, not traced;
     // this one holds the layout's dark tile, 16, 40, 284 x 122).
     assets::UiLayoutNode node;
@@ -167,9 +167,18 @@ void Hud::Confirm(const std::string& titleKey, const std::vector<std::string>& l
     node.rect = {0.0f, 0.0f, 316.0f, 178.0f};
     ui::Widget* w = ui_->Open(node);
     auto* box = dynamic_cast<ConfirmBox*>(w);
-    if (box == nullptr) return;
+    if (box == nullptr) return nullptr;
     ui_->Centre(*box, screen_);
     box->Ask(lines, std::move(answer));
+    return box;
+}
+
+void Hud::Inform(const std::string& titleKey, const std::vector<std::string>& lines, std::function<void()> done) {
+    if (ui_ == nullptr) return;
+    ConfirmBox* box = Confirm(titleKey, lines, [done = std::move(done)](bool) {
+        if (done) done();
+    });
+    if (box != nullptr) box->OkOnly(ui_->resources().Text("UIIT_CTL_CONFIRM"));
 }
 
 void Hud::ReverseReturn(std::function<void(int)> answer) {

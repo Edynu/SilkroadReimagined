@@ -1105,6 +1105,8 @@ public:
     bool OnNotice(const ui::Notice& notice) override;
     void Ask(const std::vector<std::string>& lines, std::function<void(bool yes)> answer);
     void Answer(bool yes); // as a click on Yes or No
+    // One button only, in the middle, labelled `label` (the original's boxes that only tell: the lost connection's).
+    void OkOnly(const std::string& label);
 
 private:
     ui::Interface* ui_ = nullptr;
