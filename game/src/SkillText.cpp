@@ -364,6 +364,12 @@ void Lines::Effects(const assets::SkillRow& s) {
         if (p[0] != 0) Add(T("PARAM_HP") + " " + T("PARAM_TRANS") + " " + N(p[0]));
         if (p[1] != 0) Add(T("PARAM_MP") + " " + T("PARAM_TRANS") + " " + N(p[1]));
     }
+    // 'dmgr': damage returned, by a chance, then the physical and the magical shares.
+    if (const auto p = P("dmgr")) {
+        if (p[0] != 0) Add(T("UIIT_STT_DAMAGE") + " " + T("PARAM_RETURN") + " " + T("UIIT_STT_PROBABILITY") + " " + N(p.Int(0)) + "%");
+        if (p[1] != 0) Add(T("UIIT_STT_PHY_DAMAGE") + " " + T("PARAM_RETURN") + " " + T("UIIT_STT_EU_RATIO") + " " + N(p.Int(1)) + "%");
+        if (p[2] != 0) Add(T("UIIT_STT_MAG_DAMAGE") + " " + T("PARAM_RETURN") + " " + T("UIIT_STT_EU_RATIO") + " " + N(p.Int(2)) + "%");
+    }
     for (const auto& [tag, what] : std::initializer_list<std::pair<const char*, const char*>>{
              {"spi", "PARAM_SKILL_POINT_AMOUNT"}, {"hwit", "PARAM_HWAN_TIME_INCREASE"}, {"msr", "PARAM_MP_ABSORB_RATE"}, {"gdr", "PARAM_GOLD_DROP_RATE"}}) {
         if (const auto p = P(tag)) Add(FormatText(T(what), {N(p[0])}));

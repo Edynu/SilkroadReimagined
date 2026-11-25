@@ -2915,4 +2915,8 @@ TEST_CASE("a European passive's lifts read as the 1.188 tooltip words them ('set
     CHECK(lines("SKILL_EU_CLERIC_PRAISEP_ABILITY_A_01").find(lookup("UIIT_STT_EU_WHEN_A_BLESSING") + " " + lookup("PARAM_STR") + " 1 ") != std::string::npos);
     CHECK(lines("SKILL_EU_ROG_STEALTHP_TIME_A_01").find(lookup("PARAM_DURA") + " 12.0" + lookup("PARAM_SECOND")) != std::string::npos);
     CHECK(lines("SKILL_EU_WIZARD_SPIRITP_FIRE_A_01").find(lookup("PARAM_MA") + " 4% " + lookup("PARAM_INCREASE")) != std::string::npos);
+    // 'dmgr': the two-hander's damage returned (20 % of the time, 20 % of the physical).
+    const std::string back = lines("SKILL_EU_WARRIOR_TWOHANDP_RETURN_A_01");
+    CHECK(back.find(lookup("UIIT_STT_DAMAGE") + " " + lookup("PARAM_RETURN") + " " + lookup("UIIT_STT_PROBABILITY") + " 20%") != std::string::npos);
+    CHECK(back.find(lookup("UIIT_STT_PHY_DAMAGE") + " " + lookup("PARAM_RETURN") + " " + lookup("UIIT_STT_EU_RATIO") + " 20%") != std::string::npos);
 }
