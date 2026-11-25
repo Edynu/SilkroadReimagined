@@ -1052,6 +1052,22 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         // --page stall | stall-buy | stall-price: Zeta's stall open for business beside the bag (a visitor's view; stall-buy:
         // its second item dragged to the bag, the agreement box), or the player's own being modified with its first item's
         // price asked (stall-price: its edit button).
+        // --page open-market-register: the Open Market's Register page with a potion stack waiting, Register pressed (its
+        // confirm box: the deposit, the warning and its check box).
+        if (page_ == "open-market-register" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
+            stallShown_ = true;
+            if (tables_->Usable()) {
+                hudContext_.items = &tables_->items;
+                if (const assets::ItemRow* r = tables_->items.Find(std::string_view("ITEM_ETC_HP_POTION_02"))) {
+                    sample_.openMarket.pending.push_back({std::uint8_t(13), r->refObjId, 50, 25000});
+                    ++sample_.openMarket.version;
+                }
+                hudContext_.openMarketRequest = [](game::proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: open market request 0x{:04X}", id); };
+                ShowOpenMarket(hudContext_, true);
+                OpenMarketScript(hudContext_, "om-page", "register");
+                OpenMarketScript(hudContext_, "om-register", "");
+            }
+        }
         // --page stall-network-buy: the stall network's window on a page of one row, its Purchase pressed (the box).
         if (page_ == "stall-network-buy" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
             stallShown_ = true;

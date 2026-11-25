@@ -33,6 +33,8 @@ constexpr int kSettleStrip = 7, kSettle = 55, kSettleRows = 140, kSettlePages = 
 // Inside a row: the number, the level, the name, the count, the price, the time (the register and settle rows), the item.
 constexpr int kRowNumber = 10, kRowLevel = 11, kRowName = 12, kRowCount = 13, kRowPrice = 14, kRowTime = 15, kRowItem = 20, kRowTip = 21;
 constexpr int kWindowId = 190, kPriceBoxId = 194;
+constexpr const char* kConfirmLayout = "res_ui\\open_market_1_3.2dt";
+constexpr int kConfirmBoxId = 196;
 
 template <typename T>
 void Send(HudContext& c, const T& message) {
@@ -89,6 +91,47 @@ public:
 
 private:
     HudContext& c_;
+};
+
+// The registration's question (CNIFOpenMarketRegistrationConfirmationMsgBox, open_market_1_3.2dt): its second line the
+// deposit ("The deposit comes to [%d] Gold. ..."), its fourth the warning beside a check box ticked when it opens; Confirm
+// (23) registers while the box is ticked, else "UIIT_STT_OPEN_MARKET_CHECKBOX_ERROR"; either way it closes, as Cancel (24).
+class RegisterConfirmBox : public ui::MainFrame {
+public:
+    RegisterConfirmBox(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+    std::function<void()> confirmed;
+    void Created(ui::Interface& ui) override {
+        MainFrame::Created(ui);
+        ui_ = &ui;
+        const auto* records = c_.layout2dt ? c_.layout2dt(kConfirmLayout) : nullptr;
+        if (records == nullptr || records->empty()) return;
+        Build2dt(ui, *this, *records, {});
+    }
+    void Ask(std::uint64_t deposit) {
+        if (ui::Widget* w = Find(26)) w->SetText(FormatText(c_.Text("UIIT_MSG_OPEN_MARKET_ENTER"), {std::to_string(deposit)}));
+        if (ui::Widget* w = Find(28)) w->SetText(c_.Text("UIIT_MSG_OPEN_MARKET_WARNING"));
+        if (auto* check = ui::As<ui::CheckBox>(Find(30))) check->checked = true;
+        visible = true;
+    }
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && (n.control == 23 || n.control == 24)) {
+            if (n.control == 23) {
+                const auto* check = ui::As<ui::CheckBox>(Find(30));
+                if (check != nullptr && check->checked) {
+                    if (confirmed) confirmed();
+                } else if (c_.systemLine) {
+                    c_.systemLine(c_.Text("UIIT_STT_OPEN_MARKET_CHECKBOX_ERROR"));
+                }
+            }
+            if (ui_ != nullptr) ui_->Close(this);
+            return true;
+        }
+        return MainFrame::OnNotice(n);
+    }
+
+private:
+    HudContext& c_;
+    ui::Interface* ui_ = nullptr;
 };
 
 class MarketWindow : public ui::MainFrame {
@@ -281,14 +324,20 @@ public:
         if (s == nullptr || s->openMarket.pending.empty() || c_.hud == nullptr) return;
         const std::uint64_t deposit = s->openMarket.PendingDeposit();
         HudContext* c = &c_;
-        // "The deposit comes to [%d] Gold. The deposit for unsold items are not refundable. Will you register the item(s)?"
-        c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(c_.Text("UIIT_MSG_OPEN_MARKET_ENTER"), {std::to_string(deposit)}), c_.Text("UIIT_MSG_OPEN_MARKET_WARNING")},
-                        [c](bool yes) {
-                            if (!yes || c->state == nullptr) return;
-                            proto::OpenMarketRegister m;
-                            for (const auto& p : c->state->openMarket.pending) m.entries.push_back({p.place, p.count, p.price});
-                            Send(*c, m);
-                        });
+        // The registration's own box (open_market_1_3.2dt): the deposit, the warning and its check box.
+        if (ui_ == nullptr) return;
+        if (ui::Widget* open = ui_->Window(kConfirmBoxId)) ui_->Close(open);
+        const auto node = RootNode2dt(c_, kConfirmLayout, "CNIFOpenMarketRegistrationConfirmationMsgBox", kConfirmBoxId);
+        auto* box = node ? dynamic_cast<RegisterConfirmBox*>(ui_->Open(*node)) : nullptr;
+        if (box == nullptr) return;
+        ui_->Centre(*box, ui_->screen());
+        box->confirmed = [c] {
+            if (c->state == nullptr) return;
+            proto::OpenMarketRegister m;
+            for (const auto& p : c->state->openMarket.pending) m.entries.push_back({p.place, p.count, p.price});
+            Send(*c, m);
+        };
+        box->Ask(deposit);
     }
     void CancelChosen() {
         game::PlayerState* s = c_.state;
@@ -554,6 +603,7 @@ MarketWindow* WindowOf(HudContext& c) {
 void RegisterOpenMarketWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CNIFOpenMarket", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<MarketWindow>(n, *c); });
     ui.Register("CNIFOpenMarketRegistrationPriceMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<PriceBox>(n, *c); });
+    ui.Register("CNIFOpenMarketRegistrationConfirmationMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<RegisterConfirmBox>(n, *c); });
 }
 
 void ShowOpenMarket(HudContext& c, bool shown) {
