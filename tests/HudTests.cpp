@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/assets/FileSystem.h"
@@ -130,6 +131,16 @@ struct HudHarness {
 };
 
 } // namespace
+
+TEST_CASE("the original's refusal codes find their words (the 1.188 client's one table)") {
+    using sr::client::OriginalErrorKey;
+    CHECK(std::string(OriginalErrorKey(0x185B)) == "UIIT_MSG_STRGERR_WAIT_FOR_REUSE_DELAY");
+    CHECK(std::string(OriginalErrorKey(0x1C07)) == "UIIT_MSG_INTERACTION_FAIL_NOT_ENOUGH_MONEY");
+    CHECK(std::string(OriginalErrorKey(0x3029)) == "UIIT_STT_SKILL_USE_FAIL_OVERLAP_COUNT");
+    CHECK(std::string(OriginalErrorKey(0x0002)) == "UIIT_MSG_PARTYERR_UNKNOWN_ERROR");
+    CHECK(OriginalErrorKey(0x1807) == nullptr); // none: the windows' own words
+    CHECK(OriginalErrorKey(0xFFFF) == nullptr);
+}
 
 TEST_CASE("the HUD's start windows stand where the screen's size puts them") {
     HudHarness h;

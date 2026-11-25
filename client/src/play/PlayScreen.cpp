@@ -1,4 +1,5 @@
 #include "play/PlayScreen.h"
+#include "gui/ErrorTexts.h"
 #include "sr/game/BetaQuests.h"
 #include "sr/game/TimedServices.h"
 #include "sr/game/Cos.h"
@@ -660,14 +661,12 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
     } else if (const auto* shop = std::get_if<proto::ShopAnswer>(&event); shop != nullptr && shop->opened) {
         if (!replay_) shopShow_ = shop->entity; // the store of the picked tab group, beside the inventory
     } else if (const auto* repaired = std::get_if<proto::NpcRepaired>(&event)) {
-        // An NPC's repair: the refusals' texts (by their names: the client's table of the
-        // 0x1Cxx codes was not read); done prints nothing (the pieces' new durability is in the bag).
+        // An NPC's repair: the refusals' texts by the original's table (ErrorTexts.h: 0x1C07 not enough money, 0x1C11
+        // cannot be repaired, 0x1C12 cannot be revived); done prints nothing (the pieces' new durability is in the bag).
         core::LogInfo("game: repair: {} ({} pieces, {} gold, code 0x{:04x})", repaired->ok ? "done" : "refused", repaired->changed.size(), repaired->gold, repaired->code);
         if (!replay_ && !repaired->ok) {
-            const char* key = repaired->code == 0x1C07   ? "UIIT_MSG_STRGERR_NOT_ENOUGH_REPAIR_GOLD"
-                              : repaired->code == 0x1C11 ? "UIIT_MSG_INTERACTION_FAIL_CANNOT_BE_REPAIRED"
-                              : repaired->code == 0x1C12 ? "UIIT_MSG_INTERACTION_FAIL_CANNOT_BE_REVIVED"
-                                                         : "UIIT_MSG_INTERACTION_FAIL_I_DONT_HAVE_ANYTHING_FOR_YOU";
+            const char* key = OriginalErrorKey(repaired->code);
+            if (key == nullptr) key = "UIIT_MSG_INTERACTION_FAIL_I_DONT_HAVE_ANYTHING_FOR_YOU";
             player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);
         }
     } else if (const auto* list = std::get_if<proto::StorageList>(&event)) {
@@ -785,11 +784,13 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         case proto::SkillUseStatus::Target: key = "UIIT_SKILL_USE_FAIL_NONESELECTETARGET"; break;
         case proto::SkillUseStatus::Dead: key = "UIIT_SKILL_USE_FAIL_CHAR_DEAD"; break;
         case proto::SkillUseStatus::Untouchable: key = "UIIT_MSG_SKILL_USE_FAIL_CANT_ATTACK_TEMPORARILY"; break;
-        case proto::SkillUseStatus::Overlap:
-        case proto::SkillUseStatus::Links: key = "UIIT_SKILL_USE_FAIL_OVERLAP"; break; // ours for Links: the 1.188 text of 0x3029 not traced
-        case proto::SkillUseStatus::InBattle:
-        case proto::SkillUseStatus::Transformed: key = "UIIT_SKILL_USE_FAIL_SEALED"; break; // ours: the texts of 0x3028, 0x3030 not traced
-        case proto::SkillUseStatus::Berserk: key = "UIIT_MSG_HWAN_FAIL_OVERLAP_1"; break; // "Cannot be used in berzerk mode." 
+        case proto::SkillUseStatus::Overlap: key = "UIIT_SKILL_USE_FAIL_OVERLAP"; break;
+        // The original's codes' words (its table, ErrorTexts.h): 0x3029 a link's count, 0x3028 a battle state, 0x3030 a
+        // skill in a monster's shape, 0x3031 a stealth or a transform in berserk.
+        case proto::SkillUseStatus::Links: key = OriginalErrorKey(0x3029); break;
+        case proto::SkillUseStatus::InBattle: key = OriginalErrorKey(0x3028); break;
+        case proto::SkillUseStatus::Transformed: key = OriginalErrorKey(0x3030); break;
+        case proto::SkillUseStatus::Berserk: key = OriginalErrorKey(0x3031); break;
         case proto::SkillUseStatus::ReviveLevel: key = "UIIT_MSG_SKILL_USE_FAIL_RESURRECT"; break;
         // The jobs' 0x3018, 0x3022, 0x3019, 0x3021, 0x3006.
         case proto::SkillUseStatus::NotBattlefield: key = "UIIT_MSG_SKILL_USE_FAIL_ITS_NOT_A_BATTLE_FIELD"; break;
@@ -1002,39 +1003,10 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         if (!replay_) ServiceEvent(hudContext_, *mall); // the services' answers, the cubes (HudServices.cpp)
 
     } else if (const auto* refused = std::get_if<proto::ItemRefused>(&event)) {
-        // The original's code as its text (the client's table).
-        static constexpr struct {
-            std::uint16_t code;
-            const char* key;
-        } kTexts[] = {{0x18F5, "UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_INS"},
-                      {0x187A, "UIIT_MSG_COSPETERR_CANT_USEITEM"},
-                      {0x185F, "UIIT_MSG_STRGERR_REQUESTED_JOB_BLOCKED_BY_QUEST"},
-                      {0x185D, "UIIT_MSG_STRGERR_PREV_TELESCROLL_ALREADY_WORKING"},
-                      {0x1875, "UIIT_MSG_STRGERR_MURDERER_CANT_USE_PORTAL_SCROLL"},
-                      {0x185E, "UIIT_MSG_STRGERR_CANT_TELEPORT_WITH_CART"},
-                      {0x186A, "UIIT_MSG_STRGERR_ONLY_ROBBER_CAN_USE_THIS_ITEM"},
-                      {0x1885, "UIIT_MSG_STRGERR_CANT_FIND_LAST_TELEPOS"},
-                      {0x1886, "UIIT_MSG_STRGERR_CANT_FIND_LAST_DIEDPOS"},
-                      {0x18FD, "UIIT_MSG_INTERACTION_FAIL_OUT_OF_REQUIRED_LEVEL_FOR_TELEPORT"},
-                      {0x18E9, "UIIT_MSG_FORT_PORTALSTONE_FAIL_02"},
-                      {0x18F2, "UIIT_MSG_FORT_ETC_ERROR_WRONGACTION_FORTWAR"},
-                      {0x1838, "UIIT_MSG_STRGERR_CANNOT_BE_DROPPED"},
-                      {0x1839, "UIIT_MSG_STRGERR_CANNOT_BE_PICKED"},
-                      {0x1874, "UIIT_MSG_STRGERR_CANNOT_BE_PICKED_AT_QUEST_ACHIEVE_CONDITION"},
-                      {0x1843, "UIIT_MSG_STRGERR_INVALID_TARGET_STORAGE"},
-                      {0x1834, "UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED"},
-                      {0x1829, "UIIT_MSG_STRGERR_SPECIFY_POSITIVE_NUMBER_ONLY"},
-                      {0x180F, "UIIT_MSG_STRGERR_NOT_ENOUGH_GOLD"},
-                      // A potion's or a pill's (0xB04C's): its user dead, its kind's reuse not over.
-                      {0x1889, "UIIT_SKILL_USE_FAIL_CHAR_DEAD"},
-                      {0x185B, "UIIT_MSG_STRGERR_WAIT_FOR_REUSE_DELAY"},
-                      // A quest's trap: a monster within 5 times its radius (0x3038), another trap or object in it (0x3037).
-                      {0x3038, "UIIT_MSG_QUEST_ERR_CANNOT_MAKE_TRAP_EXIST_MONSTER"},
-                      {0x3037, "UIIT_MSG_QUEST_ERR_CANNOT_MAKE_TRAP"}};
-        const char* key = "UIIT_MSG_COSPETERR_CANT_USEITEM";
-        for (const auto& t : kTexts) {
-            if (t.code == refused->code) key = t.key;
-        }
+        // The original's code as its text (the 1.188 client's table, ErrorTexts.h); a code it has none for, the COS's
+        // item line (ours).
+        const char* key = OriginalErrorKey(refused->code);
+        if (key == nullptr) key = "UIIT_MSG_COSPETERR_CANT_USEITEM";
         // A murderer's return scroll (0x1875): a banner too (category 5).
         if (refused->code == 0x1875) player_.Notify(game::Banner::Kind::Warning, gui_.data().Text(key), context.time);
         if (const char* mall = MallItemErrorKey(refused->code)) key = mall; // the mall's items' codes

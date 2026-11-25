@@ -19,6 +19,7 @@
 #include <map>
 #include <string>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/game/Inventory.h"
@@ -852,7 +853,8 @@ const char* StallCodeKey(Code code) {
     case Code::NotTown: return "UIIT_MSG_WARENETWORK_USE_CITY";
     case Code::Changed: return "UIIT_MSG_WARENETWORK_BUY_ERROR";
     case Code::Rented: return "UIIT_CTL_NASRUN_NOT_TRADE";
-    default: return nullptr;
+    // Any other of the original's codes: its table's words (ErrorTexts.h); ours below 0x100 stay quiet.
+    default: return std::uint16_t(code) >= 0x100 ? OriginalErrorKey(std::uint16_t(code)) : nullptr;
     }
 }
 

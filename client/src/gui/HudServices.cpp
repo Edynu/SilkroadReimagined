@@ -9,6 +9,7 @@
 #include <cmath>
 #include <format>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/assets/Dress.h"
@@ -40,28 +41,12 @@ void Line(HudContext& c, const std::string& text) {
     if (c.state != nullptr && !text.empty()) c.state->Post(game::GameMessage::Kind::General, text, c.time);
 }
 
-// The services' codes' texts (the client's table).
+// The services' codes' texts: the original's table (ErrorTexts.h), and two of ours it has none for.
 const char* ServiceKey(std::uint16_t code) {
     switch (code) {
-    case 0x1882: return "UIIT_MSG_STRGERR_CANT_MUTATE_EQUIPED_ITEM";
-    case 0x1883: return "UIIT_MSG_STRGERR_CANT_MUTATE_SINCE_EQUIP_CLASS_TOO_HIGH";
-    case 0x1884: return "UIIT_MSG_STRGERR_INVALID_TRANSGENDER_TARGET";
-    case 0x1888: return "UIIT_MSG_STRGERR_THERE_IS_NO_ITEM_TO_REPAIR";
-    case 0x1889: return "UIIT_SKILL_USE_FAIL_CHAR_DEAD";
-    case 0x188A: return "UIIT_STT_MAGIC_CUBE_INVENTORY_FULL";
-    case 0x188E: return "UIIT_STT_MAGIC_CUBE_STORE_SELL_ERROR";
     case 0x1807: return "UIIT_MSG_STRGERR_INVENTORY_FULL";
-    case 0x1892: return "UIIT_MSG_CHAR_SKIN_ERR_ARMOR";
-    case 0x1C07: return "UIIT_MSG_STRGERR_NOT_ENOUGH_REPAIR_GOLD";
     case 0x1C09: return "UIIT_MSG_STRGERR_THERE_IS_NO_ITEM_TO_REPAIR"; // ours: the interaction group's text not traced
-    case 0x1C11:
-    case 0x1C12: return "UIIT_MSG_INTERACTION_FAIL_CANNOT_BE_REPAIRED";
-    case 0x7801: return "UIIT_MSG_WITHDRAW_SKILL_FAIL_NOT_LEARN";
-    case 0x7802: return "UIIT_MSG_WITHDRAW_SKILL_FAIL_INVALID_LEVEL";
-    case 0x7804: return "UIIT_MSG_WITHDRAW_SKILL_FAIL_NOT_ENOUGH_GOLD";
-    case 0x7805: return "UIIT_MSG_WITHDRAW_SKILL_FAIL_NOT_ENOUGH_POTION";
-    case 0x7806: return "UIIT_MSG_WITHDRAW_SKILL_FAIL_DEPENDANCY_LIMIT";
-    default: return nullptr;
+    default: return OriginalErrorKey(code);
     }
 }
 

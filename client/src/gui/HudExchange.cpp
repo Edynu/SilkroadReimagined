@@ -11,6 +11,7 @@
 
 #include <string>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/game/Inventory.h"
@@ -302,7 +303,8 @@ const char* ExchangeCodeKey(proto::ExchangeCode code) {
     case C::TradeGoods: return "UIIT_MSG_STRGERR_YOU_CANT_DEAL_SPECIALTY";
     case C::PetSummoned: return "UIIT_MSG_COSPETERR_CANT_TRADE";
     case C::Rented: return "UIIT_CTL_NASRUN_NOT_TRADE";
-    default: return nullptr;
+    // Any other of the original's codes: its table's words (ErrorTexts.h); ours below 0x100 stay quiet.
+    default: return std::uint16_t(code) >= 0x100 ? OriginalErrorKey(std::uint16_t(code)) : nullptr;
     }
 }
 

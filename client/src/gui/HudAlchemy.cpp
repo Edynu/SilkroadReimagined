@@ -21,6 +21,7 @@
 #include <format>
 #include <string>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/game/Alchemy.h"
@@ -106,7 +107,11 @@ const char* ServerKey(std::uint16_t code) {
     case alchemy::code::kRepairInvalid: return "UIIT_MSG_ENCHANTERR_RONDO2_UNREPAIRABLE_ITEM";
     case alchemy::code::kHonorRondo: return "UIIT_MSG_TC_ERROR_NOT_RONDO_HONOR_ITEM";
     case alchemy::code::kAvatar: return "UIIT_MSG_ENCHANT_SLOT_MISMATCH_REINFORCE";
-    default: return "UIIT_MSG_ENCHANT_FAILED";
+    default: {
+        // Any other code: the original's table's words (ErrorTexts.h), else the failure's line.
+        const char* key = OriginalErrorKey(code);
+        return key != nullptr ? key : "UIIT_MSG_ENCHANT_FAILED";
+    }
     }
 }
 
