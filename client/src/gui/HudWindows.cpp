@@ -11,39 +11,16 @@ namespace sr::client {
 
 std::string FormatText(const std::string& format, std::initializer_list<std::string> args) { return game::FormatText(format, args); }
 
-namespace {
-
-// The main window's round buttons (ifmainpopup.txt, ids 10..16): each one's page and its title.
-struct SideButton {
-    int id, page;
-    const char* text;
-};
-constexpr SideButton kSideButtons[] = {
-    {10, hud::kPageCharacter, "UIIT_STT_CHARACTER"}, {11, hud::kPageInventory, "UIIT_STT_INVENTORY"}, {12, hud::kPageSkills, "UIIT_STT_SKILL"},
-    {13, hud::kPageActions, "UIIT_STT_ACTION"},      {14, hud::kPageParty, "UIIT_STT_PARTY"},         {15, hud::kPageQuests, "UIIT_STT_QUEST"},
-    {16, hud::kPageAcademy, "UIIT_CTL_TC_TRAININGCAMP"},
-};
-
-} // namespace
-
 void MainPopup::Update(ui::Frame& frame) {
     ui::MainFrame::Update(frame);
-    for (const SideButton& b : kSideButtons) {
-        if (ui::Widget* w = Child(b.id); w != nullptr && frame.pointer.hovered == w) frame.interface.ShowTooltip(context_.Text(b.text), w->ScreenRect());
+    // The left strip (ifmainpopup.txt's round buttons 10..16 and their backing 4): 1.188 hides them when it makes the
+    // window and never shows them again; its pages are reached by the under menu bar and the keys.
+    for (int id : {4, 10, 11, 12, 13, 14, 15, 16}) {
+        if (ui::Widget* w = Child(id)) w->visible = false;
     }
 }
 
-bool MainPopup::OnNotice(const ui::Notice& notice) {
-    if (notice.kind == ui::Notice::Kind::Clicked && notice.source->parent() == this && context_.hud != nullptr) {
-        for (const SideButton& b : kSideButtons) {
-            if (notice.control != b.id) continue;
-            if (b.page == hud::kPageQuests) ToggleQuestWindow(context_); // 1.188: the quests' own window
-            else context_.hud->OpenPage(b.page);
-            return true;
-        }
-    }
-    return ui::MainFrame::OnNotice(notice);
-}
+bool MainPopup::OnNotice(const ui::Notice& notice) { return ui::MainFrame::OnNotice(notice); }
 
 void RegisterHudWindows(ui::Interface& ui, HudContext& context) {
     HudContext* c = &context;
