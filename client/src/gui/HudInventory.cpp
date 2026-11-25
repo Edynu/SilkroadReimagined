@@ -266,6 +266,47 @@ std::vector<ui::TooltipLine> Requirements(const assets::ItemRow& row, const HudC
         needs.push_back({c.Text(row.country == 0 ? "UIO_NEWCHAR_CTL_CHINESE" : "UIO_NEWCHAR_CTL_EUROPEAN"), row.country == c.wearer.country ? kWhite : kRed,
                          kShadow});
     }
+    // A fortress war's item (3/3/3/6..9 and 11, 3/3/1..2/10, 3/3/6/2, 3/1/6/16; not the mall's): who may use it (Param5's
+    // positions, none: everyone; red outside a guild or without one of them), where (Param2: 1 inside a fortress's area,
+    // 2 outside it) and when (Param3: 1 during the war, 2 outside it), each red when the player does not meet it; 3/1/6/16
+    // has the first alone. Ours: the positions joined by ", " (the original puts one before each but the commander).
+    const auto& t = row.typeId;
+    const bool fortressItem = !row.cashItem && t[0] == 3 &&
+                              ((t[1] == 3 && ((t[2] == 3 && ((t[3] >= 6 && t[3] <= 9) || t[3] == 11)) || ((t[2] == 1 || t[2] == 2) && t[3] == 10) ||
+                                              (t[2] == 6 && t[3] == 2))) ||
+                               (t[1] == 1 && t[2] == 6 && t[3] == 16));
+    if (fortressItem) {
+        const proto::GuildMemberRecord* me = c.guild != nullptr && c.guild->InGuild() ? c.guild->Self() : nullptr;
+        const int grade = row.params[4], spot = row.params[1], time = row.params[2];
+        std::string who;
+        if (grade == 0) who = c.Text("UIIT_CTL_PARTYMATCH_PSEARCH_OBJECTALL");
+        for (const std::uint8_t p : {game::kPositionCommander, game::kPositionDeputy, game::kPositionWar, game::kPositionProduction, game::kPositionTraining,
+                                     game::kPositionEngineer}) {
+            if ((grade & p) != 0) who += (who.empty() ? "" : ", ") + c.Text(game::GuildPositionKey(p));
+        }
+        const bool gradeMet = me != nullptr && (grade == 0 || (me->position & grade) != 0);
+        needs.push_back({c.Text("UIIT_STT_ITEM_FORMAT_FORT_USEGRADE") + ": " + who, gradeMet ? kWhite : kRed, kShadow});
+        if (!(t[1] == 1 && t[2] == 6 && t[3] == 16)) {
+            const game::WorldView::Entity* self = c.world != nullptr ? c.world->Find(c.world->Self()) : nullptr;
+            bool inFortress = false;
+            if (self != nullptr && c.fortress != nullptr) {
+                for (const proto::FortressRecord& f : c.fortress->Fortresses()) {
+                    if (std::find(f.regions.begin(), f.regions.end(), self->position.region) != f.regions.end()) inFortress = true;
+                }
+            }
+            std::string where = spot == 0 ? c.Text("UIIT_STT_QUEST_UNLIMITED") : std::string();
+            bool whereMet = true;
+            if ((spot & 1) != 0) where = c.Text("UIIT_STT_FORT_ITEMUSE_CONDITION_PLACE_FORTIN"), whereMet = inFortress;
+            if ((spot & 2) != 0) where = c.Text("UIIT_STT_FORT_ITEMUSE_CONDITION_PLACE_FORTOUT"), whereMet = !inFortress;
+            needs.push_back({c.Text("UIIT_STT_ITEM_FORMAT_FORT_USESPOT") + ": " + where, whereMet ? kWhite : kRed, kShadow});
+            const bool war = c.fortress != nullptr && c.fortress->WarOn();
+            std::string when = time == 0 ? c.Text("UIIT_STT_QUEST_UNLIMITED") : std::string();
+            bool whenMet = true;
+            if ((time & 1) != 0) when = c.Text("UIIT_STT_FORT_ITEMUSE_CONDITION_TIME_FORTPERIOD"), whenMet = me == nullptr || war;
+            if ((time & 2) != 0) when = c.Text("UIIT_STT_FORT_ITEMUSE_CONDITION_TIME_NOTFORTPERIOD"), whenMet = me == nullptr || !war;
+            needs.push_back({c.Text("UIIT_STT_ITEM_FORMAT_FORT_USETIME") + ": " + when, whenMet ? kWhite : kRed, kShadow});
+        }
+    }
     return needs;
 }
 

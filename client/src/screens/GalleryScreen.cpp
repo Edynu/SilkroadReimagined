@@ -845,6 +845,16 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 if (const assets::ItemRow* row = tables_->items.Find(std::string_view("ITEM_ETC_HP_POTION_02")))
                     for (std::uint8_t place : {std::uint8_t(13), std::uint8_t(45), std::uint8_t(77), std::uint8_t(108)})
                         bag.items.push_back({place, row->refObjId, 0, 0, 0, std::uint16_t(place), {}});
+                // --bag-items CODE,CODE...: those from the bag's second place on (an item's tooltip with --mouse over it).
+                std::uint8_t next = 14;
+                const std::string codes = context.config.GetString("bag-items", "");
+                for (std::size_t from = 0; from < codes.size();) {
+                    const std::size_t comma = std::min(codes.find(',', from), codes.size());
+                    if (const assets::ItemRow* row = tables_->items.Find(std::string_view(codes).substr(from, comma - from))) {
+                        bag.items.push_back({next++, row->refObjId, 0, 0, game::NewDurability(*row), 1, {}});
+                    }
+                    from = comma + 1;
+                }
                 sample_.Apply(game::TitleEvent{bag});
                 hud_.OpenPage(hud::kPageInventory);
             }
