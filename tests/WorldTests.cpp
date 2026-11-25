@@ -412,6 +412,52 @@ TEST_CASE("World: a ground item is told as just fallen to those who see it fall,
     CHECK(!view.Find(gold)->fresh);
 }
 
+TEST_CASE("World: a ground item kept for one player says whose it is until freed; only a ground item carries the owner") {
+    // On the wire: a ground item's owner both ways; any other entity has no such field (the same bytes as before).
+    proto::EntityAppeared item;
+    item.entity = 7;
+    item.kind = proto::EntityKind::GroundItem;
+    item.owner = 0x10000003;
+    proto::EntityAppeared back;
+    REQUIRE(proto::Decode(proto::Encode(item), back));
+    CHECK(back.owner == 0x10000003);
+    proto::EntityAppeared monster = item;
+    monster.kind = proto::EntityKind::Monster;
+    CHECK(proto::Encode(monster).size() + 4 == proto::Encode(item).size());
+    REQUIRE(proto::Decode(proto::Encode(monster), back));
+    CHECK(back.owner == 0);
+
+    Harness h(20.0);
+    const std::uint32_t a = h.Enter(1, At(100, 100, 500, 500), "Killer");
+    h.Run(0.2);
+    const auto told = [&](std::uint64_t peer, std::uint32_t entity) {
+        std::vector<proto::EntityAppeared> out;
+        for (const auto& m : h.Of<proto::EntityAppeared>(peer)) {
+            if (m.entity == entity) out.push_back(m);
+        }
+        return out;
+    };
+    const std::uint32_t drop = h.world.AddGroundItem(62, At(100, 100, 520, 500), 0.0f, 1, 0, 0, {}, a);
+    h.Run(0.3);
+    REQUIRE(told(1, drop).size() == 1);
+    CHECK(told(1, drop)[0].owner == a);
+    // The client's picture keeps the owner, and lets it go when told.
+    game::WorldView view;
+    view.Apply(game::TitleEvent{told(1, drop)[0]});
+    REQUIRE(view.Find(drop) != nullptr);
+    CHECK(view.Find(drop)->owner == a);
+    view.Apply(game::TitleEvent{proto::GroundItemFree{drop}});
+    CHECK(view.Find(drop)->owner == 0);
+    // Freed: once; a newcomer sees it as anyone's.
+    CHECK(h.world.FreeGroundItem(drop));
+    CHECK_FALSE(h.world.FreeGroundItem(drop));
+    CHECK_FALSE(h.world.FreeGroundItem(a)); // a player is no ground item
+    h.Enter(2, At(100, 100, 540, 500), "Passer");
+    h.Run(0.3);
+    REQUIRE(told(2, drop).size() == 1);
+    CHECK(told(2, drop)[0].owner == 0);
+}
+
 TEST_CASE("World: a walk ends where the navigation is blocked (game files)") {
     const auto dir = GameDir();
     if (dir.empty()) {

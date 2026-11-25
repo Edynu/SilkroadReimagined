@@ -419,6 +419,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     std::priority_queue<std::pair<Clock::time_point, std::uint32_t>, std::vector<std::pair<Clock::time_point, std::uint32_t>>,
                         std::greater<>>
         groundExpiry;
+    // The drops kept for their owner, by when they are anyone's (GroundItemFree to those who see them then).
+    std::priority_queue<std::pair<Clock::time_point, std::uint32_t>, std::vector<std::pair<Clock::time_point, std::uint32_t>>,
+                        std::greater<>>
+        groundOwned;
     static constexpr auto kGroundLifetime = std::chrono::seconds(180); // ours: for a row without a DecayTime
     // How long an item lies on the ground: its row's DecayTime (ms; dropped specialty goods 30 minutes), gold its gold
     // row's (`model`, ITEM_ETC_GOLD_*).
@@ -465,8 +469,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::uniform_real_distribution<float> reach(least, most);
         const proto::FlatPosition centre = proto::ToFlat(at);
         std::string ownerName;
+        std::uint32_t ownerEntity = 0;
         for (const auto& [peerId, p] : players) {
-            if (owner != 0 && p.selected == owner && p.entity != 0) ownerName = p.name;
+            if (owner != 0 && p.selected == owner && p.entity != 0) {
+                ownerName = p.name;
+                ownerEntity = p.entity;
+            }
         }
         for (std::size_t i = 0; i < drops.size(); ++i) {
             DropTable::Drop& d = drops[i];
@@ -481,10 +489,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             const std::string_view name = row == nullptr                   ? std::string_view()
                                           : game::IsSpecialtyGood(*row) ? std::string_view(d.item.creator)
                                                                         : OwnedItemName(*row, ownerName);
-            const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, d.item.plus, GroundState(d.item), name);
+            const std::uint32_t id = world->AddGroundItem(model, there, turn(groundRandom), amount, d.item.plus, GroundState(d.item), name, ownerEntity);
             const Clock::duration life = GroundLife(d.item, model);
             GroundItem g{std::move(d.item), d.gold, owner, Clock::now() + kDropOwned, Clock::now() + life};
             groundExpiry.push({g.expires, id});
+            if (ownerEntity != 0) groundOwned.push({g.ownerUntil, id});
             ground[id] = std::move(g);
         }
     }
@@ -504,9 +513,19 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         ground[id] = std::move(g);
     }
 
-    // The ground items whose time has come: gone for everyone near.
+    // The ground items whose time has come: gone for everyone near. The drops whose owner's time is over: anyone's,
+    // told to those who see them.
     void ExpireGround() {
         const auto now = Clock::now();
+        while (!groundOwned.empty() && groundOwned.top().first <= now) {
+            const std::uint32_t id = groundOwned.top().second;
+            groundOwned.pop();
+            if (!ground.contains(id) || !world->FreeGroundItem(id)) continue; // picked up or gone already
+            const std::vector<std::byte> bytes = proto::Encode(proto::GroundItemFree{id});
+            world->ForEachObserver(id, [&](std::uint64_t to) {
+                if (Peer* p = peers->Find(to)) p->connection->Send(proto::GroundItemFree::kId, bytes);
+            });
+        }
         while (!groundExpiry.empty() && groundExpiry.top().first <= now) {
             const std::uint32_t id = groundExpiry.top().second;
             groundExpiry.pop();
@@ -5209,7 +5228,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::uniform_real_distribution<float> turn(0.0f, 6.2831853f), spread(-6.0f, 6.0f);
         const proto::FlatPosition c = proto::ToFlat(where->position);
         const proto::WorldPosition there = proto::FromFlat({c.x + spread(groundRandom), c.z + spread(groundRandom)}, where->position.y);
-        const std::uint32_t id = world->AddGroundItem(row->refObjId, there, turn(groundRandom), 1, 0, 0, OwnedItemName(*row, p->name));
+        const std::uint32_t id = world->AddGroundItem(row->refObjId, there, turn(groundRandom), 1, 0, 0, OwnedItemName(*row, p->name), p->entity);
         const Clock::duration life = GroundLife(game::ItemInstance{}, row->refObjId);
         GroundItem g{NewItem(*row, 1), 0, p->selected, Clock::now() + life, Clock::now() + life, true};
         groundExpiry.push({g.expires, id});

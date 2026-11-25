@@ -2732,7 +2732,14 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
         // (as the original's does), behind a swing or a cast running. Two commands held: not sent.
         pendingNpc_ = 0;
         pendingGate_ = 0;
-        if (actionsHeld_ < 2) {
+        // Kept for another (a drop for its killer's first 30 s, a quest item for good), unless both are of a party
+        // sharing items: refused at once with the original's words (0x1812), nothing sent.
+        const game::WorldView::Entity* lying = view_.Find(item);
+        const bool shared = player_.party.InParty() && (player_.party.settings & game::kPartyItemShare) != 0 && lying != nullptr &&
+                            player_.party.MemberByEntity(lying->owner) != nullptr;
+        if (lying != nullptr && lying->owner != 0 && lying->owner != view_.Self() && !shared) {
+            player_.itemRefusals.push_back(proto::ItemStatus::NotYours);
+        } else if (actionsHeld_ < 2) {
             if (StandingNear(item, 15.0f)) FaceToward(item); // picked up from where it stands (the server's reach)
             shared_->session->PickUp(item);
         }

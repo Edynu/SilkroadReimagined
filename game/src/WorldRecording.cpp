@@ -92,6 +92,7 @@ bool IsWorldMessage(proto::MessageId id) {
     case proto::EntityGone::kId:
     case proto::EntityMoved::kId:
     case proto::EntityTurned::kId:
+    case proto::GroundItemFree::kId:
     case proto::GateRefused::kId:
     case proto::LogoutAnswer::kId:
     case proto::QuickSlotList::kId:
@@ -191,6 +192,7 @@ const char* WorldMessageName(proto::MessageId id) {
     case proto::EntityGone::kId: return "EntityGone";
     case proto::EntityMoved::kId: return "EntityMoved";
     case proto::EntityTurned::kId: return "EntityTurned";
+    case proto::GroundItemFree::kId: return "GroundItemFree";
     case proto::EntityAction::kId: return "EntityAction";
     case proto::EntitySwing::kId: return "EntitySwing";
     case proto::EntityCastCancelled::kId: return "EntityCastCancelled";
@@ -281,6 +283,7 @@ bool DecodeWorldEvent(proto::MessageId id, std::span<const std::byte> payload, T
     case proto::EntityGone::kId: return As<proto::EntityGone>(payload, out);
     case proto::EntityMoved::kId: return As<proto::EntityMoved>(payload, out);
     case proto::EntityTurned::kId: return As<proto::EntityTurned>(payload, out);
+    case proto::GroundItemFree::kId: return As<proto::GroundItemFree>(payload, out);
     case proto::GateRefused::kId: return As<proto::GateRefused>(payload, out);
     case proto::LogoutAnswer::kId: return As<proto::LogoutAnswer>(payload, out);
     case proto::QuickSlotList::kId: return As<proto::QuickSlotList>(payload, out);

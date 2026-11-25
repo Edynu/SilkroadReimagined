@@ -41,7 +41,8 @@ using MessageId = std::uint16_t;
 
 // Raised whenever a message changes in a way an older peer cannot read.
 // 2: the moves packed (EntityMoved's places, a tick's moves in one frame).
-inline constexpr std::uint32_t kProtocolVersion = 2;
+// 3: a ground item's owner in EntityAppeared.
+inline constexpr std::uint32_t kProtocolVersion = 3;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

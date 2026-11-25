@@ -47,7 +47,7 @@ struct TitleError {
 
 using TitleEvent = std::variant<proto::ServerList, proto::Notices, proto::LoginResult, proto::LobbyEntered, proto::CharacterList,
                                 proto::LobbyResult, TitleError, proto::WorldEntered, proto::WorldLeft, proto::EntityAppeared,
-                                proto::EntityGone, proto::EntityMoved, proto::EntityTurned, proto::GateRefused, proto::LogoutAnswer,
+                                proto::EntityGone, proto::EntityMoved, proto::EntityTurned, proto::GroundItemFree, proto::GateRefused, proto::LogoutAnswer,
                                 proto::QuickSlotList, proto::ChatAnswer, proto::ChatLine, proto::InventoryList, proto::ItemMoved,
                                 proto::EquipmentChanged, proto::GateMenu, proto::ReturnPointSet, proto::GoldChanged,
                                 proto::ReturnStarted, proto::ReturnCancelled, proto::BuffAdded, proto::BuffRemoved,

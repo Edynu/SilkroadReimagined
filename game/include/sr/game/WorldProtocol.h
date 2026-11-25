@@ -338,6 +338,9 @@ struct EntityAppeared {
     std::uint8_t plus = 0;
     std::uint8_t rarity = 0;
     bool fresh = false;
+    // A ground item kept for one player (a drop for its killer's first 30 s, a quest item for good): his entity, 0
+    // anyone's (GroundItemFree ends it). Only a ground item carries it.
+    std::uint32_t owner = 0;
     template <typename V>
     void Visit(V& v) {
         v("entity", entity);
@@ -352,6 +355,7 @@ struct EntityAppeared {
         v("plus", plus);
         v("rarity", rarity);
         v("fresh", fresh);
+        if (kind == EntityKind::GroundItem) v("owner", owner);
     }
 };
 
@@ -1095,6 +1099,16 @@ struct DropGold {
 
 struct PickUp {
     static constexpr MessageId kId = 0x10A2;
+    std::uint32_t entity = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("entity", entity);
+    }
+};
+
+// A ground item no longer kept for its owner (EntityAppeared's `owner`): anyone's now.
+struct GroundItemFree {
+    static constexpr MessageId kId = 0x10A3;
     std::uint32_t entity = 0;
     template <typename V>
     void Visit(V& v) {

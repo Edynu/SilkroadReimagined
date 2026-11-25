@@ -42,6 +42,7 @@ public:
         std::uint32_t lookVersion = 0;
         proto::EntityKind kind = proto::EntityKind::Character;
         std::uint32_t amount = 0; // a ground item's count or gold; a skill object's owner
+        std::uint32_t owner = 0;  // a ground item kept for one player: his entity (0 anyone's)
         std::uint8_t plus = 0;
         std::uint8_t rarity = 0;  // a monster's kind (EntityAppeared)
         bool fresh = false;       // a ground item seen falling (EntityAppeared::fresh)

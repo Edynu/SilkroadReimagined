@@ -70,6 +70,7 @@ struct World::State {
         std::uint8_t plus = 0;
         std::uint8_t rarity = 0;   // a monster's kind
         bool fresh = false;        // a ground item just put down: told as fallen on the next pass only
+        std::uint32_t owner = 0;   // a ground item kept for one player (his entity)
         std::uint32_t maxHp = 0, maxMp = 0; // a player's (WorldEntered)
         SharedBytes appearBytes; // an NPC's EntityAppeared, encoded once (shared by everyone told)
         std::vector<proto::StateRecord> states; // its states (SetStates), their time left at statesAt
@@ -820,6 +821,7 @@ struct World::State {
         m.plus = o.plus;
         m.rarity = o.rarity;
         m.fresh = o.fresh;
+        m.owner = o.kind == proto::EntityKind::GroundItem ? o.owner : 0;
         return m;
     }
 
@@ -899,7 +901,7 @@ std::uint32_t World::AddNpc(std::uint32_t model, const proto::WorldPosition& pos
 }
 
 std::uint32_t World::AddGroundItem(std::uint32_t item, const proto::WorldPosition& position, float yaw, std::uint32_t amount,
-                                   std::uint8_t plus, std::uint8_t state, std::string_view name) {
+                                   std::uint8_t plus, std::uint8_t state, std::string_view name, std::uint32_t owner) {
     const std::uint32_t id = AddNpc(item, position, yaw, name);
     State::Entity& e = s_->entities[id];
     e.kind = proto::EntityKind::GroundItem;
@@ -907,8 +909,17 @@ std::uint32_t World::AddGroundItem(std::uint32_t item, const proto::WorldPositio
     e.amount = amount;
     e.plus = plus;
     e.rarity = state;
+    e.owner = owner;
     e.appearBytes = proto::Encode(State::Appeared(e));
     return id;
+}
+
+bool World::FreeGroundItem(std::uint32_t entity) {
+    const auto it = s_->entities.find(entity);
+    if (it == s_->entities.end() || it->second.kind != proto::EntityKind::GroundItem || it->second.owner == 0) return false;
+    it->second.owner = 0;
+    it->second.appearBytes = proto::Encode(State::Appeared(it->second));
+    return true;
 }
 
 std::uint32_t World::AddSkillObject(std::uint32_t skill, std::uint32_t owner, const proto::WorldPosition& position, float yaw) {

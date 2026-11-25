@@ -213,8 +213,11 @@ public:
     // `rarity`: the original's byte for the name's colour (the item's rarity, | 1 for equipment with
     // magic options). `name`: specialty goods' owner (the alias of the trader who bought them) or a quest or event
     // item's (3/3/9, the player it belongs to), shown after the item's name.
+    // `owner`: the player it is kept for (his entity; EntityAppeared's owner) until FreeGroundItem.
     std::uint32_t AddGroundItem(std::uint32_t item, const game::proto::WorldPosition& position, float yaw, std::uint32_t amount,
-                                std::uint8_t plus, std::uint8_t state = 0, std::string_view name = {});
+                                std::uint8_t plus, std::uint8_t state = 0, std::string_view name = {}, std::uint32_t owner = 0);
+    // A ground item anyone's now: those who come into sight are told so (true when it was kept for one).
+    bool FreeGroundItem(std::uint32_t entity);
     // A skill object (proto::EntityKind::SkillObject: the skill's id, its owner's entity) standing at
     // `position`, seen like an NPC; Leave takes it away.
     std::uint32_t AddSkillObject(std::uint32_t skill, std::uint32_t owner, const game::proto::WorldPosition& position, float yaw);

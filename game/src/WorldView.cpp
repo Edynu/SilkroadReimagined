@@ -58,6 +58,7 @@ void WorldView::Apply(const TitleEvent& event) {
         e.yaw = m->yaw;
         e.kind = m->kind;
         e.amount = m->amount;
+        e.owner = m->owner;
         e.plus = m->plus;
         e.rarity = m->rarity;
         e.fresh = m->fresh;
@@ -149,6 +150,8 @@ void WorldView::Apply(const TitleEvent& event) {
         }
     } else if (const auto* m = std::get_if<proto::EntityDamaged>(&event)) {
         if (const auto it = entities_.find(m->target); it != entities_.end()) it->second.look.hp = m->hp;
+    } else if (const auto* m = std::get_if<proto::GroundItemFree>(&event)) {
+        if (const auto it = entities_.find(m->entity); it != entities_.end()) it->second.owner = 0;
     } else if (const auto* m = std::get_if<proto::EntityTurned>(&event)) {
         // A turn where it stands (a walker's leg keeps the facing of its way).
         if (const auto it = entities_.find(m->entity); it != entities_.end() && !it->second.moving) {

@@ -84,7 +84,7 @@ const char* RefusalKey(proto::ItemStatus status) {
     case proto::ItemStatus::TokensShort: return "UIIT_MSG_NOT_ENOUGH_COIN";
     case proto::ItemStatus::CoinsShort: return "UIIT_MGS_ARENA_NOT_ENOUGH_COIN";
     case proto::ItemStatus::TooFar: return "UIIT_MSG_INTERACTION_FAIL_TOO_FAR";
-    case proto::ItemStatus::NotYours: return "UIIT_MSG_ITEM_GET_FAIL"; // "Cannot loot the item"
+    case proto::ItemStatus::NotYours: return "UIIT_MSG_STRGERR_LOCKED_BY_OTHER_ONE"; // 0x1812: "... because it is other player's."
     case proto::ItemStatus::Exchanging: return "UIIT_MSG_STRGERR_CANT_USEITEM_WHILE_INTERACT"; // 0x1835
     case proto::ItemStatus::PlaceTaken: return "UIIT_MSG_STRGERR_EQUIPITEM";                    // an avatar of that kind worn (0x180E)
     case proto::ItemStatus::NeedsDress: return "UIIT_STT_AVATAR_MAIL_ONLY_WEAR";
