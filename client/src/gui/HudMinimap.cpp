@@ -150,8 +150,12 @@ void Minimap::Draw(ui::Frame& frame) {
             float size = 8.0f;
             if (e.kind == proto::EntityKind::Monster) {
                 if (e.look.hp == 0) continue;
-                sign = e.rarity == 3 ? "interface\\minimap\\mm_sign_unique.ddj" : "interface\\minimap\\mm_sign_monster.ddj";
-                if (e.rarity == 3) size = 12.0f;
+                // A unique's ring for rarity 3, and 8 (the Qin-Shi tomb's generals), as the original's.
+                const bool unique = (e.rarity & 0x0F) == 3 || (e.rarity & 0x0F) == 8;
+                sign = unique ? "interface\\minimap\\mm_sign_unique.ddj" : "interface\\minimap\\mm_sign_monster.ddj";
+                if (unique) size = 12.0f;
+            } else if (e.kind == proto::EntityKind::Cos) {
+                sign = "interface\\minimap\\mm_sign_animal.ddj"; // a pet, a horse, a transport: the animal's (the original's)
             } else if (e.look.name.empty()) {
                 // An NPC; one with something about the player's quests its own sign (loads
                 // mm_sign_questnpc.ddj beside mm_sign_npc.ddj).
