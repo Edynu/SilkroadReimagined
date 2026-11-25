@@ -24,6 +24,7 @@
 #include "sr/game/MagicPop.h"
 #include "sr/game/Mall.h"
 #include "sr/game/Skills.h"
+#include "sr/game/SkillText.h"
 #include "sr/assets/ItemGlow.h"
 #include "sr/assets/Dress.h"
 #include "sr/assets/ExeCursors.h"
@@ -2879,4 +2880,39 @@ TEST_CASE("An avatar dress worn over armour: drawn, the armour it covers left ou
     }
     MESSAGE(dressMeshes << " avatar meshes of " << model.parts.size());
     CHECK(dressMeshes > 0);
+}
+
+TEST_CASE("a European passive's lifts read as the 1.188 tooltip words them ('setv')") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    SkillTable skills;
+    REQUIRE_MESSAGE(skills.Load(fs, error), error);
+    TextCatalog text;
+    REQUIRE_MESSAGE(LoadTextCatalog(fs, "server_dep\\silkroad\\textdata\\textuisystem.txt", text, error), error);
+    const sr::game::SkillTextLookup lookup = [&](const std::string& key) {
+        const auto it = text.find(key);
+        return it != text.end() ? it->second : key;
+    };
+    const auto lines = [&](const char* codename) {
+        const SkillRow* row = skills.Find(std::string_view(codename));
+        REQUIRE_MESSAGE(row != nullptr, codename);
+        std::string all;
+        for (const std::string& l : sr::game::SkillRowEffectLines(*row, lookup)) all += l + "\n";
+        MESSAGE(std::string(codename) << ":\n" << all);
+        return all;
+    };
+    // Two lifts on one row: the blood sucked and the cruel spells' attack.
+    const std::string blood = lines("SKILL_EU_WARLOCK_BLOODP_INCREASE_A_01");
+    CHECK(blood.find(lookup("PARAM_LIFE_STEAL") + " 21% " + lookup("PARAM_INCREASE")) != std::string::npos);
+    CHECK(blood.find(lookup("UIIT_STT_EU_CRUALSPELL_ATTACK") + " 28% " + lookup("PARAM_INCREASE")) != std::string::npos);
+    // A blessing's stat, the stealth's time in seconds, a spell's magical attack.
+    CHECK(lines("SKILL_EU_CLERIC_PRAISEP_ABILITY_A_01").find(lookup("UIIT_STT_EU_WHEN_A_BLESSING") + " " + lookup("PARAM_STR") + " 1 ") != std::string::npos);
+    CHECK(lines("SKILL_EU_ROG_STEALTHP_TIME_A_01").find(lookup("PARAM_DURA") + " 12.0" + lookup("PARAM_SECOND")) != std::string::npos);
+    CHECK(lines("SKILL_EU_WIZARD_SPIRITP_FIRE_A_01").find(lookup("PARAM_MA") + " 4% " + lookup("PARAM_INCREASE")) != std::string::npos);
 }

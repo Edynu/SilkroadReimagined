@@ -39,6 +39,7 @@ private:
     std::string Flat(const char* what, long long n, const char* how) const { return T(what) + " " + N(n) + " " + T(how); }
     std::string Pct(const char* what, long long n, const char* how) const { return T(what) + " " + N(n) + "% " + T(how); }
     void Area(const assets::SkillParam& p);
+    void SetValues(const assets::SkillRow& s);
 
     const assets::SkillRow& owner_;
     const SkillTextLookup& text_;
@@ -64,6 +65,63 @@ void Lines::Area(const assets::SkillParam& p) {
         if (p[3] != 0) line += " (" + T("UIIT_STT_TRANSITION_COUNT") + " " + N(p[3]) + ")";
         Add(line);
     }
+}
+
+// 'setv' (up to five a row): the European passives' lifts, by their kind's code and its value, each a line as the
+// original words it.
+void Lines::SetValues(const assets::SkillRow& s) {
+    int count = 0;
+    assets::ForEachSkillParam(s, [&](std::uint32_t code, std::span<const std::uint32_t> a) {
+        if (code != SkillTag("setv") || count >= 5 || a.empty()) return;
+        ++count;
+        const std::uint32_t kind = a[0];
+        const std::uint32_t raw = a.size() > 1 ? a[1] : 0;
+        const long long v = static_cast<int>(raw);
+        const auto is = [&](std::initializer_list<const char*> codes) {
+            for (const char* c : codes) {
+                if (kind == SkillTag(c)) return true;
+            }
+            return false;
+        };
+        if (is({"E1SA", "E2SA", "E2AA", "CBAT", "DGAT"})) {
+            Add(Pct("PARAM_PA", v, "PARAM_INCREASE"));
+        } else if (is({"E2AH", "DGHR"})) {
+            Add(Flat("PARAM_HR", v, "PARAM_INCREASE"));
+        } else if (is({"WIMD", "BDMD", "HLMD"})) {
+            Add(Pct("PARAM_PSKILL_CONSUME_MP", v, "PARAM_DECREASE"));
+        } else if (is({"WIRU", "CBRA"})) {
+            Add(T("PARAM_RU") + " " + Metres(raw) + " " + T("PARAM_INCREASE"));
+        } else if (is({"EAAT", "COAT", "FIAT", "LIAT", "DTAT", "BLAT", "TRAT", "MUAT", "HLAT"})) {
+            Add(Pct("PARAM_MA", v, "PARAM_INCREASE"));
+        } else if (is({"RPDU"})) {
+            Add(Flat("PARAM_POISON_DAMAGE", v, "PARAM_INCREASE"));
+        } else if (is({"RPTU"})) {
+            Add(T("PARAM_PS") + " " + T("PARAM_POWER") + " " + N(v) + " " + T("PARAM_INCREASE"));
+        } else if (is({"RPBU", "STDU"})) {
+            Add(T("PARAM_DURA") + " " + Seconds1(raw) + T("PARAM_SECOND") + " " + T("PARAM_INCREASE"));
+        } else if (is({"DGAA"})) {
+            Add(Flat("PARAM_PA", v, "PARAM_INCREASE"));
+        } else if (is({"STSP"})) {
+            Add(Pct("PARAM_HSTE", v, "PARAM_INCREASE"));
+        } else if (is({"DTDR"})) {
+            Add(Pct("PARAM_DURA", v, "PARAM_INCREASE"));
+        } else if (is({"BSHP"})) {
+            Add(Pct("PARAM_LIFE_STEAL", v, "PARAM_INCREASE"));
+        } else if (is({"SAAA"})) {
+            Add(Pct("UIIT_STT_EU_CRUALSPELL_ATTACK", v, "PARAM_INCREASE"));
+        } else if (is({"TRAA"})) {
+            Add(Flat("UIIT_STT_EU_TRAP_DEMAGE", v, "PARAM_INCREASE"));
+        } else if (is({"MUER", "DSER"})) {
+            Add(T("PARAM_EFF_RANGE") + " " + Metres(raw) + " " + T("PARAM_INCREASE"));
+        } else if (is({"MUCR", "DSCR"})) {
+            Add(Flat("PARAM_RESIST", v, "PARAM_INCREASE"));
+        } else if (is({"HLRU"})) {
+            Add(Pct("PARAM_HEAL_HP", v, "PARAM_INCREASE"));
+        } else if (is({"HLFS", "HLMI", "HLBP", "HLSM"})) {
+            const char* what = kind == SkillTag("HLFS") ? "PARAM_STR" : kind == SkillTag("HLMI") ? "PARAM_INT" : kind == SkillTag("HLBP") ? "PARAM_PD" : "PARAM_MD";
+            Add(T("UIIT_STT_EU_WHEN_A_BLESSING") + " " + T(what) + " " + N(v) + " " + T("PARAM_INCREASE"));
+        }
+    });
 }
 
 void Lines::Effects(const assets::SkillRow& s) {
@@ -234,11 +292,21 @@ void Lines::Effects(const assets::SkillRow& s) {
         if ((p[0] & 8) != 0) Add(Pct("UIIT_STT_MAG_DAMAGE", p.Int(1), "PARAM_ABSORB"));
     }
     if (const auto p = P("lkag")) Add(Pct("PARAM_AGGRO", p.Int(0), "PARAM_ABSORB"));
+    // 'lkdd': the damage dispersed over the linked.
+    if (const auto p = P("lkdd")) Add(T("UIIT_STT_DAMAGE") + " " + T("UIIT_STT_EU_DISPERSION_RATIO") + " " + N(p.Int(0)) + "%");
     // Reflected damage, by the weapon's attack it is reckoned from.
     for (const auto& [tag, what] : std::initializer_list<std::pair<const char*, const char*>>{
              {"pwtt", "PARAM_WEAPON_PA_RATIO"}, {"mwtt", "PARAM_WEAPON_MA_RATIO"}, {"pwdt", "PARAM_WEAPON_PA_RATIO"}, {"mwdt", "PARAM_WEAPON_MA_RATIO"},
              {"mwhh", "PARAM_WEAPON_MA_RATIO"}, {"mwmh", "PARAM_WEAPON_MA_RATIO"}, {"mwhs", "PARAM_WEAPON_MA_RATIO"}}) {
         if (const auto p = P(tag)) Add(Pct(what, p.Int(0), "PARAM_REFLECT"));
+    }
+    // 'mcap': a monster of up to that level made (the transform's scroll); 'msch': the most a transform reaches.
+    if (const auto p = P("mcap")) {
+        Add(T("SN_ITEM_ETC_TRANS_MONSTER") + " " + T("UIIT_STT_EU_MAKE") + " (" + T("UIIT_STT_EU_POSSIBLE") + " " + T("UIIT_STT_MONSTER") + " " +
+            T("PARAM_LV") + " " + N(p.Int(0)) + ")");
+    }
+    if (const auto p = P("msch"); p && p[1] != 0) {
+        Add(T("PARAM_MAX") + " " + T("UIIT_STT_EU_TRANS") + " " + T("UIIT_STT_EU_POSSIBLE") + " " + T("PARAM_LV") + " " + N(p.Int(1)));
     }
     if (const auto p = P("pmhp")) {
         if (p[1] != 0) Add(T("PARAM_MAX") + " " + T("PARAM_HP") + " " + N(p[1]) + " " + T("PARAM_DECREASE"));
@@ -266,6 +334,12 @@ void Lines::Effects(const assets::SkillRow& s) {
     if (const auto p = P("cura")) Add(T("UIIT_STT_CURE_ALL") + " " + N(p[0]));
     if (const auto p = P("alcu")) Add(Pct("PARAM_ALCU", p.Int(0), "PARAM_INCREASE"));
     if (const auto p = P("luck")) Add(Pct("PARAM_LUCK", p.Int(0), "PARAM_INCREASE"));
+    // 'saps': a physical (4) or magical (8) skill's resonance.
+    if (const auto p = P("saps")) {
+        if ((p[0] & 4) != 0) Add(T("PARAM_PSKILL_SYMPATHY") + " " + N(p.Int(1)) + "%");
+        if ((p[0] & 8) != 0) Add(T("PARAM_MSKILL_SYMPATHY") + " " + N(p.Int(1)) + "%");
+    }
+    SetValues(s);
     if (const auto p = P("pdmg")) Add(T("UIIT_STT_EU_ABSOLUTE") + " " + T("UIIT_STT_DAMAGE") + " " + N(p[0]));
     if (const auto p = P("dmgt")) {
         if (p[0] != 0) Add(T("UIIT_STT_EU_ABSORB_RATIO") + " " + N(p[0]) + "%");
