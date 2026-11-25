@@ -91,6 +91,12 @@ void PlayScreen::PartyFrame(ScreenContext& context) {
     if (ui == nullptr || !hud_.Created()) return;
     // A request to party: the yes / no box (who asks, the party's settings, "Accept
     // party invitation?"); gone with the request (its time ran out).
+    // The Option window's "Party Invitation" unticked: refused without asking, as the original's.
+    if (party.invitation && !partyAsking_ && !replay_ && context.options != nullptr && !context.options->game.Get("partyInvites")) {
+        core::LogInfo("game: party request from {} refused (party invitations are off)", party.invitation->name);
+        party.invitation.reset();
+        shared_->session->AnswerPartyInvite(false);
+    }
     if (party.invitation && !partyAsking_) {
         const proto::PartyInvited& asked = *party.invitation;
         UiData& d = gui_.data();

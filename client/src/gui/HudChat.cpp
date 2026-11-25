@@ -168,6 +168,9 @@ void ChatWindow::TakeEntries() {
             if (!why.empty()) Post(game::GameMessage::Kind::General, why);
             continue;
         }
+        // The Option window's "Whisper" unticked: another's whisper is not shown (the original's client drops it; the
+        // sender is not told).
+        if (e.kind == proto::ChatKind::Whisper && !e.own && context_.options != nullptr && !context_.options->game.Get("whispers")) continue;
         const Shown shown = Format(e, context_);
         if (shown.text.empty()) continue;
         AddLine(shown.type, shown.colour, shown.text);

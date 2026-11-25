@@ -465,6 +465,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     snapshot.scene.active = false;
     snapshot.clearColor = {backdrop_[0], backdrop_[1], backdrop_[2], 1.0f};
     hudContext_.state = &sample_;
+    hudContext_.options = context.options; // the windows as the options file has them (the system lines' autohide, ...)
 #ifdef SR_BUG_REPORTS
     // The bug report's button and window on sample data: Send only logs what it would send.
     hudContext_.bugReport = [](BugReportForm form) {

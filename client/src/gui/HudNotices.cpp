@@ -107,7 +107,9 @@ void SystemMessages::Update(ui::Frame& frame) {
         }
         seen_ = state->messagesPosted;
     }
-    // The frame while the mouse is over the window (or the open board); always without the option.
+    // The frame while the mouse is over the window (or the open board); always without the option (the Game page's
+    // "System UI Autohide").
+    if (context_.options != nullptr) autohide = context_.options->game.Get("hideSystemMessages");
     const ui::Vec2 mouse = frame.pointer.position;
     const bool over = Inside(ScreenRect(), mouse) || (boardOpen_ && board_ != nullptr && Inside(board_->ScreenRect(), mouse));
     const bool shown = !autohide || over;
