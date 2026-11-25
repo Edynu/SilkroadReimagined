@@ -19,6 +19,7 @@
 #include "sr/assets/CollectionBook.h"
 #include "sr/assets/Gacha.h"
 #include "sr/assets/GameGuide.h"
+#include "sr/assets/FileSystem.h"
 #include "sr/assets/GameData.h"
 #include "sr/core/Options.h"
 #include "sr/assets/Shop.h"
@@ -214,6 +215,9 @@ struct HudContext {
     bool forgeAsked = false;
     // A guild's emblem at that revision as a texture path (empty: not here yet; asked for then).
     std::function<std::string(std::uint32_t guild, std::uint32_t revision)> guildCrest;
+    // A game picture's key pixels (32-bit ARGB, one of `keys`) in `colour`, the rest clear: a texture made once
+    // (KeyedPicture); its path ("" when it cannot be made). The world map's monster areas.
+    std::function<std::string(const std::string& source, const std::vector<std::uint32_t>& keys, std::uint32_t colour)> keyedPicture;
     // The Action window's icons (actionwnddata.txt; null: not loaded yet) and an icon used.
     const std::vector<assets::ActionRow>* actions = nullptr;
     // The world map's maps, floors and labels (null: not loaded yet).
@@ -557,6 +561,10 @@ void ShowWorldMap(HudContext& context, int map); // the window open on that map 
 void WorldMapGuideStep(HudContext& context, int tab, int heading, int entry);
 // The world map's monster box (31) ticked or not: the monsters 0..6 levels over the player's marked.
 void WorldMapMonsterBox(HudContext& context, bool on);
+// `source` (a game .ddj) read, its pixels whose ARGB is one of `keys` drawn in `colour` and the rest clear, written once
+// into `made` as a 32-bit DDS; its path ("" when the picture cannot be read).
+std::string KeyedPicture(const assets::FileSystem& files, assets::MemorySource& made, const std::string& source,
+                         const std::vector<std::uint32_t>& keys, std::uint32_t colour);
 // The world map in the reverse return scroll's choosing mode: `chosen` hears the
 // picked map point's ID (_RefOptionalTeleport's); closing the map hears nothing. `listMarker` (the gallery's) lists
 // that marker's destinations at once.

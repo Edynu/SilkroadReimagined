@@ -2988,6 +2988,9 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.openMarketRequest = hudContext_.guildRequest;
     hudContext_.fortress = &fortress_;
     hudContext_.guildCrest = [this](std::uint32_t guild, std::uint32_t revision) { return CrestTexture(proto::kCrestGuild, guild, revision); };
+    hudContext_.keyedPicture = [this, files = &context.files](const std::string& source, const std::vector<std::uint32_t>& keys, std::uint32_t colour) {
+        return madeFiles_ != nullptr ? KeyedPicture(*files, *madeFiles_, source, keys, colour) : std::string();
+    };
     hudContext_.npcTax = &npcTax_;
     hudContext_.npcSafe = &npcSafe_;
     SyncSafeTradeIcon(context.time); // put back after a world entry cleared the board

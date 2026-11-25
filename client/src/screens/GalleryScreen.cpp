@@ -468,6 +468,10 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.state = &sample_;
     hudContext_.options = context.options; // the windows as the options file has them (the system lines' autohide, ...)
     if (tables_ && tables_->Usable() && hudContext_.characters == nullptr) hudContext_.characters = &tables_->characters;
+    hudContext_.keyedPicture = [files = &context.files, made = context.madeFiles](const std::string& source, const std::vector<std::uint32_t>& keys,
+                                                                                  std::uint32_t colour) {
+        return made != nullptr ? KeyedPicture(*files, *made, source, keys, colour) : std::string();
+    };
 #ifdef SR_BUG_REPORTS
     // The bug report's button and window on sample data: Send only logs what it would send.
     hudContext_.bugReport = [](BugReportForm form) {

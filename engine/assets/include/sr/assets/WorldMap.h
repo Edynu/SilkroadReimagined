@@ -155,14 +155,16 @@ struct FortressZoneRow {
 // 6..8 the orders, 9 the link's kind (0 a map id, 1 a worldmap_localinfo row), 10 the link. MONSTER cols: 0 service,
 // 1 a name, 2 codename (a heading: an area's, its text UIIT_STT_<codename>; an entry: the monster), 3 its area, 4 main /
 // sub, 5..7 the orders, 8 9 its pixel on the world map, 10 11 its region (-1: in a dungeon), 12 13 its place there (the
-// region's offset; in a dungeon the map's pixel), 14 its areas' marks. worldmapguidedata_region.txt: a monster's map
-// tiles (field: each tile 4 x 4 regions, by its region "XxZ").
+// region's offset; in a dungeon the map's pixel), 14 its areas' keys ("0x80000005,0x80000003": the 32-bit ARGB of its
+// pixels in its tiles' pictures, interface\worldmap\monster\<area>_<x>x<z>.ddj). worldmapguidedata_region.txt: a
+// monster's map tiles (field: each tile 4 x 4 regions, by its region "XxZ").
 struct WorldMapGuideRow {
     std::string codename, nameKey, area;
     bool heading = false;
     std::array<int, 3> order{};
     int linkKind = 0, link = 0;                        // AREA
     int regionX = -1, regionZ = -1, placeX = 0, placeY = 0; // MONSTER
+    std::vector<std::uint32_t> keys;                        // MONSTER: its areas' pixels in its tiles' pictures
 };
 struct WorldMapGuideTab {
     std::string section, art, labelKey;

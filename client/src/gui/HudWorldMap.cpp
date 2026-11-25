@@ -16,9 +16,14 @@
 #include <string>
 #include <vector>
 
+#include <cstring>
+#include <format>
+#include <unordered_set>
+
 #include "gui/Hud.h"
 #include "gui/HudMapView.h"
 #include "gui/HudWindows.h"
+#include "sr/assets/Texture.h"
 #include "sr/ui/Controls.h"
 #include "sr/ui/Interface.h"
 
@@ -212,13 +217,14 @@ private:
     // map, its tiles tinted in its colour and its icon there.
     struct MonsterMark {
         int map = 0;
-        std::string codename;
+        std::string codename, area; // its area names its tiles' pictures
         ui::Vec2 pixel;
-        ui::Color colour = 0;
+        std::uint32_t argb = 0; // its colour (ARGB, the original's)
+        std::vector<std::uint32_t> keys; // its areas' pixels in those pictures
     };
     std::vector<MonsterMark> marks_;
     // A monster's mark (none: its area has no map); `keep` the others.
-    void MarkMonster(const assets::WorldMapGuideRow& row, ui::Color colour, bool keep);
+    void MarkMonster(const assets::WorldMapGuideRow& row, std::uint32_t argb, bool keep);
     // The monster box ticked or not: the monsters 0..3 levels over the player's (0x80D9D2C6) and 4..6 over (0x80B63143)
     // marked, the others not (the original's on_31); unticked, none.
     void LevelMarks(bool on);
@@ -385,7 +391,13 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
                     continue;
                 }
                 const ui::Vec2 s = view_.ToScreen({px.x, px.y}, at);
-                frame.paint.Fill({s.x, s.y, px.w, px.h}, mark.colour);
+                // The tile's picture of the areas (interface\worldmap\monster\<area>_<x>x<z>.ddj: each area's pixels one
+                // 32-bit key): the monster's keys in its colour, the rest clear (KeyedPicture).
+                if (!c_.keyedPicture) continue;
+                const std::string source = "interface\\worldmap\\monster\\" + mark.area + "_" + std::to_string(tx) + "x" + std::to_string(tz) + ".ddj";
+                if (const std::string picture = c_.keyedPicture(source, mark.keys, mark.argb); !picture.empty()) {
+                    frame.paint.Image(picture, {s.x, s.y, px.w, px.h});
+                }
             }
         }
     }
@@ -475,7 +487,7 @@ void WorldMapWindow::ToggleGuide() {
     guide->visible = !guide->visible;
 }
 
-void WorldMapWindow::MarkMonster(const assets::WorldMapGuideRow& row, ui::Color colour, bool keep) {
+void WorldMapWindow::MarkMonster(const assets::WorldMapGuideRow& row, std::uint32_t argb, bool keep) {
     if (!keep) marks_.clear();
     if (c_.worldMap == nullptr) return;
     const int map = c_.worldMap->guide.MapOfArea(row.area);
@@ -489,7 +501,7 @@ void WorldMapWindow::MarkMonster(const assets::WorldMapGuideRow& row, ui::Color 
     at.regionZ = row.regionZ;
     at.x = row.placeX;
     at.y = row.placeY;
-    marks_.push_back({map, row.codename, place.LabelPixel(at), colour});
+    marks_.push_back({map, row.codename, row.area, place.LabelPixel(at), argb, row.keys});
 }
 
 void WorldMapWindow::LevelMarks(bool on) {
@@ -502,8 +514,8 @@ void WorldMapWindow::LevelMarks(bool on) {
             const assets::ObjectRow* monster = r.heading ? nullptr : c_.characters->Find(std::string_view(r.codename));
             if (monster == nullptr) continue;
             const int over = monster->level - int(c_.state->self.level);
-            if (over >= 0 && over < 4) MarkMonster(r, ui::Argb(0x80D9D2C6), true);
-            else if (over >= 4 && over < 7) MarkMonster(r, ui::Argb(0x80B63143), true);
+            if (over >= 0 && over < 4) MarkMonster(r, 0x80D9D2C6u, true);
+            else if (over >= 4 && over < 7) MarkMonster(r, 0x80B63143u, true);
         }
     }
 }
@@ -580,7 +592,7 @@ void WorldMapWindow::GuidePick(const assets::WorldMapGuideRow& row) {
     // A monster: its area's map centred on its place, its icon there and its tiles tinted (0x80E9C624); the monster box
     // unticked, its marks gone.
     if (auto* box = ui::As<ui::CheckBox>(Child(kMonsterBox))) box->checked = false;
-    MarkMonster(row, ui::Argb(0x80E9C624), false);
+    MarkMonster(row, 0x80E9C624u, false);
     if (marks_.empty() || !ShowMap(marks_.back().map)) return;
     view_.CentreOn(marks_.back().pixel);
 }
@@ -728,6 +740,60 @@ void WorldMapWindow::MapMouse(ui::Frame& frame, const ui::Widget& owner, const u
 void ShowWorldMap(HudContext& c, int map) {
     if (c.hud == nullptr) return;
     if (auto* window = dynamic_cast<WorldMapWindow*>(c.hud->Show(hud::kWorldMap))) window->Open(map);
+}
+
+std::string KeyedPicture(const assets::FileSystem& files, assets::MemorySource& made, const std::string& source,
+                         const std::vector<std::uint32_t>& keys, std::uint32_t colour) {
+    // Its path from the source, the keys and the colour (FNV-1a); made once.
+    std::uint64_t h = 1469598103934665603ull;
+    const auto mix = [&h](std::uint32_t v) {
+        for (int i = 0; i < 4; ++i) h = (h ^ ((v >> (8 * i)) & 0xFFu)) * 1099511628211ull;
+    };
+    for (const std::uint32_t k : keys) mix(k);
+    mix(colour);
+    std::string base = source;
+    for (char& ch : base) {
+        if (ch == '\\' || ch == '/' || ch == '.') ch = '_';
+    }
+    const std::string path = std::format("made\\keyed\\{}_{:016x}.dds", base, h);
+    static std::unordered_set<std::string> madeOnce, missing;
+    if (madeOnce.contains(path)) return path;
+    if (missing.contains(path)) return {};
+    const auto file = files.Read(source);
+    assets::TextureData texture;
+    std::string error;
+    if (!file || !assets::DecodeDdj(file->Bytes(), texture, error) || texture.mips.empty()) {
+        missing.insert(path);
+        return {};
+    }
+    const std::vector<std::uint8_t> rgba = assets::DecodeToRgba8(texture, 0);
+    const std::uint32_t w = texture.mips[0].width, ht = texture.mips[0].height;
+    // A 32-bit DDS (A8R8G8B8: B, G, R, A in memory), as the emblems are made.
+    std::vector<std::byte> out(128 + std::size_t(w) * ht * 4);
+    const auto put = [&](std::size_t at, std::uint32_t v) { std::memcpy(out.data() + at, &v, 4); };
+    std::memcpy(out.data(), "DDS ", 4);
+    put(4, 124);
+    put(8, 0x1 | 0x2 | 0x4 | 0x1000);
+    put(12, ht);
+    put(16, w);
+    put(76, 32);
+    put(80, 0x40 | 0x1);
+    put(88, 32);
+    put(92, 0x00FF0000u);
+    put(96, 0x0000FF00u);
+    put(100, 0x000000FFu);
+    put(104, 0xFF000000u);
+    put(108, 0x1000);
+    for (std::size_t i = 0; i < std::size_t(w) * ht && i * 4 + 3 < rgba.size(); ++i) {
+        const std::uint32_t argb = (std::uint32_t(rgba[i * 4 + 3]) << 24) | (std::uint32_t(rgba[i * 4 + 0]) << 16) |
+                                   (std::uint32_t(rgba[i * 4 + 1]) << 8) | std::uint32_t(rgba[i * 4 + 2]);
+        const bool key = std::find(keys.begin(), keys.end(), argb) != keys.end();
+        const std::uint32_t pixel = key ? colour : 0u;
+        std::memcpy(out.data() + 128 + i * 4, &pixel, 4);
+    }
+    made.Put(path, std::move(out));
+    madeOnce.insert(path);
+    return path;
 }
 
 void WorldMapMonsterBox(HudContext& c, bool on) {

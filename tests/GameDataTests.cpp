@@ -2043,6 +2043,13 @@ TEST_CASE("the world map's guide: its two tabs, headings and entries, each entry
     const auto tiles = g.monsterTiles.find("MOB_CH_MANGNYANG");
     REQUIRE(tiles != g.monsterTiles.end());
     CHECK(tiles->second == std::vector<std::pair<int, int>>{{162, 97}, {166, 97}, {170, 97}});
+    // Its areas' keys in those tiles' pictures (interface\worldmap\monster\field_<x>x<z>.ddj): 0x80000005; a stone ghost's two.
+    const auto mangnyang = std::find_if(g.tabs[1].rows.begin(), g.tabs[1].rows.end(), [](const WorldMapGuideRow& r) { return r.codename == "MOB_CH_MANGNYANG"; });
+    REQUIRE(mangnyang != g.tabs[1].rows.end());
+    CHECK(mangnyang->keys == std::vector<std::uint32_t>{0x80000005u});
+    const auto stone = std::find_if(g.tabs[1].rows.begin(), g.tabs[1].rows.end(), [](const WorldMapGuideRow& r) { return r.codename == "MOB_CH_STONEGHOST"; });
+    REQUIRE(stone != g.tabs[1].rows.end());
+    CHECK(stone->keys == std::vector<std::uint32_t>{0x80000001u, 0x80000003u});
 }
 
 TEST_CASE("the world map's tables: every map's, floor's and label's pictures (worldmap_mapinfo.txt, worldmap_localinfo.txt)") {

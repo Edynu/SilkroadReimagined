@@ -309,6 +309,16 @@ void DecodeWorldMapGuide(std::string_view text, std::string_view regions, WorldM
             r.regionZ = Int(c[11]);
             r.placeX = Int(c[12]);
             r.placeY = Int(c[13]);
+            if (c.size() > 14) {
+                const std::string_view list = Trim(c[14]);
+                for (std::size_t at = 0; at < list.size();) {
+                    std::size_t comma = list.find(',', at);
+                    if (comma == std::string_view::npos) comma = list.size();
+                    const std::string one(Trim(list.substr(at, comma - at)));
+                    if (one.starts_with("0x") || one.starts_with("0X")) r.keys.push_back(std::uint32_t(std::strtoul(one.c_str() + 2, nullptr, 16)));
+                    at = comma + 1;
+                }
+            }
         } else {
             return;
         }
