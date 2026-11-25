@@ -742,7 +742,9 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         case proto::FreePvpCode::JobState: key = "UIIT_MGS_ERR_FRPVP_JOB_STATE"; break;
         case proto::FreePvpCode::CannotLeave: key = "UIIT_MGS_ERR_FRPVP_OFF"; break;
         case proto::FreePvpCode::CannotChange: key = "UIIT_MGS_ERR_FRPVP_CHANGE_TEAM"; break;
-        case proto::FreePvpCode::Cancelled: key = "UIIT_MGS_ERR_FRPVP_ON_CANCEL"; break;
+        case proto::FreePvpCode::Cancelled: // leaving, joining or changing teams given up
+            key = pvpChangeTo_ == 0 ? "UIIT_MGS_ERR_FRPVP_OFF_CANCEL" : pvpChangeFrom_ == 0 ? "UIIT_MGS_ERR_FRPVP_ON_CANCEL" : "UIIT_MGS_ERR_FRPVP_CANCEL_CHANGE_TEAM";
+            break;
         default: break;
         }
         if (key != nullptr) player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);

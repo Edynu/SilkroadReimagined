@@ -348,6 +348,7 @@ void PlayScreen::HandleFreePvp(ScreenContext& context, const proto::EntityFreePv
     s.team = e.team;
     s.to = e.to;
     s.changing = e.changing != 0;
+    if (e.entity == view_.Self() && e.changing != 0) pvpChangeFrom_ = e.team, pvpChangeTo_ = e.to;
     if (e.team == 0 && e.changing == 0) entityPvp_.erase(e.entity);
     hudContext_.freePvpTeam = entityPvp_.contains(view_.Self()) ? entityPvp_[view_.Self()].team : 0;
     hudContext_.freePvpChanging = entityPvp_.contains(view_.Self()) && entityPvp_[view_.Self()].changing;

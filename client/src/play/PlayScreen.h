@@ -668,6 +668,8 @@ private:
         bool changing = false;
     };
     std::unordered_map<std::uint32_t, FreePvpState> entityPvp_;
+    // The player's last change under way: its team then and the one asked (a cancel's line by them, the original's).
+    std::uint8_t pvpChangeFrom_ = 0, pvpChangeTo_ = 0;
     void ToggleFreePvpWindow();
     bool FreePvpFoe(std::uint32_t other) const;
     bool JobFoe(std::uint32_t other) const; // a job's foe (PlayFortress.cpp)
