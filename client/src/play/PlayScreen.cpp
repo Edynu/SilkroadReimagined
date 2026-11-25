@@ -3621,7 +3621,7 @@ void PlayScreen::HudRequests(ScreenContext& context) {
             break;
         case HudRequest::Kind::ChatCommand:
             if (PremiumCommand(r.text)) break; // the premium's /Return, /Reverse Return, /Resurrection (PlayMallItems.cpp)
-            core::LogInfo("game: a chat command; it comes with its feature (trades, parties, stalls, pets)");
+            ChatCommand(context, r.target, r.text); // the command's key (r.target) and its whole line
             break;
         case HudRequest::Kind::LearnSkill:
             if (!replay_) shared_->session->LearnSkill(std::uint32_t(r.value));

@@ -8,10 +8,98 @@
 #include "play/PlayScreen.h"
 #include "sr/assets/Model.h"
 #include "sr/core/Log.h"
+#include "sr/game/Cos.h"
 
 namespace sr::client {
 
 namespace proto = game::proto;
+
+void PlayScreen::ChatCommand(ScreenContext& context, const std::string& key, const std::string& line) {
+    // "/word NAME rest": the name (a player in sight for those that ask one) and what follows it.
+    const std::size_t space = line.find(' ');
+    const std::size_t nameAt = space == std::string::npos ? std::string::npos : line.find_first_not_of(' ', space);
+    const std::size_t nameEnd = nameAt == std::string::npos ? std::string::npos : line.find(' ', nameAt);
+    const std::string name = nameAt == std::string::npos ? std::string() : line.substr(nameAt, nameEnd == std::string::npos ? std::string::npos : nameEnd - nameAt);
+    const std::size_t restAt = nameEnd == std::string::npos ? std::string::npos : line.find_first_not_of(' ', nameEnd);
+    const std::string rest = restAt == std::string::npos ? std::string() : line.substr(restAt);
+    const auto is = [&](std::string_view k) { return key == k; };
+    const auto inSight = [&]() -> std::uint32_t {
+        for (const auto& [id, e] : view_.Entities()) {
+            if (id != view_.Self() && e.kind == proto::EntityKind::Character && !e.look.name.empty() && e.look.name == name) return id;
+        }
+        return 0;
+    };
+    auto* chat = dynamic_cast<ChatWindow*>(gui_.interface() != nullptr ? gui_.interface()->Window(hud::kChat) : nullptr);
+    const bool live = !replay_ && shared_ && shared_->session;
+    if (is("UIIT_STT_CHAT_COMMAND_REPLY1") || is("UIIT_STT_CHAT_COMMAND_REPLY2") || is("UIIT_STT_CHAT_COMMAND_REPLY3") ||
+        is("UIIT_STT_CHAT_COMMAND_REPLY4")) {
+        // The last whisperer's address in the input line.
+        if (chat != nullptr) {
+            chat->Reply();
+            chat->FocusInput();
+        }
+    } else if (key.starts_with("UIIT_STT_CHAT_COMMAND_WHISPER") || is("UIIT_STT_CHAT_COMMAND_SECRET_TALK")) {
+        // "/w NAME text": whispered; with no text, the address in the input line.
+        if (name.empty()) return;
+        if (!rest.empty()) {
+            hud_.Request({HudRequest::Kind::Chat, int(proto::ChatKind::Whisper), rest, name});
+        } else if (chat != nullptr) {
+            chat->Address(name, true);
+        }
+    } else if (is("UIIT_STT_CHAT_COMMAND_PARTY_INVITE") || is("UIIT_STT_CHAT_COMMAND_PARTY_INVITE2")) {
+        if (const std::uint32_t target = inSight(); target != 0 && live) shared_->session->PartyInvite(target, player_.party.preferred);
+    } else if (is("UIIT_STT_CHAT_COMMAND_PARTY_EXPEL")) {
+        for (const proto::PartyMemberRecord& m : player_.party.members) {
+            if (m.name == name && live && player_.party.IsLeader()) shared_->session->KickPartyMember(m.id);
+        }
+    } else if (is("UIIT_STT_CHAT_COMMAND_PARTY_EXIT")) {
+        if (live && player_.party.InParty()) shared_->session->LeaveParty();
+    } else if (is("UIIT_STT_CHAT_COMMAND_TRADE") || is("UIIT_STT_CHAT_COMMAND_TRADE2")) {
+        if (const std::uint32_t target = inSight(); target != 0 && live) {
+            SelectPlayer(target);
+            shared_->session->SendGame(proto::ExchangeAsk::kId, proto::Encode(proto::ExchangeAsk{target}));
+        }
+    } else if (is("UIIT_STT_CHAT_COMMAND_GUILD_INVITE") || is("UIIT_STT_CHAT_COMMAND_GUILD_INVITE1") || is("UIIT_STT_CHAT_COMMAND_GUILD_INVITE2")) {
+        if (const std::uint32_t target = inSight(); target != 0 && live) shared_->session->SendGuild(proto::GuildInvite{target});
+    } else if (is("UIIT_STT_CHAT_COMMAND_STREETSTORE")) {
+        if (live) {
+            shared_->session->SendGame(proto::StallOpen::kId,
+                                       proto::Encode(proto::StallOpen{FormatText(gui_.data().Text("UIIT_STT_STALL_DEFAULT_TITLE"), {player_.self.name})}));
+        }
+    } else if (is("UIIT_STT_CHAT_COMMAND_SITDOWN")) {
+        UseAction(context, 1000);
+    } else if (key.starts_with("UIIT_KEY_COS_")) {
+        // The pets' words: the attack pet's attack and stance, the first pet's follow and recall, the ride's board, leave
+        // and dismissal.
+        const OwnCos* attackPet = nullptr;
+        const OwnCos* pet = nullptr;
+        for (const OwnCos& c : ownCoses_) {
+            if (c.kind == std::uint8_t(game::CosKind::AttackPet)) attackPet = &c;
+            if (pet == nullptr && (c.kind == std::uint8_t(game::CosKind::AttackPet) || c.kind == std::uint8_t(game::CosKind::GrabPet))) pet = &c;
+        }
+        const auto order = [&](const OwnCos* c, proto::CosOrder o, std::uint32_t target = 0) {
+            if (c != nullptr && live) shared_->session->SendGame(proto::CosCommand::kId, proto::Encode(proto::CosCommand{c->entity, o, target}));
+        };
+        if (is("UIIT_KEY_COS_ATTACK")) {
+            order(attackPet, proto::CosOrder::Attack, player_.target.kind == game::TargetStatus::Kind::Monster ? player_.target.entity : 0);
+        } else if (is("UIIT_KEY_COS_FOLLOW")) {
+            order(pet, proto::CosOrder::Follow);
+        } else if (is("UIIT_KEY_COS_AGGRESSIVE") || is("UIIT_KEY_COS_DEFENSIVE")) {
+            order(attackPet, proto::CosOrder::Stance);
+        } else if (is("UIIT_KEY_COS_RIDING")) {
+            CosRide(true);
+        } else if (is("UIIT_KEY_COS_DISMOUNT")) {
+            CosRide(false);
+        } else if (is("UIIT_KEY_COS_RETURN")) {
+            if (pet != nullptr && live) shared_->session->SendGame(proto::CosDismiss::kId, proto::Encode(proto::CosDismiss{pet->entity}));
+        } else if (is("UIIT_KEY_COS_LEAVEOUT")) {
+            CosDismiss();
+        }
+    } else {
+        // The PvP proposal and the user search: features of the original not built.
+        core::LogInfo("game: the chat command {} ({}): not built", key, line);
+    }
+}
 
 std::pair<std::string, std::string> PlayScreen::ActionSlotLook(std::uint32_t action) const {
     // What the next use does (the original's quick slots swap their icon and text on each change): sit or stand by

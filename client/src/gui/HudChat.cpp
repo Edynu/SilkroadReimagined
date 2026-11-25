@@ -353,14 +353,28 @@ bool ChatWindow::Command(const std::string& line) {
     if (CommunityChatCommand(context_, line)) return true;
     const std::size_t space = line.find(' ');
     const std::string word = line.substr(0, space);
-    constexpr const char* kCommands[] = {"UIIT_STT_CHAT_COMMAND_TRADE",        "UIIT_STT_CHAT_COMMAND_PARTY_INVITE",
+    constexpr const char* kCommands[] = {"UIIT_STT_CHAT_COMMAND_TRADE",        "UIIT_STT_CHAT_COMMAND_TRADE2",
+                                         "UIIT_STT_CHAT_COMMAND_PARTY_INVITE", "UIIT_STT_CHAT_COMMAND_PARTY_INVITE2",
                                          "UIIT_STT_CHAT_COMMAND_PARTY_EXPEL",  "UIIT_STT_CHAT_COMMAND_PARTY_EXIT",
-                                         "UIIT_STT_CHAT_COMMAND_STREETSTORE",  "UIIT_STT_PREMIUM_COMMAND_RETURN_HIGH_SPEED",
-                                         "UIIT_STT_PREMIUM_COMMAND_REVERSE_RETURN", "UIIT_STT_PREMIUM_COMMAND_RESURRECTION_100%"};
+                                         "UIIT_STT_CHAT_COMMAND_STREETSTORE",  "UIIT_STT_CHAT_COMMAND_SITDOWN",
+                                         "UIIT_STT_CHAT_COMMAND_REPLY1",       "UIIT_STT_CHAT_COMMAND_REPLY2",
+                                         "UIIT_STT_CHAT_COMMAND_REPLY3",       "UIIT_STT_CHAT_COMMAND_REPLY4",
+                                         "UIIT_STT_CHAT_COMMAND_WHISPER1",     "UIIT_STT_CHAT_COMMAND_WHISPER2",
+                                         "UIIT_STT_CHAT_COMMAND_WHISPER3",     "UIIT_STT_CHAT_COMMAND_WHISPER4",
+                                         "UIIT_STT_CHAT_COMMAND_WHISPER5",     "UIIT_STT_CHAT_COMMAND_SECRET_TALK",
+                                         "UIIT_STT_CHAT_COMMAND_GUILD_INVITE", "UIIT_STT_CHAT_COMMAND_GUILD_INVITE1",
+                                         "UIIT_STT_CHAT_COMMAND_GUILD_INVITE2", "UIIT_STT_CHAT_COMMAND_PVP_PROPOSAL",
+                                         "UIIT_STT_CHAT_COMMAND_FINDUSER",     "UIIT_KEY_COS_ATTACK",
+                                         "UIIT_KEY_COS_FOLLOW",                "UIIT_KEY_COS_RIDING",
+                                         "UIIT_KEY_COS_DISMOUNT",              "UIIT_KEY_COS_RETURN",
+                                         "UIIT_KEY_COS_LEAVEOUT",              "UIIT_KEY_COS_AGGRESSIVE",
+                                         "UIIT_KEY_COS_DEFENSIVE",             "UIIT_KEY_COS_CHARM",
+                                         "UIIT_STT_PREMIUM_COMMAND_RETURN_HIGH_SPEED", "UIIT_STT_PREMIUM_COMMAND_REVERSE_RETURN",
+                                         "UIIT_STT_PREMIUM_COMMAND_RESURRECTION_100%"};
     for (const char* key : kCommands) {
         const bool premium = std::string_view(key).starts_with("UIIT_STT_PREMIUM_COMMAND");
         if (context_.hasText && context_.hasText(key) && context_.Text(key) == (premium ? line : word)) {
-            if (context_.hud != nullptr) context_.hud->Request({HudRequest::Kind::ChatCommand, 0, line});
+            if (context_.hud != nullptr) context_.hud->Request({HudRequest::Kind::ChatCommand, 0, line, key});
             return true;
         }
     }

@@ -632,6 +632,8 @@ private:
     void HandleFortress(ScreenContext& context, const game::proto::FortressEvent& event);
     void FortressScript(ScreenContext& context);
     void UseAction(ScreenContext& context, std::uint32_t action); // an icon of the Action window (PlayActions.cpp)
+    // A chat command (its text table key and the line typed): what it names done (PlayActions.cpp).
+    void ChatCommand(ScreenContext& context, const std::string& key, const std::string& line);
     // An action shortcut's icon and text key as the next use would do it (PlayActions.cpp).
     std::pair<std::string, std::string> ActionSlotLook(std::uint32_t action) const;
     // The Action page: each walker's motion and marks as the server told them
