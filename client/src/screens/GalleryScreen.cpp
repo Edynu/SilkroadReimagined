@@ -840,6 +840,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             autoPotionShown_ = true;
             if (tables_->Usable()) {
                 hudContext_.items = &tables_->items;
+                hudContext_.magicOptions = host_.data().MagicOptions(); // the tooltips' blues and the stones' targets
                 game::proto::InventoryList bag;
                 bag.size = game::Inventory::kMaxSize;
                 if (const assets::ItemRow* row = tables_->items.Find(std::string_view("ITEM_ETC_HP_POTION_02")))

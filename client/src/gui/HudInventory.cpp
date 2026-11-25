@@ -491,6 +491,58 @@ std::vector<ui::TooltipLine> ItemTooltipBody(const assets::ItemRow& row, const g
     // many (the stack, and the most one may carry).
     if (kind == ItemKind::Expendable) {
         description();
+        // An alchemy stone (3/3/11/1 a magic stone, 3/3/11/2 an attribute stone): its sort; the items it goes on, each by
+        // its kind's name ("weapon" Weapon type, "helm" Head, ...): an attribute stone's (and the repair stone's) from its
+        // Desc4, a magic stone's from its option's groups; their least degree (Param1; not for the Devil's Spirit's
+        // stones); and its own assimilation chance (its plus). Ours: a space between the two words of the last.
+        if (row.typeId[0] == 3 && row.typeId[1] == 3 && row.typeId[2] == 11 && (row.typeId[3] == 1 || row.typeId[3] == 2)) {
+            const bool attribute = row.typeId[3] == 2;
+            line(c.Text("UIIT_STT_ITEM_TYPE") + ": " + c.Text(attribute ? "UIIT_STT_ITEM_TYPE_ALCHEMY_ATTRSTONE" : "UIIT_STT_ITEM_TYPE_ALCHEMY_MAGICSTONE"));
+            std::vector<std::string> targets;
+            const auto split = [&](const std::string& text) {
+                std::string word;
+                for (const char ch : text + ",") {
+                    if (ch == ',' || ch == ' ') {
+                        if (!word.empty() && word != "xxx") targets.push_back(word);
+                        word.clear();
+                    } else {
+                        word += ch;
+                    }
+                }
+            };
+            const std::string& option = row.paramTexts[0];
+            if (attribute || option == "MATTR_REPAIR") {
+                split(row.paramTexts[3]);
+            } else if (c.magicOptions != nullptr) {
+                for (const auto& m : *c.magicOptions) {
+                    if (m.optionName == option) {
+                        targets = m.availGroups;
+                        break;
+                    }
+                }
+            }
+            static constexpr std::pair<const char*, const char*> kNames[] = {
+                {"weapon", "UIIT_STT_WEAPON_TYPE"},          {"armor", "UIIT_STT_ARMOR_TYPE"},
+                {"shield", "UIIT_STT_SHIELD"},               {"accessory", "UIIT_STT_ACCESSARY_TYPE"},
+                {"helm", "UIIT_STT_ARMOR_POSITION_HEAD"},    {"shoulderguard", "UIIT_STT_ARMOR_POSITION_SHOULDER"},
+                {"mail", "UIIT_STT_ARMOR_POSITION_BREAST"},  {"pants", "UIIT_STT_ARMOR_POSITION_LEG"},
+                {"gauntlet", "UIIT_STT_ARMOR_POSITION_HAND"}, {"boots", "UIIT_STT_ARMOR_POSITION_FOOT"},
+                {"earring", "UIIT_STT_ACCESSARY_EARRING"},   {"necklace", "UIIT_STT_ACCESSARY_NECKLACE"},
+                {"ring", "UIIT_STT_ACCESSARY_RING"},         {"honor", "UIIT_STT_HONOR_TYPE"},
+                {"avatar_special_armlet", "PARAM_NASRUN"}};
+            std::string names;
+            bool spirit = false;
+            for (const std::string& t : targets) {
+                for (const auto& [word, key] : kNames) {
+                    if (t == word) names += (names.empty() ? "" : " ") + c.Text(key);
+                }
+                spirit = spirit || t == "avatar_special_armlet";
+            }
+            if (!names.empty()) line(c.Text("UIIT_STT_TARGET_ITEM") + ": " + names);
+            if (!spirit) line(c.Text("UIIT_STT_TARGET_ITEM_CLASS") + ": " + std::to_string(row.params[0] & 0xFF) + " " + c.Text("UIIT_STT_CLASS"));
+            line(c.Text("PARAM_ATTR_ASSIMILATION") + " " + c.Text("UIIT_STT_PROBABILITY") + ": " + std::to_string(item.plus) + "%");
+            blank();
+        }
         if (auto lines = ExpendableLines(row, c); !lines.empty()) {
             out.insert(out.end(), lines.begin(), lines.end());
             blank();
