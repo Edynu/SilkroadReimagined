@@ -9,6 +9,7 @@
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/game/MagicPop.h"
+#include "sr/game/Mall.h"
 #include "sr/game/Alchemy.h"
 #include "sr/game/Cos.h"
 #include "sr/game/CosProtocol.h"
@@ -524,6 +525,21 @@ std::vector<ui::TooltipLine> ItemTooltipBody(const assets::ItemRow& row, const g
             for (const auto& o : sorted) {
                 const MagicOptionText t = MagicOptionLine(c, row, o);
                 if (!t.text.empty()) line(t.text, t.negative ? kRed : kBlue, kBoldShadow);
+            }
+        }
+        // A Devil's Spirit: "Awaken time" (beige), then, awakened (its data word a time), what is left "NDay NHour
+        // NMinute" or "time over"; else the length its awakening gives (Param1 in days) or "Not awakened" (-1).
+        if (game::IsDevilSpirit(row)) {
+            blank();
+            line(c.Text("UIIT_STT_NASRUN_AWAKE_TIME"), kKindBeige);
+            if (item.durability > 1'000'000'000u) {
+                const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                const std::int64_t left = std::max<std::int64_t>(0, std::int64_t(item.durability) - std::int64_t(now));
+                line(left == 0 ? c.Text("UIIT_STT_NASRUN_AWAKE_TIMEOVER")
+                               : std::to_string(left / 86400) + c.Text("PARAM_DAY") + " " + std::to_string(left % 86400 / 3600) + c.Text("PARAM_HOUR") + " " +
+                                     std::to_string(left % 3600 / 60) + c.Text("PARAM_MINUTE"));
+            } else {
+                line(row.params[0] == -1 ? c.Text("UIIT_STT_NASRUN_NOT_AWAKE") : std::to_string(row.params[0] / 86400) + c.Text("PARAM_DAY"));
             }
         }
         return out;
