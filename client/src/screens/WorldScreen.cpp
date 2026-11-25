@@ -864,6 +864,40 @@ bool WorldScreen::RayHitsCylinder(float screenX, float screenY, float width, flo
     return false;
 }
 
+bool WorldScreen::RayHitsBox(float screenX, float screenY, float width, float height, const game::proto::WorldPosition& centre, float half,
+                             float halfTall, float& distance) const {
+    if (width <= 0.0f || height <= 0.0f || half <= 0.0f || halfTall <= 0.0f) return false;
+    // The ray of Pick, origin-relative.
+    const glm::vec3 eye(camera_.targetX, camera_.targetY, camera_.targetZ);
+    const glm::vec3 dir(std::cos(camera_.pitch) * std::sin(camera_.yaw), std::sin(camera_.pitch), std::cos(camera_.pitch) * std::cos(camera_.yaw));
+    const glm::mat4 view = glm::lookAt(eye, eye + dir, glm::vec3(0, 1, 0));
+    glm::mat4 proj = glm::perspective(camera_.fovY, width / height, camera_.nearZ > 0 ? camera_.nearZ : 1.0f, camera_.farZ > 0 ? camera_.farZ : 6000.0f);
+    proj[1][1] *= -1.0f;
+    const glm::mat4 inverse = glm::inverse(proj * view);
+    const float nx = screenX / width * 2.0f - 1.0f, ny = screenY / height * 2.0f - 1.0f;
+    glm::vec4 nearPoint = inverse * glm::vec4(nx, ny, 0.0f, 1.0f), farPoint = inverse * glm::vec4(nx, ny, 1.0f, 1.0f);
+    nearPoint /= nearPoint.w;
+    farPoint /= farPoint.w;
+    const glm::vec3 o(nearPoint), d = glm::normalize(glm::vec3(farPoint) - o);
+    // The slabs of the box, the ray within the original's 5,000.
+    const glm::vec3 c = OriginRelative(centre);
+    const glm::vec3 lo = c - glm::vec3(half, halfTall, half), hi = c + glm::vec3(half, halfTall, half);
+    float tNear = 0.0f, tFar = 5000.0f;
+    for (int axis = 0; axis < 3; ++axis) {
+        if (std::abs(d[axis]) < 1e-8f) {
+            if (o[axis] < lo[axis] || o[axis] > hi[axis]) return false;
+            continue;
+        }
+        float t0 = (lo[axis] - o[axis]) / d[axis], t1 = (hi[axis] - o[axis]) / d[axis];
+        if (t0 > t1) std::swap(t0, t1);
+        tNear = std::max(tNear, t0);
+        tFar = std::min(tFar, t1);
+        if (tNear > tFar) return false;
+    }
+    distance = tNear;
+    return true;
+}
+
 bool WorldScreen::Project(const game::proto::WorldPosition& p, float lift, float width, float height, float& x, float& y) const {
     float depth = 0;
     return Project(p, lift, width, height, x, y, depth);

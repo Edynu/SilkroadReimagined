@@ -485,6 +485,32 @@ void PlayScreen::GuildScript(ScreenContext& context) {
         } else {
             core::LogWarning("game: goto-place: '{}' is not REGION,X,Z[,Y]", arg);
         }
+    } else if (verb == "click-gate") {
+        // click-gate:REFOBJID: the player's click on the screen where that gate stands (its spot projected), through
+        // the pick as a mouse's (tries of the gates' pick).
+        const assets::TeleportGate* gate = nullptr;
+        if (tables_ && tables_->Usable()) {
+            for (const assets::TeleportGate& g : tables_->teleports.Gates()) {
+                if (g.refObjId == std::uint32_t(std::strtoul(arg.c_str(), nullptr, 10))) gate = &g;
+            }
+        }
+        const float width = float(context.device.SwapchainWidth()), height = float(context.device.SwapchainHeight());
+        float x = 0.0f, y = 0.0f;
+        const game::WorldView::Entity* self = view_.Find(view_.Self());
+        if (gate == nullptr || !world_ || self == nullptr) {
+            core::LogWarning("game: --guild {}: no such gate", step);
+        } else if (!world_->Project({gate->region, gate->x, gate->y, gate->z}, 0.0f, width, height, x, y) || x < 0.0f || y < 0.0f || x > width ||
+                   y > height) {
+            // Out of view: the camera turned toward it (the step again clicks).
+            const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat({gate->region, gate->x, gate->y, gate->z});
+            cameraYaw_ = float(std::atan2(b.x - a.x, b.z - a.z));
+            const double flat = std::max(1.0, std::hypot(b.x - a.x, b.z - a.z));
+            cameraPitch_ = std::clamp(-float(std::atan2(double(gate->y - self->position.y), flat)), -1.07f, 1.07f); // within the pitch's limit
+            core::LogInfo("game: --guild {}: out of view, the camera turned toward it", step);
+        } else {
+            ClickWorld(context, x, y, false);
+            core::LogInfo("game: --guild {}: clicked at {:.0f},{:.0f}: {}", step, x, y, lastClick_);
+        }
     } else if (verb == "goto-mob") {
         // A developer's teleport to a nest of that monster (SroGame --dev-commands; the quests' hunts).
         session.SendGame(proto::DevGotoMonster::kId, proto::Encode(proto::DevGotoMonster{arg}));

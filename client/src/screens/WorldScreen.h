@@ -153,6 +153,10 @@ public:
     // and how far along it (to pick the nearest).
     bool RayHitsCylinder(float screenX, float screenY, float width, float height, const game::proto::WorldPosition& base, float radius,
                          float tall, float& distance) const;
+    // Whether that ray passes through an upright box centred on `centre` (`half` across both ways, `halfTall` up and down:
+    // a gate's, the original's) and how far along it.
+    bool RayHitsBox(float screenX, float screenY, float width, float height, const game::proto::WorldPosition& centre, float half,
+                    float halfTall, float& distance) const;
     // Whether that ray meets a stage model's box (its model's bounds placed by its transform, its scale too) and how far
     // along it: the original's entity pick, only a model drawn
     // (within the view distance) and within the ray's 5,000.

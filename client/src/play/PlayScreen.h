@@ -93,6 +93,9 @@ private:
     // A click near a gate: walk there, then ask for one of the places it leads to.
     void Gates(ScreenContext& context);
     const assets::TeleportGate* GateNear(const game::proto::WorldPosition& at, float reach) const;
+    // A gate the player can meet where it is: outdoors the outdoor ones, in a dungeon those of its own region (the
+    // original has only the gates its server spawns about the player).
+    bool GateHere(const assets::TeleportGate& g) const;
     void StepReplay(ScreenContext& context, int steps);
     void Bench(ScreenContext& context, FrameSnapshot& snapshot);
     void HandleInput(ScreenContext& context);

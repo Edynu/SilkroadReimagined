@@ -1376,13 +1376,21 @@ void PlayScreen::Arrive(ScreenContext& context, FrameSnapshot& snapshot) {
                   originX_, originY_, at.x, at.y, at.z);
 }
 
+bool PlayScreen::GateHere(const assets::TeleportGate& g) const {
+    if (g.region == 0 || !tables_ || tables_->teleports.PointOf(g.refObjId) == nullptr) return false;
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    const std::uint16_t here = self != nullptr ? self->position.region : 0;
+    if ((g.region & 0x8000) != 0) return g.region == here;
+    return (here & 0x8000) == 0;
+}
+
 const assets::TeleportGate* PlayScreen::GateNear(const proto::WorldPosition& at, float reach) const {
     if (!tables_ || !tables_->Usable()) return nullptr;
     const proto::FlatPosition p = proto::ToFlat(at);
     const assets::TeleportGate* best = nullptr;
     double bestDistance = reach;
     for (const assets::TeleportGate& g : tables_->teleports.Gates()) {
-        if (g.region == 0 || (g.region & 0x8000) != 0 || tables_->teleports.PointOf(g.refObjId) == nullptr) continue;
+        if (!GateHere(g)) continue;
         const proto::FlatPosition s = proto::ToFlat({g.region, g.x, g.y, g.z});
         const double d = std::hypot(s.x - p.x, s.z - p.z);
         if (d <= bestDistance) {
@@ -1395,14 +1403,17 @@ const assets::TeleportGate* PlayScreen::GateNear(const proto::WorldPosition& at,
 
 const assets::TeleportGate* PlayScreen::GateUnder(float x, float y, float width, float height, const proto::WorldPosition* ground) const {
     if (!tables_ || !tables_->Usable() || !world_) return nullptr;
-    // The crystal first (the nearest along the ray), then the ground near a gate's spot.
+    // The gate's box first (the nearest along the ray; the original's: its row's BCRadius across, its BCHeight up and down
+    // about its spot; a row without them our crystal's cylinder), then the ground near a gate's spot.
     const assets::TeleportGate* best = nullptr;
     float bestDistance = 1e9f;
     for (const assets::TeleportGate& g : tables_->teleports.Gates()) {
-        if (g.region == 0 || (g.region & 0x8000) != 0 || tables_->teleports.PointOf(g.refObjId) == nullptr) continue;
+        if (!GateHere(g)) continue;
         float distance = 0;
-        if (world_->RayHitsCylinder(x, y, width, height, {g.region, g.x, g.y, g.z}, kGateCrystalRadius, kGateCrystalHeight, distance) &&
-            distance < bestDistance) {
+        const proto::WorldPosition at{g.region, g.x, g.y, g.z};
+        const bool hit = g.radius > 0.0f && g.height > 0.0f ? world_->RayHitsBox(x, y, width, height, at, g.radius, g.height, distance)
+                                                            : world_->RayHitsCylinder(x, y, width, height, at, kGateCrystalRadius, kGateCrystalHeight, distance);
+        if (hit && distance < bestDistance) {
             best = &g;
             bestDistance = distance;
         }
