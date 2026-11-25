@@ -6,6 +6,7 @@
 // animation by S_ObjectAniToIndex, gone at S_ObjectRelease), over at S_End.
 // Not shown yet (logged once): the music by its name (S_SetBGM), the light's fades (S_Lighting), the crowd of random
 // adventurers (S_ObjectCreateIndex, S_ObjectEquipSetIndex) and the player's own place in it (S_Teleport *player).
+// Its texts on the screen: S_StaticCreateEx / S_StaticRelease (the dialogue's lines in the White Viper's scenes).
 
 #include <algorithm>
 #include <cmath>
@@ -150,6 +151,28 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
                 if (it->second < slotUsed_.size()) slotUsed_[it->second] = false;
                 scene_.objects.erase(it);
             }
+        } else if (c.verb == "S_StaticCreateEx") {
+            // <name> <screen h> <screen v> <its own h> <its own v> <w> <h> <x> <y> <text h> <text v> <r> <g> <b> <font> <text>
+            // (the original's SC_StaticCreateEx: POS_LEFT / TOP 0, POS_CENTER 1, POS_RIGHT / BOTTOM 2; the text a key after
+            // '*', else as written).
+            const auto pos = [&](std::size_t i) {
+                const std::string v = arg(i);
+                return v == "POS_CENTER" ? 1 : (v == "POS_RIGHT" || v == "POS_BOTTOM") ? 2 : 0;
+            };
+            QuestSceneRun::Static st;
+            st.name = arg(0);
+            st.screenH = pos(1), st.screenV = pos(2), st.ownH = pos(3), st.ownV = pos(4);
+            st.w = c.Number(5), st.h = c.Number(6), st.x = c.Number(7), st.y = c.Number(8);
+            st.textH = pos(9), st.textV = pos(10);
+            const auto byte = [&](std::size_t i) { return std::uint32_t(std::clamp(int(c.Number(i, 255.0f)), 0, 255)); };
+            st.color = 0xFF000000u | byte(11) << 16 | byte(12) << 8 | byte(13);
+            st.font = int(c.Number(14));
+            std::string text = arg(15);
+            st.text = text.starts_with('*') ? gui_.data().Text(text.substr(1)) : text;
+            std::erase_if(scene_.statics, [&](const QuestSceneRun::Static& s) { return s.name == st.name; });
+            scene_.statics.push_back(std::move(st));
+        } else if (c.verb == "S_StaticRelease") {
+            std::erase_if(scene_.statics, [&](const QuestSceneRun::Static& s) { return s.name == arg(0); });
         } else if (c.verb == "S_SetBGM" || c.verb == "S_Lighting" || c.verb == "S_ObjectCreateIndex" || c.verb == "S_ObjectEquipSetIndex" ||
                    c.verb == "S_Teleport") {
             unshown(c.verb);
@@ -174,11 +197,20 @@ bool PlayScreen::QuestSceneCamera(float t, assets::CameraKey& key) const {
 }
 
 void PlayScreen::DrawQuestSceneBars(ScreenContext& context, ui::Painter& paint) {
-    if (scene_.barsShown <= 0.0) return;
     const float w = float(context.device.SwapchainWidth()) / paint.scale(), h = float(context.device.SwapchainHeight()) / paint.scale();
-    const float bar = scene_.barsHeight * float(scene_.barsShown) * h / 768.0f; // the original's interface is 768 high
-    paint.Fill({0.0f, 0.0f, w, bar}, ui::Argb(0xFF000000));
-    paint.Fill({0.0f, h - bar, w, bar}, ui::Argb(0xFF000000));
+    if (scene_.barsShown > 0.0) {
+        const float bar = scene_.barsHeight * float(scene_.barsShown) * h / 768.0f; // the original's interface is 768 high
+        paint.Fill({0.0f, 0.0f, w, bar}, ui::Argb(0xFF000000));
+        paint.Fill({0.0f, h - bar, w, bar}, ui::Argb(0xFF000000));
+    }
+    // Its texts: the screen's anchor (none, half, all of its width or height), less its own share of its size, plus its
+    // offset (the original's 0x503F10), its text aligned in it.
+    for (const QuestSceneRun::Static& st : scene_.statics) {
+        const auto along = [](int anchor, float full) { return anchor == 2 ? full : anchor == 1 ? std::floor(full / 2.0f) : 0.0f; };
+        const auto own = [](int anchor, float size) { return anchor == 2 ? size : anchor == 1 ? std::floor(size / 2.0f) : 0.0f; };
+        const ui::Rect r{along(st.screenH, w) - own(st.ownH, st.w) + st.x, along(st.screenV, h) - own(st.ownV, st.h) + st.y, st.w, st.h};
+        ui::DrawLabel(paint, st.text, r, ui::Argb(st.color), st.font, st.textH, st.textV, ui::kTextShadow);
+    }
 }
 
 } // namespace sr::client

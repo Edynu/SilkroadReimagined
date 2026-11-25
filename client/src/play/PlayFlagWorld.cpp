@@ -156,6 +156,10 @@ bool PlayScreen::FlagScriptStep(ScreenContext& context, const std::string& verb,
         snapName_ = arg.empty() ? "snap" : arg;
         return true;
     }
+    if (verb == "scene") { // scene:NAME: a quest scene (script\q_script\NAME.txt) played here, as the server's 0x3CA2 starts one
+        PlayQuestScene(context, arg);
+        return true;
+    }
 #ifdef SR_BUG_REPORTS
     if (verb == "bug-report") { // bug-report:SUBJECT|TEXT[|noui]: the report window's Send (PlayBugReport.cpp), its screenshot taken
         BugReportForm form;

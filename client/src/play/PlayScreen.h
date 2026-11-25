@@ -424,6 +424,15 @@ private:
         };
         std::map<std::string, Placed> looks;
         std::set<std::string> unshown; // commands logged once as not shown
+        // Its texts on the screen (S_StaticCreateEx, gone at S_StaticRelease): placed against the screen as drawn.
+        struct Static {
+            std::string name, text;
+            int screenH = 0, screenV = 0, ownH = 0, ownV = 0; // 0 left / top, 1 centre, 2 right / bottom
+            float w = 0, h = 0, x = 0, y = 0;
+            int textH = 0, textV = 0, font = 0;
+            std::uint32_t color = 0xFFFFFFFF;
+        };
+        std::vector<Static> statics;
     } scene_;
     struct CameraShake {
         double from = 0, until = 0, next = 0;
