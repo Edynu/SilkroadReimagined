@@ -880,12 +880,21 @@ bool InventoryWindow::OnNotice(const ui::Notice& notice) {
         }
         return true;
     }
-    // Ctrl + click with a store open: sold at once, the whole stack.
+    // Ctrl + click with a store open: the whole stack sold once the box asking it is answered (the original's quick sale);
+    // a mall item is never sold so.
     if (notice.kind == ui::Notice::Kind::Clicked && notice.value == 2 && context_.hud != nullptr && context_.state != nullptr &&
         context_.state->shopNpc != 0) {
         const int place = PlaceOf(notice.source);
-        if (place >= game::slot::kWorn && context_.state->inventory.At(std::uint8_t(place)) != nullptr) {
-            context_.hud->Request({HudRequest::Kind::ShopSell, place});
+        const game::ItemInstance* item = place >= game::slot::kWorn ? context_.state->inventory.At(std::uint8_t(place)) : nullptr;
+        const assets::ItemRow* row = item != nullptr && context_.items != nullptr ? context_.items->Find(item->refId) : nullptr;
+        if (row != nullptr && row->cashItem) {
+            context_.state->Post(game::GameMessage::Kind::General, context_.Text("UIIT_MSG_STRGERR_CANT_QUICKSELL_CASHITEM"), context_.time);
+        } else if (item != nullptr) {
+            HudContext* c = &context_;
+            const std::string name = row != nullptr ? context_.Text(row->nameKey) : std::string();
+            context_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(context_.Text("UIIT_MSG_SELL_RECONFIRM"), {name})}, [c, place](bool yes) {
+                if (yes && c->hud != nullptr && c->state != nullptr && c->state->shopNpc != 0) c->hud->Request({HudRequest::Kind::ShopSell, place});
+            });
         }
         return true;
     }

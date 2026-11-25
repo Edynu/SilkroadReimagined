@@ -1232,7 +1232,7 @@ private:
 // tab groups: up to 4 tabs (200..203, made in code), 30 goods a page (100..129) with the page
 // spinner (14), the 5 sold items that can be bought back (50..54, oldest left). A good dragged onto
 // the inventory opens the buy box; an item dropped on the store the sell box; a sold one dragged onto
-// the inventory the buy-back box; Ctrl + click buys or sells at once.
+// the inventory the buy-back box; Ctrl + click buys at once, sells once asked.
 class StoreWindow : public ui::MainFrame {
 public:
     StoreWindow(const assets::UiLayoutNode& node, HudContext& context) : MainFrame(node), context_(context) {}
