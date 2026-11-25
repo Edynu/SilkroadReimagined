@@ -27,6 +27,7 @@
 #include "sr/core/Trace.h"
 #include "sr/game/Loading.h"
 #include "sr/game/Berserk.h"
+#include "sr/game/SpecialItems.h"
 #include "sr/game/SkillCatalogue.h"
 #include "sr/game/Skills.h"
 #include "gui/HudWindows.h"
@@ -1035,6 +1036,11 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         // A murderer's return scroll (0x1875): a banner too (category 5).
         if (refused->code == 0x1875) player_.Notify(game::Banner::Kind::Warning, gui_.data().Text(key), context.time);
         if (const char* mall = MallItemErrorKey(refused->code)) key = mall; // the mall's items' codes
+        // A second experience scroll while one runs: the original's client refuses it itself with its own line.
+        if (const assets::ItemRow* row = tables_ ? tables_->items.Find(refused->item) : nullptr;
+            row != nullptr && refused->code == game::kBonusRunning && game::BonusScrollOf(*row).key == game::kBonusExperienceKey) {
+            key = "UIIT_MSG_MOVE_SPEED_UP_FAIL_OVERLAP";
+        }
         player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);
         core::LogInfo("game: item use refused (code 0x{:X})", refused->code);
     } else if (const auto* started = std::get_if<proto::ReturnStarted>(&event)) {
@@ -3583,7 +3589,7 @@ void PlayScreen::HudRequests(ScreenContext& context) {
                 shared_->session->MoveItem({place, std::uint8_t(wornAt), 0});
             } else if (ActionBarRuns(context.time)) {
                 // Refused silently while the player's action bar runs.
-            } else if (!MurdererScrollRefused(place, context.time) && !UseCrestItem(place) && !UseGlobalChatItem(place) && !UseReverseReturn(place) && !UseFortressItem(place) && !UseMallItem(place) &&
+            } else if (!MurdererScrollRefused(place, context.time) && !BerserkScrollRefused(place, context.time) && !UseCrestItem(place) && !UseGlobalChatItem(place) && !UseReverseReturn(place) && !UseFortressItem(place) && !UseMallItem(place) &&
                        !UseServiceItem(hudContext_, place)) {
                 // With the selection (a quest's trap or branch takes it).
                 shared_->session->UseItem(place, 0, 0, player_.target.Selected() && player_.target.entity != view_.Self() ? player_.target.entity : 0);
@@ -3591,7 +3597,7 @@ void PlayScreen::HudRequests(ScreenContext& context) {
             break;
         }
         case HudRequest::Kind::UseItem:
-            if (!replay_ && !ActionBarRuns(context.time) && !MurdererScrollRefused(std::uint8_t(r.value), context.time) && !UseCrestItem(std::uint8_t(r.value)) && !UseGlobalChatItem(std::uint8_t(r.value)) && !UseTalisman(std::uint8_t(r.value)) &&
+            if (!replay_ && !ActionBarRuns(context.time) && !MurdererScrollRefused(std::uint8_t(r.value), context.time) && !BerserkScrollRefused(std::uint8_t(r.value), context.time) && !UseCrestItem(std::uint8_t(r.value)) && !UseGlobalChatItem(std::uint8_t(r.value)) && !UseTalisman(std::uint8_t(r.value)) &&
                 !UseReverseReturn(std::uint8_t(r.value)) && !UseFortressItem(std::uint8_t(r.value)) && !UseMallItem(std::uint8_t(r.value)) &&
                 !UseServiceItem(hudContext_, int(r.value))) {
                 shared_->session->UseItem(std::uint8_t(r.value), 0, 0, player_.target.Selected() && player_.target.entity != view_.Self() ? player_.target.entity : 0);

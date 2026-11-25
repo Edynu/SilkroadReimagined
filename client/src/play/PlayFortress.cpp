@@ -177,6 +177,11 @@ bool PlayScreen::UseFortressItem(std::uint8_t place) {
     if (!groundPoint && !manual && !onTarget) return false;
     const game::WorldView::Entity* self = view_.Find(view_.Self());
     if (self == nullptr) return true;
+    // The shock bomb (3/3/6/2) not from a ride: "Unable to use item while using COS." (the original's use checks it first).
+    if (t[2] == 6 && t[3] == 2 && riders_.count(view_.Self()) != 0) {
+        player_.Post(game::GameMessage::Kind::General, hudContext_.Text("UIIT_MSG_SKILL_USE_FAIL_CANT_USEITEM_IN_RIDESTATE"), 0.0);
+        return true;
+    }
     // The fortress whose area the player stands in (0: none).
     std::uint32_t fortress = 0;
     for (const proto::FortressRecord& f : fortress_.Fortresses()) {

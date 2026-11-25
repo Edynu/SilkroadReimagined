@@ -12,6 +12,7 @@
 #include "sr/core/Log.h"
 #include "sr/game/Mall.h"
 #include "sr/game/MallProtocol.h"
+#include "sr/game/SpecialItems.h"
 #include "sr/game/TimedServices.h"
 
 namespace sr::client {
@@ -34,6 +35,15 @@ const char* MallItemErrorKey(std::uint16_t code) {
     case 0x18FE: return "UIIT_STT_STORAGE_EXPANSION_USE_ERORR";
     default: return nullptr;
     }
+}
+
+bool PlayScreen::BerserkScrollRefused(std::uint8_t place, double time) {
+    if (!tables_ || !tables_->Usable() || player_.self.berserkLit == 0) return false;
+    const game::ItemInstance* item = player_.inventory.At(place);
+    const assets::ItemRow* row = item != nullptr ? tables_->items.Find(item->refId) : nullptr;
+    if (row == nullptr || game::BonusScrollOf(*row).key != game::kBonusBerserkTimeKey) return false;
+    player_.Post(game::GameMessage::Kind::General, gui_.data().Text("UIIT_MSG_HWAN_FAIL_OVERLAP_1"), time);
+    return true;
 }
 
 bool PlayScreen::UseMallItem(std::uint8_t place) {

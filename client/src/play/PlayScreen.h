@@ -689,6 +689,8 @@ private:
     // attacked (or Alt is held) and is not of the party, a booth's bag, the fortress war's and the events' sides.
     int PlayerCursor(std::uint32_t player, bool alt) const;
     bool MurdererScrollRefused(std::uint8_t place, double time);
+    // The berserk time's scroll ('pht') in berserk: refused by the client ("Cannot be used in berzerk mode.", the original's).
+    bool BerserkScrollRefused(std::uint8_t place, double time);
     void PkRefusal(game::proto::SkillUseStatus status, double time);
     ui::Color PlayerNameColour(std::uint32_t id, const game::WorldView::Entity& e) const;
     // Capture the Flag and Event So-Ok (55; PlayFlagWorld.cpp): the client's view of the event (the notices'
