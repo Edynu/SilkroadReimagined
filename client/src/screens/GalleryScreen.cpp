@@ -1052,6 +1052,29 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         // --page stall | stall-buy | stall-price: Zeta's stall open for business beside the bag (a visitor's view; stall-buy:
         // its second item dragged to the bag, the agreement box), or the player's own being modified with its first item's
         // price asked (stall-price: its edit button).
+        // --page stall-network-buy: the stall network's window on a page of one row, its Purchase pressed (the box).
+        if (page_ == "stall-network-buy" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
+            stallShown_ = true;
+            namespace proto = game::proto;
+            if (tables_->Usable()) {
+                hudContext_.items = &tables_->items;
+                hudContext_.stall = &sampleStall_;
+                proto::NetworkPage page;
+                page.pages = 1;
+                page.total = 1;
+                proto::NetworkRow row;
+                row.listing = 7ull << 8 | 1;
+                row.owner = "Zeta";
+                row.price = 12500;
+                if (const assets::ItemRow* r = tables_->items.Find(std::string_view("ITEM_ETC_HP_POTION_02"))) row.item = {0, r->refObjId, 0, 0, 0, 50, {}};
+                page.rows = {row};
+                sampleStall_.NewSearch(0, 0);
+                sampleStall_.Apply(proto::StallEvent{page}, 1);
+                hudContext_.stallRequest = [](proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: stall request 0x{:04X}", id); };
+                hud_.Show(hud::kStallNetwork);
+                if (ui::Interface* ui = hud_.interface()) StallNetworkBuy(*ui, 0);
+            }
+        }
         const bool stallPage = page_ == "stall" || page_ == "stall-buy" || page_ == "stall-price";
         if (stallPage && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
             stallShown_ = true;

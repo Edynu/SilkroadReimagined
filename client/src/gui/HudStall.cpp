@@ -366,6 +366,51 @@ void BuildNetwork2dt(ui::Interface& ui, const std::vector<assets::Ui2dtRecord>& 
     }
 }
 
+// CNIFStallNetworkMsgBox (res_ui\\nifstallnetworkmsgbox.2dt): a network row's purchase asked, as the original's network
+// window asks it: the item's icon (26), its name (20), the amount (21) and the price (22, the number plain), Buy (4) and
+// Cancel (7). Buy sends the purchase; either closes the box.
+constexpr const char* kNetworkBoxLayout = "res_ui\\nifstallnetworkmsgbox.2dt";
+constexpr int kNetworkBox = 151;
+
+class NetworkBuyBox : public ui::MainFrame {
+public:
+    NetworkBuyBox(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+
+    void Created(ui::Interface& ui) override {
+        MainFrame::Created(ui);
+        ui_ = &ui;
+        if (const auto* records = c_.layout2dt ? c_.layout2dt(kNetworkBoxLayout) : nullptr; records != nullptr && !records->empty()) {
+            Build2dt(ui, *this, *records);
+        }
+    }
+
+    void Ask(const proto::NetworkRow& row) {
+        row_ = row;
+        const assets::ItemRow* item = c_.items != nullptr ? c_.items->Find(row.item.item) : nullptr;
+        if (auto* icon = ui::As<ui::Static>(Child(26))) icon->texture = item != nullptr && !item->iconPath.empty() ? "icon\\" + item->iconPath : std::string();
+        if (ui::Widget* w = Child(20)) w->SetText(item != nullptr ? c_.Text(item->nameKey) : std::string());
+        if (ui::Widget* w = Child(21)) w->SetText(std::to_string(std::max<int>(1, row.item.quantity)));
+        if (ui::Widget* w = Child(22)) w->SetText(std::to_string(row.price));
+    }
+
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && n.source != nullptr && n.source->parent() == this && (n.control == 4 || n.control == 7)) {
+            if (n.control == 4 && c_.stallRequest && c_.stall != nullptr) {
+                const_cast<game::StallView*>(c_.stall)->Buying(row_.listing);
+                c_.stallRequest(proto::NetworkBuy::kId, proto::Encode(proto::NetworkBuy{row_.listing, row_.revision, row_.price}));
+            }
+            if (ui_ != nullptr) ui_->Close(this);
+            return true;
+        }
+        return MainFrame::OnNotice(n);
+    }
+
+private:
+    HudContext& c_;
+    ui::Interface* ui_ = nullptr;
+    proto::NetworkRow row_;
+};
+
 class StallNetworkWindow : public ui::MainFrame {
 public:
     StallNetworkWindow(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
@@ -483,20 +528,17 @@ public:
         searchAgain_ = c_.time + proto::kNetworkSearchSeconds;
         chosen_ = -1;
     }
-    // A row of the page shown chosen and bought (asks first).
+    // A row of the page shown chosen and bought: its purchase box (CNIFStallNetworkMsgBox).
     void Purchase() {
         const proto::NetworkRow* row = Chosen();
-        if (row == nullptr || c_.hud == nullptr) return;
-        const assets::ItemRow* item = c_.items != nullptr ? c_.items->Find(row->item.item) : nullptr;
-        HudContext* c = &c_;
-        const proto::NetworkRow r = *row;
-        c_.hud->Confirm("UIIT_STT_CONFIRM_BOX",
-                        {FormatText(c_.Text("UIIT_MSG_WARENETWORK_BUY_CONFIRM"), {item != nullptr ? c_.Text(item->nameKey) : std::string(), GoldText(r.price)})},
-                        [c, r](bool yes) {
-                            if (!yes || !c->stallRequest || c->stall == nullptr) return;
-                            const_cast<game::StallView*>(c->stall)->Buying(r.listing);
-                            c->stallRequest(proto::NetworkBuy::kId, proto::Encode(proto::NetworkBuy{r.listing, r.revision, r.price}));
-                        });
+        if (row == nullptr || ui_ == nullptr) return;
+        if (ui::Widget* open = ui_->Window(kNetworkBox)) ui_->Close(open);
+        const auto node = RootNode2dt(c_, kNetworkBoxLayout, "CNIFStallNetworkMsgBox", kNetworkBox);
+        if (!node) return;
+        if (auto* box = dynamic_cast<NetworkBuyBox*>(ui_->Open(*node))) {
+            ui_->Centre(*box, ui_->screen());
+            box->Ask(*row);
+        }
     }
     void Choose(int row) {
         chosen_ = row;
@@ -693,6 +735,7 @@ void RegisterStallWindows(ui::Interface& ui, HudContext& context) {
         return std::make_unique<NetworkRow>(node);
     });
     ui.Register("CNIFStallNetworkPages", [](const assets::UiLayoutNode& n) { return std::make_unique<NetworkPages>(n); });
+    ui.Register("CNIFStallNetworkMsgBox", [c](const assets::UiLayoutNode& n) { return std::make_unique<NetworkBuyBox>(n, *c); });
     // The network's window: 1.188's CNIFStallNetwork from its 2dt (the root's size and frame).
     ui.Register("CIFStallNetwork", [c](const assets::UiLayoutNode& n) -> std::unique_ptr<ui::Widget> {
         assets::UiLayoutNode node = n;
