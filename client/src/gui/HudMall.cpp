@@ -39,7 +39,7 @@ constexpr int kPanel = 105, kFirstMain = 3000, kFirstSub = 3100, kFirstGood = 40
 constexpr int kBasketBuy = 3200, kBasketEmpty = 3201, kScrollUp = 3300, kScrollDown = 3301;
 // A goods slot (ifnewitemmallshopitemslot.txt): name, arrow, old price, price, silk icon, count, icon.
 constexpr int kSlotName = 801, kSlotArrow = 802, kSlotOld = 803, kSlotPrice = 805, kSlotCount = 807, kSlotIcon = 900;
-constexpr float kMenuWidth = 124.0f, kGoodW = 199.0f, kGoodH = 81.0f, kGoodGap = 4.0f;
+constexpr float kMenuWidth = 124.0f, kGoodW = 199.0f, kGoodH = 81.0f, kGoodGap = 4.0f, kHeadingH = 23.0f;
 // The confirm window (ifnewitemmallconfirmbuy.txt).
 constexpr int kConfirmBuy = 61, kConfirmCancel = 62, kCountUp = 50, kCountDown = 51, kCountEdit = 42, kConfirmName = 40, kConfirmIcon = 11;
 constexpr int kConfirmSilk = 70; // ours: the silk row's value (the original's CIFNewItemMallConfirmSlot)
@@ -208,18 +208,9 @@ public:
             }
             break;
         case View::Front:
-        case View::Hot: {
-            // The hot store (with the in-service tags 1, 2, 16, 8): one list each; the front page ours the same.
-            for (const assets::MallHotRow& h : cat->hot()) {
-                if (!h.service) continue;
-                each([&](const assets::MallTab& t, const assets::MallGood& g) {
-                    if ((g.saleTag & h.tag) == 0) return;
-                    const GoodRef r{t.id, g.slot};
-                    if (std::find(out.begin(), out.end(), r) == out.end()) out.push_back(r);
-                });
-            }
+        case View::Hot:
+            for (const Line& l : Lines()) out.insert(out.end(), l.goods.begin(), l.goods.end());
             break;
-        }
         case View::Basket:
             for (const auto& [tab, slot] : c_.mall->basket) out.push_back({tab, slot});
             break;
@@ -230,6 +221,45 @@ public:
             });
             break;
         }
+        }
+        return out;
+    }
+
+    // The panel's lines: a hot list's heading or a row of up to two goods.
+    struct Line {
+        std::string heading; // a text key: the line is a heading
+        std::vector<GoodRef> goods;
+    };
+    std::vector<Line> Lines() const {
+        std::vector<Line> out;
+        const auto rows = [&out](const std::vector<GoodRef>& goods) {
+            for (std::size_t i = 0; i < goods.size(); i += 2) {
+                Line l;
+                l.goods.assign(goods.begin() + std::ptrdiff_t(i), goods.begin() + std::ptrdiff_t(std::min(i + 2, goods.size())));
+                out.push_back(std::move(l));
+            }
+        };
+        if (view_ != View::Front && view_ != View::Hot) {
+            rows(Goods());
+            return out;
+        }
+        // The hot store: each in-service list (tags 1, 2, 16, 8) with goods, its heading then its goods, a good in
+        // every list it is tagged for (the original's CIFNewItemMallShop); the front page ours the same.
+        const assets::MallTable* cat = c_.mall != nullptr ? c_.mall->catalog : nullptr;
+        if (cat == nullptr) return out;
+        for (const assets::MallHotRow& h : cat->hot()) {
+            if (!h.service) continue;
+            std::vector<GoodRef> goods;
+            for (const assets::MallShop& s : cat->shops()) {
+                for (const assets::MallTab& t : s.tabs) {
+                    for (const assets::MallGood& g : t.goods) {
+                        if ((g.saleTag & h.tag) != 0) goods.push_back({t.id, g.slot});
+                    }
+                }
+            }
+            if (goods.empty()) continue;
+            out.push_back({h.nameKey, {}});
+            rows(goods);
         }
         return out;
     }
@@ -319,30 +349,45 @@ public:
             }
             top = 30.0f;
         }
-        // The goods, two to a row, from the scroll's row.
-        const std::vector<GoodRef> goods = Goods();
-        const int rows = (int(goods.size()) + 1) / 2;
-        const int shown = int((513.0f - top) / (kGoodH + kGoodGap));
-        scroll_ = std::clamp(scroll_, 0, std::max(0, rows - shown));
-        for (int i = scroll_ * 2; i < int(goods.size()) && i < (scroll_ + shown) * 2; ++i) {
-            const assets::MallGood* g = GoodOf(goods[std::size_t(i)]);
-            if (g == nullptr) continue;
-            const int k = i - scroll_ * 2;
-            assets::UiLayoutNode n;
-            n.type = "CIFStatic";
-            n.id = kFirstGood + i;
-            n.rect = {kMenuWidth + 6.0f + float(k % 2) * (kGoodW + 8.0f), top + float(k / 2) * (kGoodH + kGoodGap), kGoodW, kGoodH};
-            auto slot = std::make_unique<GoodSlot>(n, c_);
-            GoodSlot* s = static_cast<GoodSlot*>(panel_->Add(std::move(slot)));
-            s->ref = goods[std::size_t(i)];
-            s->good = g;
-            s->selected = s->ref == selected_;
-            AddSection(*ui_, *s, "resinfo\\ifnewitemmallshopitemslot.txt", "Create");
-            AddSection(*ui_, *s, "resinfo\\ifnewitemmallshopitemslot.txt", "NewShopSlotIconForPackage");
-            FillSlot(*s);
+        // The lines from the scroll's line: a heading (116 x 23, its name 93 x 15 from 43) or two goods.
+        const std::vector<Line> lines = Lines();
+        const auto height = [](const Line& l) { return l.heading.empty() ? kGoodH + kGoodGap : kHeadingH; };
+        int last = int(lines.size()); // the first line of the last page
+        for (float h = 0.0f; last > 0 && h + height(lines[std::size_t(last - 1)]) <= 513.0f - top; --last) h += height(lines[std::size_t(last - 1)]);
+        scroll_ = std::clamp(scroll_, 0, last);
+        float at = top;
+        int index = 0;
+        for (int i = scroll_; i < int(lines.size()) && at + height(lines[std::size_t(i)]) <= 513.0f; ++i) {
+            const Line& line = lines[std::size_t(i)];
+            if (!line.heading.empty()) {
+                assets::UiLayoutNode n;
+                n.type = "CIFStatic";
+                n.id = kFirstGood + index++;
+                n.rect = {kMenuWidth + 6.0f + 43.0f, at + 4.0f, 93.0f, 15.0f};
+                n.text = line.heading;
+                n.vAlign = 1;
+                panel_->Add(ui_->Make(n));
+            }
+            for (std::size_t k = 0; k < line.goods.size(); ++k) {
+                const assets::MallGood* g = GoodOf(line.goods[k]);
+                if (g == nullptr) continue;
+                assets::UiLayoutNode n;
+                n.type = "CIFStatic";
+                n.id = kFirstGood + index++;
+                n.rect = {kMenuWidth + 6.0f + float(k) * (kGoodW + 8.0f), at, kGoodW, kGoodH};
+                auto slot = std::make_unique<GoodSlot>(n, c_);
+                GoodSlot* s = static_cast<GoodSlot*>(panel_->Add(std::move(slot)));
+                s->ref = line.goods[k];
+                s->good = g;
+                s->selected = s->ref == selected_;
+                AddSection(*ui_, *s, "resinfo\\ifnewitemmallshopitemslot.txt", "Create");
+                AddSection(*ui_, *s, "resinfo\\ifnewitemmallshopitemslot.txt", "NewShopSlotIconForPackage");
+                FillSlot(*s);
+            }
+            at += height(line);
         }
         // The scroll's buttons (the view's mall_scroll art).
-        if (rows > shown) {
+        if (last > 0) {
             for (int k = 0; k < 2; ++k) {
                 assets::UiLayoutNode b;
                 b.type = "CIFButton";
