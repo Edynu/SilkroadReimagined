@@ -1407,6 +1407,29 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             ToggleAlchemyWindow(hudContext_);
             if (page_.size() > 8) AlchemyShowTab(hudContext_, std::atoi(page_.c_str() + 8));
         }
+        // --page avatar-grant: the smith's avatar blessing (window 156) with an avatar dress from the bag put in and its second
+        // option picked (the bag's avatar: --bag-items' first, else the first dress of the data that takes magic options).
+        if (page_ == "avatar-grant" && !alchemyShown_ && interface_ != nullptr && tables_ && tables_->Usable() && host_.data().Ready() &&
+            hud_.Created()) {
+            alchemyShown_ = true;
+            hudContext_.items = &tables_->items;
+            hudContext_.magicOptions = host_.data().MagicOptions();
+            hudContext_.magicOptionAssign = host_.data().MagicOptionAssign();
+            std::string code = context.config.GetString("bag-items", "");
+            if (code.empty()) {
+                for (const auto& [name, row] : tables_->items.rows()) {
+                    if (row.typeId == std::array<int, 4>{3, 1, 13, 2} && row.maxMagicOptions > 0 && (code.empty() || name < code)) code = name;
+                }
+            }
+            if (const assets::ItemRow* row = tables_->items.Find(std::string_view(code))) {
+                game::proto::InventoryList bag;
+                bag.size = game::Inventory::kMaxSize;
+                bag.items.push_back({14, row->refObjId, 0, 0, game::NewDurability(*row), 1, {}});
+                sample_.Apply(game::TitleEvent{bag});
+                ShowAvatarGrant(hudContext_, 0);
+                AvatarGrantStep(hudContext_, 14, 1, false);
+            }
+        }
         // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
         // (one goal met: "Completed" in its colour).
         if (page_ == "quest-list" && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&

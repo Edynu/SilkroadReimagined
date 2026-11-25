@@ -1453,10 +1453,232 @@ AlchemyWindow* WindowOf(HudContext& c) {
     return ui != nullptr ? dynamic_cast<AlchemyWindow*>(ui->Window(hud::kEnchant)) : nullptr;
 }
 
+// --- The smith's avatar blessing -----------------------------------------------------------------
+
+// 1.188's CIFGrantMagicAttributeWnd (window 156, ginterface.txt's GrantMagicAttribute: 272 x 395, the title
+// UIIT_STT_ALCHEMYBOX_ENCHANT_MAGIC_PARAM), resinfo\ifgrantmagicattributewnd.txt: Create (the guide 10, the avatar's slot 8
+// and name 9, Confirm 5, Cancel 6) and OptionList (its header 30, the five bars 40..44). Opened by a smith's row 0x2F.
+// An avatar dropped from the bag (3/1/13 but TID4 4, else UIIT_STT_AVATAR_MAGICOPTION_ONLY_AVATAR) lists its options
+// (magicoptionassign.txt's row for its kind), each a row of 215 x 24 (gil_bar02, the picked one _select) written at the
+// avatar's degree as its tooltip writes it; the wheel scrolls them. Confirm: a row picked and the avatar under its
+// MaxMagicOptCount (else UIIT_MSG_AVATAR_MAGICOPTION_ADD_ERORR), the request (the smith, the place, the option's name).
+constexpr int kGrantWindow = 156, kGrantSlot = 8, kGrantName = 9, kGrantConfirm = 5, kGrantCancel = 6, kGrantBar = 40, kGrantRows = 5;
+constexpr int kGrantRow = 60; // ours: the rows over the bars (the original's slots are made from 60 too)
+constexpr const char* kGrantLayout = "resinfo\\ifgrantmagicattributewnd.txt";
+
+class GrantRow : public ui::Widget {
+public:
+    explicit GrantRow(const assets::UiLayoutNode& node) : Widget(node) { interactive = true; }
+    bool picked = false;
+    std::string line;
+    void Mouse(ui::Frame& frame) override {
+        if (frame.input.Pressed(ui::MouseButton::Left) && frame.pointer.hovered == this) Notify(ui::Notice::Kind::Clicked);
+    }
+    void Draw(ui::Frame& frame) override {
+        if (line.empty()) return;
+        const ui::Rect r = ScreenRect();
+        frame.paint.Image(picked ? "interface\\guild\\gil_bar02_select.ddj" : "interface\\guild\\gil_bar02_deselect.ddj", r, {0, 0}, {1, 1},
+                          ui::WithAlpha(ui::kWhite, Opacity()));
+        frame.paint.Text(line, {r.x + 6.0f, r.y, r.w - 12.0f, r.h}, ui::WithAlpha(ui::kWhite, Opacity()), 0, 0, 1, ui::kTextShadow);
+    }
+};
+
+class GrantWindow : public ui::MainFrame {
+public:
+    GrantWindow(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+    std::uint32_t npc = 0;
+
+    void Created(ui::Interface& ui) override {
+        ui::MainFrame::Created(ui);
+        // The option list's section beside Create's.
+        if (const assets::UiLayout* l = ui.Layout(kGrantLayout)) {
+            for (const auto& s : l->sections) {
+                if (s.name != "OptionList") continue;
+                for (auto it = s.nodes.rbegin(); it != s.nodes.rend(); ++it) Add(ui.Make(*it));
+            }
+        }
+        for (int k = 0; k < kGrantRows; ++k) {
+            ui::Widget* bar = Child(kGrantBar + k);
+            if (bar != nullptr) bar->visible = false; // the rows over them draw their own bars (gil_bar02)
+            assets::UiLayoutNode n;
+            n.type = "CIFStatic";
+            n.id = kGrantRow + k;
+            if (bar != nullptr) {
+                n.rect = {bar->rect.x, bar->rect.y, bar->rect.w, bar->rect.h};
+            } else {
+                n.rect = {20.0f, 226.0f + 23.0f * float(k), 215.0f, 24.0f};
+            }
+            rows_[std::size_t(k)] = static_cast<GrantRow*>(Add(std::make_unique<GrantRow>(n)));
+        }
+        if (auto* slot = ui::As<ui::Slot>(Child(kGrantSlot))) {
+            slot->pickable = false;
+            slot->tooltipLines = [this] {
+                const game::ItemInstance* item = Avatar();
+                const assets::ItemRow* row = item != nullptr && c_.items ? c_.items->Find(item->refId) : nullptr;
+                return row != nullptr ? ItemTooltip(*row, *item, c_) : std::vector<ui::TooltipLine>{};
+            };
+        }
+        onDrop = [this](ui::Widget* source, ui::Widget*) {
+            const int place = InventoryPlaceOf(source);
+            if (place < game::slot::kWorn) return false;
+            Put(place);
+            return true;
+        };
+        Clear();
+    }
+
+    // A bag item put in: an avatar the window takes, else the original's line.
+    void Put(int place) {
+        const game::ItemInstance* item = c_.state != nullptr ? c_.state->inventory.At(std::uint8_t(place)) : nullptr;
+        const assets::ItemRow* row = item != nullptr && c_.items ? c_.items->Find(item->refId) : nullptr;
+        if (row == nullptr) return;
+        if (!alchemy::IsGrantAvatar(*row)) {
+            if (c_.systemLine) c_.systemLine(c_.Text("UIIT_STT_AVATAR_MAGICOPTION_ONLY_AVATAR"));
+            return;
+        }
+        place_ = place;
+        serial_ = item->serial;
+        options_ = c_.magicOptionAssign != nullptr ? alchemy::AvatarGrantList(*c_.magicOptionAssign, *row) : std::vector<std::string>{};
+        picked_ = -1;
+        top_ = 0;
+        Refresh();
+    }
+
+    void Pick(int index) {
+        if (index < 0 || index >= int(options_.size())) return;
+        picked_ = index;
+        Refresh();
+    }
+
+    void Confirm() {
+        const game::ItemInstance* item = Avatar();
+        const assets::ItemRow* row = item != nullptr && c_.items ? c_.items->Find(item->refId) : nullptr;
+        if (row == nullptr || picked_ < 0 || picked_ >= int(options_.size())) return;
+        if (int(item->options.size()) >= row->maxMagicOptions) {
+            if (c_.systemLine) c_.systemLine(c_.Text("UIIT_MSG_AVATAR_MAGICOPTION_ADD_ERORR"));
+            return;
+        }
+        if (c_.alchemyRequest) {
+            c_.alchemyRequest(proto::AvatarGrant::kId, proto::Encode(proto::AvatarGrant{npc, std::uint8_t(place_), options_[std::size_t(picked_)]}));
+        }
+    }
+
+    // The server's answer: the line, the list as it was (the avatar's options changed).
+    void Result(const proto::AlchemyResult& r) {
+        const char* key = "UIIT_MSG_AVATAR_MAGICOPTION_ADD_FAIL";
+        if (r.outcome == proto::AlchemyOutcome::Success) key = "UIIT_MSG_AVATAR_MAGICOPTION_ADD";
+        else if (r.code == 6) key = "UIIT_MSG_AVATAR_MAGICOPTION_ADD_ERORR";
+        else if (r.code == 8) key = "UIIT_STT_AVATAR_MAGICOPTION_ONLY_AVATAR";
+        else if (r.code == 0xA) key = "UIIT_MSG_AVATAR_MAGICOPTION_WRONG";
+        if (c_.systemLine) c_.systemLine(c_.Text(key));
+        picked_ = -1;
+        Refresh();
+    }
+
+    void Clear() {
+        place_ = -1;
+        serial_ = 0;
+        options_.clear();
+        picked_ = -1;
+        top_ = 0;
+        Refresh();
+    }
+
+    void Update(ui::Frame& frame) override {
+        ui::MainFrame::Update(frame);
+        // The avatar gone from its place (moved, sold): the window empties.
+        if (place_ >= 0 && Avatar() == nullptr) Clear();
+        if (frame.input.wheel() != 0.0f && Hit(frame.pointer.position) && int(options_.size()) > kGrantRows) {
+            top_ = std::clamp(top_ + (frame.input.wheel() > 0.0f ? -1 : 1), 0, int(options_.size()) - kGrantRows);
+            Refresh();
+        }
+    }
+
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && n.source != nullptr) {
+            const int id = n.source->id();
+            if (id >= kGrantRow && id < kGrantRow + kGrantRows && n.source->parent() == this) return Pick(top_ + id - kGrantRow), true;
+            if (id == kGrantConfirm) return Confirm(), true;
+            if (id == kGrantCancel) {
+                if (c_.hud != nullptr) c_.hud->Hide(kGrantWindow);
+                return true;
+            }
+        }
+        return ui::MainFrame::OnNotice(n);
+    }
+
+private:
+    const game::ItemInstance* Avatar() const {
+        const game::ItemInstance* item = place_ >= 0 && c_.state != nullptr ? c_.state->inventory.At(std::uint8_t(place_)) : nullptr;
+        return item != nullptr && item->serial == serial_ ? item : nullptr;
+    }
+
+    void Refresh() {
+        const game::ItemInstance* item = Avatar();
+        const assets::ItemRow* row = item != nullptr && c_.items ? c_.items->Find(item->refId) : nullptr;
+        if (auto* slot = ui::As<ui::Slot>(Child(kGrantSlot))) {
+            slot->icon = row == nullptr ? std::string() : row->iconPath.empty() ? std::string("icon\\icon_default.ddj") : "icon\\" + row->iconPath;
+        }
+        if (ui::Widget* name = Child(kGrantName)) name->SetText(row != nullptr ? c_.Text(row->nameKey) : std::string());
+        for (int k = 0; k < kGrantRows; ++k) {
+            GrantRow* r = rows_[std::size_t(k)];
+            if (r == nullptr) continue;
+            const int index = top_ + k;
+            r->line.clear();
+            r->picked = index == picked_;
+            if (row == nullptr || index >= int(options_.size()) || c_.magicOptions == nullptr) continue;
+            // The option at the avatar's degree, as the item's tooltip writes it (a range: its least).
+            const assets::MagicOptionRow* at = alchemy::OptionRow(*c_.magicOptions, options_[std::size_t(index)], alchemy::Degree(*row));
+            if (at == nullptr) {
+                r->line = options_[std::size_t(index)];
+                continue;
+            }
+            std::uint32_t value = 0;
+            if (alchemy::IsRangeCode(at->attribute)) {
+                value = at->rangeWords[1]; // Param3
+            } else if (const std::vector<std::uint32_t> values = alchemy::OptionValues(*c_.magicOptions, at->optionName, at->degree); !values.empty()) {
+                value = values.front();
+            }
+            r->line = MagicOptionLine(c_, *row, {at->paramId, value}).text;
+        }
+    }
+
+    HudContext& c_;
+    std::array<GrantRow*, kGrantRows> rows_{};
+    int place_ = -1, picked_ = -1, top_ = 0;
+    std::uint64_t serial_ = 0;
+    std::vector<std::string> options_;
+};
+
+GrantWindow* GrantOf(HudContext& c) {
+    ui::Interface* ui = c.hud != nullptr ? c.hud->interface() : nullptr;
+    return ui != nullptr ? dynamic_cast<GrantWindow*>(ui->Window(kGrantWindow)) : nullptr;
+}
+
 } // namespace
+
+void ShowAvatarGrant(HudContext& c, std::uint32_t npc) {
+    if (c.hud == nullptr) return;
+    if (auto* w = dynamic_cast<GrantWindow*>(c.hud->Show(kGrantWindow))) {
+        w->npc = npc;
+        w->Clear();
+        if (ui::Interface* ui = c.hud->interface()) ui->Sound("SND_WINDOW_OPEN");
+        c.hud->OpenPage(hud::kPageInventory); // the bag beside it, to drop the avatar from
+    }
+}
+
+bool AvatarGrantStep(HudContext& c, int put, int pick, bool confirm) {
+    GrantWindow* w = GrantOf(c);
+    if (w == nullptr || !w->visible) return false;
+    if (put >= 0) w->Put(put);
+    if (pick >= 0) w->Pick(pick);
+    if (confirm) w->Confirm();
+    return true;
+}
 
 void RegisterAlchemyWindow(ui::Interface& ui, HudContext& context) {
     ui.Register("CNIFEnchantWnd", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<AlchemyWindow>(n, *c); });
+    ui.Register("CIFGrantMagicAttributeWnd", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<GrantWindow>(n, *c); });
     ui.Register("CNIFMiniConfirm", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<AlchemyAlert>(n, *c); });
 }
 
@@ -1534,6 +1756,10 @@ int AlchemySocketPickMode(HudContext& c) {
 void AlchemyResultArrived(HudContext& c, const proto::AlchemyResult& result) {
     core::LogInfo("game: alchemy: operation {} outcome {} code 0x{:04x} place {} plus {} -> {}", int(result.operation), int(result.outcome), result.code,
                   result.place, result.plusBefore, result.plusAfter);
+    if (result.operation == proto::AlchemyOperation::AvatarGrant) {
+        if (GrantWindow* g = GrantOf(c)) g->Result(result);
+        return;
+    }
     if (AlchemyWindow* w = WindowOf(c)) w->Result(result);
 }
 

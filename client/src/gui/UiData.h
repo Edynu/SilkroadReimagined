@@ -56,6 +56,8 @@ public:
     const game::SpiritTable* Spirits() const { return Ready() ? &state_->spirits : nullptr; }
     // refmagicoptgroup.txt (the socket stones' skills by level); null until ready.
     const std::vector<assets::MagicOptGroupRow>* MagicOptGroups() const { return Ready() ? &state_->magicOptGroups : nullptr; }
+    // magicoptionassign.txt (the avatar blessing's lists); null until ready.
+    const std::vector<assets::MagicOptionAssignRow>* MagicOptionAssign() const { return Ready() ? &state_->magicOptionAssign : nullptr; }
     const std::vector<assets::ActionRow>* Actions() const { return Ready() ? &state_->actions : nullptr; }
     // The world map's maps, floors and labels (worldmap_mapinfo.txt, worldmap_localinfo.txt); null until ready.
     const assets::WorldMapData* WorldMap() const { return Ready() ? &state_->worldMap : nullptr; }
@@ -91,6 +93,7 @@ private:
         std::vector<assets::MagicOptionRow> magicOptions;
         game::SpiritTable spirits;
         std::vector<assets::MagicOptGroupRow> magicOptGroups;
+        std::vector<assets::MagicOptionAssignRow> magicOptionAssign;
         std::vector<assets::ActionRow> actions; // the Action window's icons
         assets::WorldMapData worldMap;
         assets::GameGuideData gameGuide;

@@ -268,6 +268,8 @@ struct HudContext {
     const game::SpiritTable* spirits = nullptr; // the Devil's Spirit's options by plus (its tooltip)
     // refmagicoptgroup.txt: the socket stones' skills by level (a stone's tooltip, the Socket page; null: not loaded yet).
     const std::vector<assets::MagicOptGroupRow>* magicOptGroups = nullptr;
+    // magicoptionassign.txt: the avatar blessing's option lists (null: not loaded yet).
+    const std::vector<assets::MagicOptionAssignRow>* magicOptionAssign = nullptr;
     // A window's pick mode wants this mouse cursor (the original's cursor resource id; 0: the screen's own): the Socket
     // page's making (174) and removing (175),
     int cursor = 0;
@@ -1085,7 +1087,8 @@ private:
             End, RecallPoint, Destinations, Destination, Storage, Talk, Shop, Guild, Fortress,
             AcademyFound,   // a storage keeper's "Academy Establishment"
             AcademyRanking, // its "Honor ranking"
-            OpenMarket,     // Juel's market (the row ours: 1.188 has no text for it)
+            OpenMarket,     // Juel's market (the original's row 0x3F)
+            AvatarGrant,    // a smith's "Grant magic option on avatar" (row 0x2F): the avatar blessing's window
             TempleReputation, // "Temple area Point" (row 0x3C): the temples' reputation board asked
             PartySummon, // a party recall pillar's "Summon Party member" (the summon list asked for)
             Quest,       // a quest of the NPC's list (destination: the quest)
@@ -1453,6 +1456,10 @@ void ToggleAlchemyWindow(HudContext& context);
 bool AlchemyShown(HudContext& context);
 void AlchemyPut(HudContext& context, int place);
 void AlchemyResultArrived(HudContext& context, const game::proto::AlchemyResult& result);
+// The smith's avatar blessing (1.188's CIFGrantMagicAttributeWnd, window 156): opened by a smith's row (`npc` its entity);
+// a script's or the gallery's steps on it: an avatar put in from a bag place, a row picked, Confirm (false: not open).
+void ShowAvatarGrant(HudContext& context, std::uint32_t npc);
+bool AvatarGrantStep(HudContext& context, int put, int pick, bool confirm);
 // A magic option's tooltip line as 1.188 writes it (HudItemOptions.cpp): empty when the client
 // shows none; red for a penalty. And the names alchemy's stone lines use: the text of an option
 // granted, its name in a change line, and whether its values read as percents.

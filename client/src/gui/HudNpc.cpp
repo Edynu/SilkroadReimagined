@@ -6,6 +6,7 @@
 
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
+#include "sr/game/AlchemyProtocol.h"
 #include "sr/game/OpenMarketProtocol.h"
 #include "sr/game/EventProtocol.h"
 #include "sr/game/JobProtocol.h"
@@ -274,9 +275,11 @@ void NpcWindow::ShowNpc(std::uint32_t entity, const std::string& codename, const
         }
         AddChoice(context_.Text("UIIT_STT_TC_HONOR_RANKING"), {Choice::Kind::AcademyRanking, 0});
     }
-    // The Open Market's merchant: its row opens the market (ours, "Search Items": 1.188 carries
-    // no text of its own for the row; its server answers 0x7506 with the market's state).
-    if (codename == game::openmarket::kNpcCodename) AddChoice(context_.Text("UIIT_STT_OPEN_MARKET_ITEM_SEARCH"), {Choice::Kind::OpenMarket, 0});
+    // The Open Market's merchant: its row (the original's row 0x3F, "Access consignment/purchases/settlements.") opens
+    // the market (its server answers 0x7506 with the market's state).
+    if (codename == game::openmarket::kNpcCodename) AddChoice(context_.Text("SN_NPC_OPEN_MARKET_START"), {Choice::Kind::OpenMarket, 0});
+    // The seven smiths' avatar blessing (the NPC's function 0x20, the original's row 0x2F): its window opens beside the bag.
+    if ((services & proto::kNpcAvatarGrant) != 0) AddChoice(context_.Text("UIIT_STT_AVATAR_MAGICOPTION_ENCHANT_MAGIC_PARAM"), {Choice::Kind::AvatarGrant, 0});
     if ((services & proto::kNpcGuild) != 0) {
         for (const GuildNpcRowInfo& row : GuildNpcRows(context_)) AddChoice(row.text, {Choice::Kind::Guild, std::uint32_t(row.choice)}, row.red);
     }
@@ -895,6 +898,10 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
             box_->AddParagraph({}, ui::kWhite);
             AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
         }
+        break;
+    case Choice::Kind::AvatarGrant:
+        close();
+        ShowAvatarGrant(context_, npc_);
         break;
     case Choice::Kind::PartySummon:
         close();
