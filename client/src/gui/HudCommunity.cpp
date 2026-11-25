@@ -346,14 +346,26 @@ private:
             }
         }
         if (auto* b = blocks_->Child(41)) b->enabled = selectedBlock_ >= 0;
-        // The letters.
+        // The letters, in the order their headers chose (Date flips at each click, Sender by name; the server's at first).
         const std::vector<proto::LetterRecord>& mail = view.Letters();
+        letterOrder_.resize(mail.size());
+        for (std::size_t i = 0; i < mail.size(); ++i) letterOrder_[i] = i;
+        if (letterSort_ != 0) {
+            std::stable_sort(letterOrder_.begin(), letterOrder_.end(), [&](std::size_t a, std::size_t b) {
+                const proto::LetterRecord &x = mail[a], &y = mail[b];
+                const bool less = letterSort_ == 1 ? std::tie(x.year, x.month, x.day, x.hour, x.minute) < std::tie(y.year, y.month, y.day, y.hour, y.minute)
+                                                   : x.from < y.from;
+                const bool more = letterSort_ == 1 ? std::tie(y.year, y.month, y.day, y.hour, y.minute) < std::tie(x.year, x.month, x.day, x.hour, x.minute)
+                                                   : y.from < x.from;
+                return letterBackwards_ ? more : less;
+            });
+        }
         selectedLetter_ = std::min(selectedLetter_, int(mail.size()) - 1);
         SetScroll(letters_, 338, int(mail.size()), int(letterRows_.size()), letterScroll_);
         PutText(letters_->Child(18), std::format(": {} / {}", mail.size(), proto::kMaxLetters));
         for (std::size_t i = 0; i < letterRows_.size(); ++i) {
             const std::size_t at = std::size_t(letterScroll_) + i;
-            const proto::LetterRecord* r = at < mail.size() ? &mail[at] : nullptr;
+            const proto::LetterRecord* r = at < mail.size() ? &mail[letterOrder_[at]] : nullptr;
             Row(letterRows_[i], r != nullptr, r != nullptr && int(at) == selectedLetter_);
             if (r == nullptr || letterRows_[i] == nullptr) continue;
             ui::Widget* row = letterRows_[i];
@@ -442,11 +454,23 @@ private:
 
     const proto::LetterRecord* ChosenLetter() const {
         const auto& mail = c_.community->Letters();
-        return selectedLetter_ >= 0 && std::size_t(selectedLetter_) < mail.size() ? &mail[std::size_t(selectedLetter_)] : nullptr;
+        if (selectedLetter_ < 0 || std::size_t(selectedLetter_) >= mail.size()) return nullptr;
+        const std::size_t at = std::size_t(selectedLetter_) < letterOrder_.size() ? letterOrder_[std::size_t(selectedLetter_)] : std::size_t(selectedLetter_);
+        return at < mail.size() ? &mail[at] : nullptr;
     }
 
     bool LetterButton(int control) {
         switch (control) {
+        case 113: // the Date header: by time, the other way at each click
+            letterBackwards_ = letterSort_ == 1 ? !letterBackwards_ : false;
+            letterSort_ = 1;
+            seen_ = ~0ull; // shown again
+            return true;
+        case 114: // the Sender header: by name
+            letterSort_ = 2;
+            letterBackwards_ = false;
+            seen_ = ~0ull;
+            return true;
         case 40:
             if (const proto::LetterRecord* r = ChosenLetter()) {
                 waitingBody_ = r->id;
@@ -612,6 +636,9 @@ private:
     int tab_ = 0, blockList_ = 0, manyKind_ = 0;
     int selectedFriend_ = -1, selectedBlock_ = -1, selectedLetter_ = -1;
     int friendScroll_ = 0, blockScroll_ = 0, letterScroll_ = 0, manyScroll_ = 0;
+    int letterSort_ = 0;                   // the letters' order: 0 the server's, 1 by date, 2 by sender
+    bool letterBackwards_ = false;         // the order the other way
+    std::vector<std::size_t> letterOrder_; // the letters shown, row by row (their places in the view)
     std::uint64_t seen_ = ~0ull, pcRevision_ = 0;
     std::uint64_t waitingBody_ = 0, shownBody_ = 0, reading_ = 0;
     std::string from_;
