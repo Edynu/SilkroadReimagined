@@ -301,6 +301,9 @@ private:
     // again on a click on the own bar while it lies; gone when the character is up again.
     double diedAt_ = -1;
     double warCountAt_ = -1; // dead in a fortress war's area: when (-2 elsewhere), the banner's count from it
+    // A guild war's surrender: its minute's end (-1 none) and the seconds last shown on the warning banner.
+    double guildWarEndAt_ = -1;
+    int guildWarEndShown_ = -1;
     int warCountShown_ = -1;
     void DeathWindow(double now, bool reopen);
     bool IsDead(const game::WorldView::Entity& e) const;

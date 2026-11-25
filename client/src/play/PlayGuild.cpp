@@ -205,6 +205,11 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
             continue;
         }
         player_.Post(game::GameMessage::Kind::General, shown, context.time);
+        // A surrender: the war closes in a minute, its seconds counted on the warning banner (the original's 60 s timer).
+        if (line.key == "UIIT_CTL_GUILDWAR_ENDCOUNT") {
+            guildWarEndAt_ = context.time + double(game::kGuildWarEndSeconds);
+            guildWarEndShown_ = -1;
+        }
         // A war begun: on the warning banner too.
         if (line.key == "UIIT_MSG_GUILDWAR_GOTOWAR") player_.Notify(game::Banner::Kind::Warning, shown, context.time);
     }

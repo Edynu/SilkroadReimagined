@@ -4927,6 +4927,16 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     AutoRun(context);
     RefreshTarget(context.time);
     DeathWindow(context.time, false);
+    // A guild war's last minute: "Until the end of war (%d seconds left)" on the warning banner each second (60 first).
+    if (guildWarEndAt_ >= 0.0) {
+        const int left = int(std::ceil(guildWarEndAt_ - context.time));
+        if (left <= 0) {
+            guildWarEndAt_ = -1.0;
+        } else if (left != guildWarEndShown_) {
+            guildWarEndShown_ = left;
+            player_.Notify(game::Banner::Kind::Warning, FormatText(gui_.data().Text("UIIT_MSG_GUILDWAR_END_COUNTDOWN"), {std::to_string(left)}), context.time);
+        }
+    }
     FlagFrame(context);
     Listen(context);
     CharacterView(context);

@@ -137,6 +137,10 @@ bool PlayScreen::PartyRequest(const HudRequest& r) {
     switch (r.kind) {
     case K::PartyInvite:
         core::LogInfo("game: party: asking {} (settings {})", r.value, r.extra);
+        // "[%s] is requesting to party." with the asked one's name, a Party line, as the original's client says it.
+        if (const game::WorldView::Entity* asked = view_.Find(std::uint32_t(r.value)); asked != nullptr && gui_.data().Ready()) {
+            player_.Post(game::GameMessage::Kind::Party, FormatText(gui_.data().Text("UIIT_STT_PARTY_PROPOSAL_PENDING"), {asked->look.name}), hudContext_.time);
+        }
         if (s) s->PartyInvite(std::uint32_t(r.value), std::uint8_t(r.extra));
         return true;
     case K::PartyAnswer:
