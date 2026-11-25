@@ -546,9 +546,13 @@ void NpcWindow::ShowRewardChoice() {
     box_->ClearParagraphs();
     box_->AddParagraph(context_.Text("UIIT_STT_QUESTREWARD_MSG01"), ui::kWhite);
     box_->AddParagraph({}, ui::kWhite);
+    // A reward by country: only the player's country's items (ITEM_CH_ China's, ITEM_EU_ Europe's, the others both), as
+    // the server pays.
+    const bool europe = context_.state != nullptr && context_.state->self.race == 1;
     for (std::size_t i = 0; i < q->reward.items.size(); ++i) {
         if (std::find(picked_.begin(), picked_.end(), std::uint8_t(i)) != picked_.end()) continue;
         const auto& item = q->reward.items[i];
+        if (q->reward.byCountry && ((item.item.starts_with("ITEM_CH_") && europe) || (item.item.starts_with("ITEM_EU_") && !europe))) continue;
         const assets::ItemRow* row = context_.items != nullptr ? context_.items->Find(std::string_view(item.item)) : nullptr;
         std::string name = row != nullptr ? context_.Text(row->nameKey) : item.item;
         if (item.count > 1) name += " x" + std::to_string(item.count);
