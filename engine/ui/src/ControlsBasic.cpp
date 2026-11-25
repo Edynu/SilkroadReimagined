@@ -324,7 +324,7 @@ void DragArea::Mouse(Frame& frame) {
         frame.interface.Raise(window);
         return;
     }
-    if (frame.input.Down(MouseButton::Left)) {
+    if (frame.input.Down(MouseButton::Left) && !fixed) {
         window->rect.x = std::round(frame.pointer.position.x - grab_.x);
         window->rect.y = std::round(frame.pointer.position.y - grab_.y);
     }

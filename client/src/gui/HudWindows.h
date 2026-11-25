@@ -707,17 +707,28 @@ public:
     void Created(ui::Interface& ui) override;
     void Update(ui::Frame& frame) override;
     bool OnNotice(const ui::Notice& notice) override;
+    // The options window's four (CIFExtQuickSlotOption: see-through 25, lock 26, fixing position 27, two lines 28).
+    struct Settings {
+        bool seeThrough, locked, fixed, twoLines;
+    };
+    Settings Current() const { return {seeThrough_, locked_, fixed_, twoLines_}; }
+    void Apply(const Settings& s);
+    // The options window opened beside the bar (on the screen's wider side), or closed when it is open.
+    void ToggleOptions();
 
 private:
     void Shape(ui::Interface& ui);
     void ShowOpen(); // the tiles, slots and end piece as open_ says, the on/off button's face to match
+    void Save();     // into the player's options (the original's SRExtQSOption.dat)
     HudContext& context_;
-    bool open_ = true, vertical_ = true, twoLines_ = true, seeThrough_ = true, reshape_ = false;
+    bool open_ = true, vertical_ = true, twoLines_ = true, seeThrough_ = true, locked_ = false, fixed_ = false, reshape_ = false;
 };
 
 // Dropping and letting go of quick slots, shared by the underbar and the extra bar: a slot dropped
 // on another swaps with it, one let go anywhere else is cleared.
 void LinkQuickSlotDrops(ui::Widget& window, HudContext& context);
+// The extra quick bar's options window (CIFExtQuickSlotOption, HudUnderBar.cpp).
+void RegisterExtraBarOptions(ui::Interface& ui, HudContext& context);
 
 // --- The target (section 4) -----------------------------------------------------------------------
 

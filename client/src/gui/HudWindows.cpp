@@ -44,6 +44,7 @@ void RegisterHudWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CIFUnderBar", [c](const assets::UiLayoutNode& n) { return std::make_unique<UnderBar>(n, *c); });
     ui.Register("CNIFUnderMenuBar", [c](const assets::UiLayoutNode& n) { return std::make_unique<MenuBar>(n, *c); });
     ui.Register("CIFExtQuickSlot", [c](const assets::UiLayoutNode& n) { return std::make_unique<ExtraQuickSlots>(n, *c); });
+    RegisterExtraBarOptions(ui, *c);
     ui.Register("CIFTargetWindow", [c](const assets::UiLayoutNode& n) { return std::make_unique<TargetWindow>(n, *c); });
     ui.Register("CIFBuffViewer", [c](const assets::UiLayoutNode& n) { return std::make_unique<TargetBuffs>(n, *c); });
     // The target window's kinds: their art, in other looks set by the window.

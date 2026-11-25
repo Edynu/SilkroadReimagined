@@ -136,6 +136,14 @@ TEST_CASE("options survive a round trip through their file text; bad lines are i
     far.beta.namesFar = true;
     CHECK(Options::Parse(far.Serialize()).beta.namesFar);
     CHECK(!Options::Parse("beta.names=everywhere\n").beta.namesFar);
+    // The extra quick bar: the original's defaults without the file (open, down, two lines, see-through, neither locked
+    // nor fixed); its settings kept.
+    const ExtraBarOptions bar0 = Options{}.extraBar;
+    CHECK((bar0.open && bar0.vertical && bar0.twoLines && bar0.seeThrough && !bar0.locked && !bar0.fixed));
+    Options barred;
+    barred.extraBar = {false, false, false, false, true, true};
+    const ExtraBarOptions bar1 = Options::Parse(barred.Serialize()).extraBar;
+    CHECK((!bar1.open && !bar1.vertical && !bar1.twoLines && !bar1.seeThrough && bar1.locked && bar1.fixed));
     CHECK(back.video.active == 1);
     CHECK(back.video.records == o.video.records);
     CHECK(back.video.custom == o.video.custom);

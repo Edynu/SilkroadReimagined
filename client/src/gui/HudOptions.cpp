@@ -630,8 +630,13 @@ void OptionWindow::Update(ui::Frame& frame) {
 void OptionWindow::Keep(bool close) {
     if (context_.options != nullptr) {
         // Apply keeps the video page only; Confirm everything.
-        if (close) *context_.options = draft_;
-        else context_.options->video = draft_.video;
+        if (close) {
+            const core::ExtraBarOptions bar = context_.options->extraBar; // the extra quick bar's own, set meanwhile
+            *context_.options = draft_;
+            context_.options->extraBar = bar;
+        } else {
+            context_.options->video = draft_.video;
+        }
         if (context_.optionsChanged) context_.optionsChanged();
     }
     if (close && ui_ != nullptr) ui_->Close(this);

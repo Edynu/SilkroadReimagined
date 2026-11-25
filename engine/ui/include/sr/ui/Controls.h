@@ -141,6 +141,7 @@ public:
     // Behind its siblings (they get clicks first); pressing it raises the window.
     void Created(Interface& interface) override;
     void Mouse(Frame& frame) override;
+    bool fixed = false; // the window stays where it is (the extra quick bar's "Fixing position")
 
 private:
     Vec2 grab_;

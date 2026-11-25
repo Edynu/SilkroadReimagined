@@ -445,7 +445,62 @@ void MenuBar::Choose(int control) {
 
 // --- The extra quick slots ----------------------------------------------------------------------------
 
-void ExtraQuickSlots::Created(ui::Interface& ui) { Shape(ui); }
+void ExtraQuickSlots::Created(ui::Interface& ui) {
+    if (context_.options != nullptr) {
+        const core::ExtraBarOptions& o = context_.options->extraBar;
+        open_ = o.open, vertical_ = o.vertical, twoLines_ = o.twoLines, seeThrough_ = o.seeThrough, locked_ = o.locked, fixed_ = o.fixed;
+    }
+    Shape(ui);
+    ShowOpen();
+}
+
+void ExtraQuickSlots::Save() {
+    if (context_.options == nullptr) return;
+    context_.options->extraBar = {open_, vertical_, twoLines_, seeThrough_, locked_, fixed_};
+    if (context_.optionsChanged) context_.optionsChanged();
+}
+
+void ExtraQuickSlots::Apply(const Settings& s) {
+    const bool relayout = s.twoLines != twoLines_;
+    seeThrough_ = s.seeThrough, locked_ = s.locked, fixed_ = s.fixed, twoLines_ = s.twoLines;
+    if (relayout) {
+        reshape_ = true;
+    } else if (context_.hud != nullptr && context_.hud->interface() != nullptr) {
+        Shape(*context_.hud->interface());
+        ShowOpen();
+    }
+    Save();
+}
+
+void ExtraQuickSlots::ToggleOptions() {
+    ui::Interface* ui = context_.hud != nullptr ? context_.hud->interface() : nullptr;
+    if (ui == nullptr) return;
+    for (ui::Widget* w : ui->Windows()) {
+        if (w->node().type == "CIFExtQuickSlotOption" && w->visible) {
+            ui->Close(w);
+            return;
+        }
+    }
+    const assets::UiLayout* l = ui->Layout(kExtraLayout);
+    if (l == nullptr) return;
+    const assets::UiLayoutNode* node = nullptr;
+    for (const auto& s : l->sections) {
+        if (s.name == "Option" && !s.nodes.empty()) node = &s.nodes.front();
+    }
+    if (node == nullptr) return;
+    ui::Widget* w = ui->Open(*node);
+    if (w == nullptr) return;
+    // Beside the bar, on the screen's wider side: a bar down the screen, right of it on the left half, else left
+    // of it; a bar across, under it on the upper half, else over it.
+    const ui::Vec2 screen = ui->screen();
+    if (vertical_) {
+        w->rect.x = rect.x < screen.x / 2.0f ? rect.x + rect.w : rect.x - w->rect.w;
+        w->rect.y = rect.y;
+    } else {
+        w->rect.x = rect.x;
+        w->rect.y = rect.y < screen.y / 2.0f ? rect.y + rect.h : rect.y - w->rect.h;
+    }
+}
 
 void ExtraQuickSlots::Shape(ui::Interface& ui) {
     // Without saved options: open, vertical, two lines, see-through: the Type4 section. The window is its handle; the
@@ -461,6 +516,11 @@ void ExtraQuickSlots::Shape(ui::Interface& ui) {
     const float a = seeThrough_ ? 110.0f / 255.0f : 1.0f;
     for (const auto& c : children()) c->alpha = a;
     LinkQuickSlotDrops(*this, context_);
+    // Locked: the slots' shortcuts stay (none picked up); fixing the position: the handle moves nothing.
+    for (int i = 0; i < 10; ++i) {
+        if (auto* slot = ui::As<ui::Slot>(Child(100 + i))) slot->pickable = !locked_;
+    }
+    if (auto* handle = dynamic_cast<ui::DragArea*>(Child(10))) handle->fixed = fixed_;
 }
 
 void ExtraQuickSlots::Update(ui::Frame&) {
@@ -489,6 +549,11 @@ bool ExtraQuickSlots::OnNotice(const ui::Notice& notice) {
         // Open / close: the tiles, the slots and the end piece.
         open_ = !open_;
         ShowOpen();
+        Save();
+        return true;
+    }
+    if (notice.control == 11) {
+        ToggleOptions();
         return true;
     }
     if ((notice.control == 12 && vertical_) || (notice.control == 13 && !vertical_)) {
@@ -496,19 +561,68 @@ bool ExtraQuickSlots::OnNotice(const ui::Notice& notice) {
         // (resinfo\ifextquickslot.txt's Type1..Type4); the user's report 2026-11-14: both did nothing.
         vertical_ = notice.control == 13;
         reshape_ = true; // next frame: the button pressed is one of the children Shape replaces
+        Save();
         return true;
     }
-    return notice.control >= 11 && notice.control <= 13; // the options come with the options (C7k)
+    return notice.control >= 11 && notice.control <= 13;
 }
 
 void ExtraQuickSlots::ShowOpen() {
     for (const auto& c : children()) {
         if ((c->id() >= 30 && c->id() < 40) || (c->id() >= 100 && c->id() < 110) || c->id() == 20) c->visible = open_;
     }
+    // Open, the button closes it (its close face); closed, its open face.
     if (auto* b = ui::As<ui::Button>(Child(14))) {
-        const char* face = vertical_ ? (open_ ? "qsl_vopen_button.ddj" : "qsl_vclose_button.ddj") : (open_ ? "qsl_hopen_button.ddj" : "qsl_hclose_button.ddj");
+        const char* face = vertical_ ? (open_ ? "qsl_vclose_button.ddj" : "qsl_vopen_button.ddj") : (open_ ? "qsl_hclose_button.ddj" : "qsl_hopen_button.ddj");
         b->texture = std::string("interface\\quick_slot\\") + face;
     }
+}
+
+// --- The extra quick bar's options --------------------------------------------------------------------
+
+namespace {
+
+// CIFExtQuickSlotOption (the bar's Option section, 290 x 223, resinfo\\ifextquickslotoption.txt): Invisible (25), Lock (26),
+// Fixing position (27), Two lines (28); Apply (36) sets them on the bar, Confirm (35) sets them and closes.
+class ExtraBarOptionWindow : public ui::MainFrame {
+public:
+    explicit ExtraBarOptionWindow(const assets::UiLayoutNode& node) : MainFrame(node) {}
+
+    void Created(ui::Interface& ui) override {
+        ui::MainFrame::Created(ui);
+        ui_ = &ui;
+        // Its controls are its class's own layout's (ifextquickslotoption.txt), made with it; the ticks as the bar has them.
+        if (ExtraQuickSlots* bar = Bar()) {
+            const ExtraQuickSlots::Settings s = bar->Current();
+            const std::pair<int, bool> ticks[] = {{25, s.seeThrough}, {26, s.locked}, {27, s.fixed}, {28, s.twoLines}};
+            for (const auto& [id, on] : ticks) {
+                if (auto* box = ui::As<ui::CheckBox>(Child(id))) box->checked = on;
+            }
+        }
+    }
+
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && n.source != nullptr && n.source->parent() == this && (n.control == 35 || n.control == 36)) {
+            const auto ticked = [&](int id) {
+                const auto* box = ui::As<ui::CheckBox>(Child(id));
+                return box != nullptr && box->checked;
+            };
+            if (ExtraQuickSlots* bar = Bar()) bar->Apply({ticked(25), ticked(26), ticked(27), ticked(28)});
+            if (n.control == 35 && ui_ != nullptr) ui_->Close(this);
+            return true;
+        }
+        return ui::MainFrame::OnNotice(n);
+    }
+
+private:
+    ExtraQuickSlots* Bar() const { return ui_ != nullptr ? dynamic_cast<ExtraQuickSlots*>(ui_->Window(hud::kExtQuickSlots)) : nullptr; }
+    ui::Interface* ui_ = nullptr;
+};
+
+} // namespace
+
+void RegisterExtraBarOptions(ui::Interface& ui, HudContext&) {
+    ui.Register("CIFExtQuickSlotOption", [](const assets::UiLayoutNode& n) { return std::make_unique<ExtraBarOptionWindow>(n); });
 }
 
 } // namespace sr::client

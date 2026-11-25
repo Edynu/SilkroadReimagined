@@ -408,6 +408,8 @@ std::string Options::Serialize() const {
     out << "online.players=" << online.players << "\nonline.monsters=" << online.monsters << "\nonline.radius=" << online.radius << "\n";
     out << "beta.movement=" << (beta.movement == BetaOptions::Movement::Pathfinding ? "pathfinding" : "classic") << "\n";
     out << "beta.names=" << (beta.namesFar ? "far" : "original") << "\n";
+    out << "extrabar.open=" << extraBar.open << "\nextrabar.vertical=" << extraBar.vertical << "\nextrabar.twoLines=" << extraBar.twoLines
+        << "\nextrabar.seeThrough=" << extraBar.seeThrough << "\nextrabar.locked=" << extraBar.locked << "\nextrabar.fixed=" << extraBar.fixed << "\n";
     return out.str();
 }
 
@@ -482,6 +484,18 @@ Options Options::Parse(std::string_view text) {
         } else if (key == "beta.movement") {
             if (value == "pathfinding") o.beta.movement = BetaOptions::Movement::Pathfinding;
             else if (value == "classic") o.beta.movement = BetaOptions::Movement::Classic;
+        } else if (key == "extrabar.open") {
+            flag(o.extraBar.open);
+        } else if (key == "extrabar.vertical") {
+            flag(o.extraBar.vertical);
+        } else if (key == "extrabar.twoLines") {
+            flag(o.extraBar.twoLines);
+        } else if (key == "extrabar.seeThrough") {
+            flag(o.extraBar.seeThrough);
+        } else if (key == "extrabar.locked") {
+            flag(o.extraBar.locked);
+        } else if (key == "extrabar.fixed") {
+            flag(o.extraBar.fixed);
         } else if (key == "beta.names") {
             if (value == "far") o.beta.namesFar = true;
             else if (value == "original") o.beta.namesFar = false;

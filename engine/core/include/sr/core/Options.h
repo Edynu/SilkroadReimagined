@@ -171,8 +171,16 @@ struct BetaOptions {
     bool namesFar = false;
 };
 
+// The extra quick bar (the original's CIFExtQuickSlot and its options window, which it keeps in Setting\SRExtQSOption.dat;
+// its defaults without the file): open, down the screen, in two lines, see-through (alpha 110), its slots' items movable,
+// the bar movable.
+struct ExtraBarOptions {
+    bool open = true, vertical = true, twoLines = true, seeThrough = true, locked = false, fixed = false;
+};
+
 struct Options {
     OnlineOptions online;
+    ExtraBarOptions extraBar;
     BetaOptions beta;
     VideoOptions video = VideoOptions::Defaults();
     AudioOptions audio;
