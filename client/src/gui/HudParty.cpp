@@ -270,7 +270,7 @@ public:
             ui::Widget* slot = Child(1 + i);
             if (slot == nullptr) continue;
             slot->visible = false;
-            for (int id : {5, 10, 20, 21, 100}) Show(slot->Child(id), false); // the status, buffs, warnings, selection
+            for (int id : {5, 10, 20, 21, 100}) Show(slot->Child(id), false); // the status, buffs, warnings (Caution), selection
             // The member's two highest masteries, 17 x 17 under the face, made in code.
             Show(MakeNode(ui, *slot, "CIFStatic", kMastery1, {-3.0f, 39.0f, 17.0f, 17.0f}), false);
             Show(MakeNode(ui, *slot, "CIFStatic", kMastery2, {15.0f, 39.0f, 17.0f, 17.0f}), false);
@@ -294,6 +294,7 @@ public:
         const float spacing = Spacing();
         rect.h = spacing * float(std::max(1, shown));
         clickThrough = shown == 0;
+        phase_ = std::fmod(phase_ + double(frame.dt) * 1000.0, 800.0);
         for (int i = 0; i < kSlots; ++i) {
             ui::Widget* slot = Child(1 + i);
             if (slot == nullptr) continue;
@@ -305,6 +306,8 @@ public:
             Put(slot->Child(4), m->name);
             if (auto* g = ui::As<ui::Gauge>(slot->Child(2))) g->SetValue(float(m->hpTenths) / 10.0f);
             if (auto* g = ui::As<ui::Gauge>(slot->Child(3))) g->SetValue(float(m->mpTenths) / 10.0f);
+            Caution(slot->Child(20), m->hpTenths, "hpWarning", "pmi_hp_quick_effect_caution.ddj");
+            Caution(slot->Child(21), m->mpTenths, "mpWarning", "pmi_mp_quick_effect_caution.ddj");
             if (auto* race = ui::As<ui::Static>(slot->Child(6))) race->texture = RaceMark16(m->race);
             Show(slot->Child(7), m->id == party.leader);
             Show(slot->Child(100), m->entity != 0 && state->target.entity == m->entity);
@@ -361,8 +364,23 @@ private:
         return d2 >= 1000000.0 ? 5 : d2 >= 810000.0 ? 4 : d2 >= 640000.0 ? 3 : d2 >= 490000.0 ? 2 : d2 >= 360000.0 ? 1 : 0;
     }
 
+    // A member's HP or MP under 30 % (tenths 1 and 2; never at 0, a dead one): that bar's caution glow, its sheet's
+    // eight 64 x 32 cells 100 ms each, as the Game page's HP / MP warning row allows (the original's quick party slot).
+    void Caution(ui::Widget* w, std::uint8_t tenths, const char* row, const char* sheet) {
+        auto* glow = ui::As<ui::Static>(w);
+        if (glow == nullptr) return;
+        glow->visible = tenths > 0 && tenths < 3 && context_.options != nullptr && context_.options->game.Get(row);
+        if (!glow->visible) return;
+        glow->texture = std::string("interface\\playerminiinfo\\") + sheet;
+        const int cell = int(phase_ / 100.0) % 8;
+        glow->customUv = true;
+        glow->uv0 = {float(cell % 4) * 0.25f, float(cell / 4) * 0.5f};
+        glow->uv1 = {glow->uv0.x + 0.25f, glow->uv0.y + 0.5f};
+    }
+
     HudContext& context_;
     std::array<std::uint32_t, kSlots> entities_{};
+    double phase_ = 0.0; // the caution glows' sheet (ms)
 };
 
 // --- The settings box (CIFSetPartyMode) ----------------------------------------------------------------
