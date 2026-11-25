@@ -1991,6 +1991,60 @@ TEST_CASE("the skill stages' sounds (skilleffect.txt SndBegin, SndEnd) are all i
     CHECK(missing == 0);
 }
 
+TEST_CASE("the world map's guide: its two tabs, headings and entries, each entry's map, the monsters' tiles (worldmapguidedata*.txt)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    WorldMapData data;
+    REQUIRE_MESSAGE(LoadWorldMapData(fs, data, error), error);
+    const WorldMapGuide& g = data.guide;
+    // AREA and MONSTER in service (QUEST is not), each with its tab's art and label.
+    REQUIRE(g.tabs.size() == 2);
+    CHECK(g.tabs[0].section == "AREA");
+    CHECK(g.tabs[0].art == "interface\\guide\\gd_area_tab_on.ddj");
+    CHECK(g.tabs[0].labelKey == "UIIT_STT_FORT_MANAGER_TAXLIST_REGION");
+    CHECK(g.tabs[1].section == "MONSTER");
+    CHECK(g.tabs[1].labelKey == "UIIT_STT_MONSTER");
+    // Each tab opens with a heading; every place links a map or a label of worldmap_localinfo.txt.
+    for (const WorldMapGuideTab& t : g.tabs) {
+        REQUIRE_FALSE(t.rows.empty());
+        CHECK(t.rows.front().heading);
+    }
+    int places = 0, linked = 0;
+    for (const WorldMapGuideRow& r : g.tabs[0].rows) {
+        if (r.heading) continue;
+        ++places;
+        if (r.linkKind == 0 && (data.Map(r.link) != nullptr || data.Dungeon(r.link) != nullptr)) ++linked;
+        if (r.linkKind == 1 && std::any_of(data.labels.begin(), data.labels.end(), [&](const WorldMapLabel& l) { return l.id == r.link; })) ++linked;
+    }
+    CHECK(places == 28);
+    CHECK(linked == places);
+    // Jangan's entry: the town heading's first, its storage's picture on Jangan's map (label 92012).
+    const auto jangan = std::find_if(g.tabs[0].rows.begin(), g.tabs[0].rows.end(), [](const WorldMapGuideRow& r) { return r.codename == "TOWN_JANGAN"; });
+    REQUIRE(jangan != g.tabs[0].rows.end());
+    CHECK(jangan->nameKey == "SN_ZONE_22001");
+    CHECK(jangan->linkKind == 1);
+    CHECK(jangan->link == 92012);
+    // The monsters: each entry's area has a map; a field monster's tiles listed.
+    int monsters = 0, mapped = 0;
+    for (const WorldMapGuideRow& r : g.tabs[1].rows) {
+        if (r.heading) continue;
+        ++monsters;
+        if (g.MapOfArea(r.area) >= 0) ++mapped;
+    }
+    CHECK(monsters == 238);
+    CHECK(mapped == monsters);
+    CHECK(g.MapOfArea("jinsi3") == 2007);
+    const auto tiles = g.monsterTiles.find("MOB_CH_MANGNYANG");
+    REQUIRE(tiles != g.monsterTiles.end());
+    CHECK(tiles->second == std::vector<std::pair<int, int>>{{162, 97}, {166, 97}, {170, 97}});
+}
+
 TEST_CASE("the world map's tables: every map's, floor's and label's pictures (worldmap_mapinfo.txt, worldmap_localinfo.txt)") {
     const auto dir = GameDir();
     if (dir.empty()) {

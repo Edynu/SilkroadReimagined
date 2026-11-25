@@ -467,6 +467,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     snapshot.clearColor = {backdrop_[0], backdrop_[1], backdrop_[2], 1.0f};
     hudContext_.state = &sample_;
     hudContext_.options = context.options; // the windows as the options file has them (the system lines' autohide, ...)
+    if (tables_ && tables_->Usable() && hudContext_.characters == nullptr) hudContext_.characters = &tables_->characters;
 #ifdef SR_BUG_REPORTS
     // The bug report's button and window on sample data: Send only logs what it would send.
     hudContext_.bugReport = [](BugReportForm form) {
@@ -682,6 +683,21 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             }
             // The world map: following the sample character (Jangan), or a map by its id
             // (worldmap:0 the world, worldmap:2007 the tomb's third floor).
+            // (worldmap-guide:TAB,HEADING,ENTRY: its guide on a tab (0 the places, 1 the monsters), a heading open, an entry
+            // picked.)
+            if (page_.rfind("worldmap-guide", 0) == 0) {
+                hudContext_.worldMap = host_.data().WorldMap();
+                int step[3] = {0, -1, -1};
+                if (page_.size() > 15) std::sscanf(page_.c_str() + 15, "%d,%d,%d", &step[0], &step[1], &step[2]);
+                hud_.Show(hud::kWorldMap);
+                WorldMapGuideStep(hudContext_, step[0], step[1], step[2]);
+            }
+            // (worldmap-level: the world with the monster box ticked: the monsters 0..6 levels over the sample's marked.)
+            if (page_ == "worldmap-level") {
+                hudContext_.worldMap = host_.data().WorldMap();
+                ShowWorldMap(hudContext_, 0);
+                WorldMapMonsterBox(hudContext_, true);
+            }
             if (page_ == "worldmap" || page_.rfind("worldmap:", 0) == 0) {
                 hudContext_.worldMap = host_.data().WorldMap();
                 // Jangan held by a sample guild: its crest box on the world.

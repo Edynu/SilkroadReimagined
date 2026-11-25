@@ -21,9 +21,12 @@
 //   region on the world map, else on the map), 13/14 a picture's size (a text's: two flags), 15..17 a text's
 //   colour, 18..20 its shadow, bold and blur, 21 a tooltip key (xxx none).
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "sr/assets/Terrain.h"
@@ -145,7 +148,36 @@ struct FortressZoneRow {
     float x = 0, y = 0, z = 0, yaw = 0;
 };
 
+// worldmapguidedata.txt: the world map's guide (1.188's CNIFWorldMapGuide). Its tabs are its sections in service (AREA the
+// places, MONSTER the monsters; QUEST is out of service), each with its tab's art and label key; their rows in service in
+// the file's order, a `main` row a heading and the `sub` rows after it its entries, listed by the player's race's order
+// column (0 Chinese, 1 European). AREA cols: 0 service, 1 a name, 2 codename, 3 its text key, 4 its area, 5 main / sub,
+// 6..8 the orders, 9 the link's kind (0 a map id, 1 a worldmap_localinfo row), 10 the link. MONSTER cols: 0 service,
+// 1 a name, 2 codename (a heading: an area's, its text UIIT_STT_<codename>; an entry: the monster), 3 its area, 4 main /
+// sub, 5..7 the orders, 8 9 its pixel on the world map, 10 11 its region (-1: in a dungeon), 12 13 its place there (the
+// region's offset; in a dungeon the map's pixel), 14 its areas' marks. worldmapguidedata_region.txt: a monster's map
+// tiles (field: each tile 4 x 4 regions, by its region "XxZ").
+struct WorldMapGuideRow {
+    std::string codename, nameKey, area;
+    bool heading = false;
+    std::array<int, 3> order{};
+    int linkKind = 0, link = 0;                        // AREA
+    int regionX = -1, regionZ = -1, placeX = 0, placeY = 0; // MONSTER
+};
+struct WorldMapGuideTab {
+    std::string section, art, labelKey;
+    std::vector<WorldMapGuideRow> rows;
+};
+struct WorldMapGuide {
+    std::vector<WorldMapGuideTab> tabs; // in service, in the file's order
+    std::unordered_map<std::string, std::vector<std::pair<int, int>>> monsterTiles; // codename -> its tiles (x, z)
+    // An area's map: the world for "field", else the AREA row of that area linking a map.
+    int MapOfArea(const std::string& area) const;
+};
+void DecodeWorldMapGuide(std::string_view text, std::string_view regions, WorldMapGuide& out);
+
 struct WorldMapData {
+    WorldMapGuide guide;
     std::vector<WorldMapRow> maps;
     std::vector<DungeonMapRow> dungeons;
     std::vector<WorldMapLabel> labels; // in service, with a place

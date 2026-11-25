@@ -110,6 +110,18 @@ public:
     // A destination picked: the window closed, its ID handed on.
     void PickPoint(std::uint32_t id);
     bool Choosing() const { return static_cast<bool>(choose_); }
+    // The guide (11): shown or hidden by the side arrow (15); its panel's drawing and clicks.
+    void ToggleGuide();
+    void DrawGuide(ui::Frame& frame, const ui::Rect& at);
+    void GuideMouse(ui::Frame& frame, const ui::Widget& owner, const ui::Rect& at);
+    // The gallery's and the tests' way: the guide shown on a tab, its heading `heading` opened, that heading's entry
+    // `entry` picked (-1: none).
+    void GuideStep(int tab, int heading, int entry);
+    // The monster box ticked or not, as a click on it.
+    void TickMonsterBox(bool on) {
+        if (auto* box = ui::As<ui::CheckBox>(Child(kMonsterBox))) box->checked = on;
+        LevelMarks(on);
+    }
 
 private:
     // The player's dungeon floor's name (the .dof's: "DH_A01_FLOOR02"; empty outdoors or not known yet).
@@ -185,6 +197,33 @@ private:
     }
     static ui::Rect ListRow(ui::Vec2 marker, std::size_t i) { return {std::floor(marker.x + 18.0f), std::floor(marker.y - 12.0f + 24.0f * float(i)), 150.0f, 24.0f}; }
 
+    // The guide's list: its tab's rows in the player's race's order, a heading's entries shown while it is open.
+    struct GuideLine {
+        const assets::WorldMapGuideRow* row = nullptr;
+        int group = 0; // its heading's (the headings counted from 0)
+    };
+    std::vector<const assets::WorldMapGuideRow*> GuideRows() const;
+    std::vector<GuideLine> GuideLines() const;
+    std::string GuideText(const assets::WorldMapGuideRow& row, ui::Color& colour) const;
+    void GuidePick(const assets::WorldMapGuideRow& row);
+    int guideTab_ = 0, guideOpen_ = -1, guideTop_ = 0;
+    const assets::WorldMapGuideRow* guidePicked_ = nullptr;
+    // A monster marked: picked in the guide (one), or every monster near the player's level (the monster box, 31): its
+    // map, its tiles tinted in its colour and its icon there.
+    struct MonsterMark {
+        int map = 0;
+        std::string codename;
+        ui::Vec2 pixel;
+        ui::Color colour = 0;
+    };
+    std::vector<MonsterMark> marks_;
+    // A monster's mark (none: its area has no map); `keep` the others.
+    void MarkMonster(const assets::WorldMapGuideRow& row, ui::Color colour, bool keep);
+    // The monster box ticked or not: the monsters 0..3 levels over the player's (0x80D9D2C6) and 4..6 over (0x80B63143)
+    // marked, the others not (the original's on_31); unticked, none.
+    void LevelMarks(bool on);
+    bool levelPending_ = false; // ticked before the tables were in: marked once they are
+
     HudContext& c_;
     ui::Interface* ui_ = nullptr;
     MapView view_;
@@ -207,6 +246,18 @@ public:
     }
 };
 
+// The guide's panel over its frame: drawn and clicked by the window.
+class GuidePanel : public ui::Widget {
+public:
+    explicit GuidePanel(const assets::UiLayoutNode& node) : Widget(node) { interactive = true; }
+    void Draw(ui::Frame& frame) override {
+        if (auto* window = dynamic_cast<WorldMapWindow*>(Root())) window->DrawGuide(frame, ScreenRect());
+    }
+    void Mouse(ui::Frame& frame) override {
+        if (auto* window = dynamic_cast<WorldMapWindow*>(Root())) window->GuideMouse(frame, *this, ScreenRect());
+    }
+};
+
 void WorldMapWindow::Created(ui::Interface& ui) {
     MainFrame::Created(ui);
     ui_ = &ui;
@@ -219,12 +270,21 @@ void WorldMapWindow::Created(ui::Interface& ui) {
     const auto* records = c_.layout2dt ? c_.layout2dt(kLayout) : nullptr;
     if (records == nullptr || records->empty()) return;
     BuildGuild2dt(ui, *records, *this, records->front().rect.x, records->front().rect.y);
-    // Not built yet: the guide and its tab, the monster list and its box.
+    // Not built yet: the monster list and its box, the size button. The guide (11) hidden at the start, its side tab
+    // (13) and arrow (15) shown (the original's Create); its panel made over its frame.
     for (const auto& child : children()) {
         ui::Widget* w = child.get();
         const int id = w->id();
-        if (id == kGuide || id == kGuideTab || id == kGuideArrow || id == kMonsterBox || id == kSizeButton) w->visible = false;
-        if (id == kMonsterList && w->rect.h < 20.0f) w->visible = false; // the list's line (the corner shares its id)
+        if (id == kSizeButton) w->visible = false;
+        if (auto* box = ui::As<ui::CheckBox>(w); box != nullptr && id == kMonsterBox) box->checked = false; // unticked at the start
+    }
+    if (ui::Widget* guide = Child(kGuide)) {
+        assets::UiLayoutNode panel;
+        panel.type = "CNIFWorldMapGuidePanel";
+        panel.id = 9001;
+        panel.rect = {0.0f, 0.0f, guide->rect.w, guide->rect.h};
+        guide->Add(std::make_unique<GuidePanel>(panel));
+        guide->visible = false;
     }
     built_ = true;
     Floors();
@@ -239,6 +299,7 @@ void WorldMapWindow::Update(ui::Frame& frame) {
         if (!ShowMap(id < 0 ? 0 : id)) ShowMap(0);
         CentreOnPlayer();
     }
+    if (levelPending_) LevelMarks(true);
     // Following the player: the map it stands in, centred on it.
     if (following_ && self != nullptr) {
         const int id = MapAt(*c_.worldMap, self->position, view_.Id(), PlayerFloor(self->position));
@@ -257,6 +318,10 @@ bool WorldMapWindow::OnNotice(const ui::Notice& n) {
             CentreOnPlayer();
             return true;
         case kPinButton: following_ = !following_; return true;
+        case kGuideArrow: ToggleGuide(); return true;
+        case kMonsterBox:
+            if (auto* box = ui::As<ui::CheckBox>(n.source)) LevelMarks(box->checked);
+            return true;
         case kFloorUp: Step(true); return true;
         case kFloorDown: Step(false); return true;
         default: break;
@@ -301,6 +366,33 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
                 frame.interface.ShowTooltip(tip, box);
             }
         }
+    }
+    // The monsters marked (MonsterMark): each its tiles tinted in its colour (a world tile 4 x 4 regions, a dungeon's one
+    // region each), then each its icon (wmap_monster_icon.ddj) at its place.
+    for (const MonsterMark& mark : marks_) {
+        if (view_.Id() != mark.map || c_.worldMap == nullptr) continue;
+        const auto tiles = c_.worldMap->guide.monsterTiles.find(mark.codename);
+        if (tiles != c_.worldMap->guide.monsterTiles.end()) {
+            for (const auto& [tx, tz] : tiles->second) {
+                ui::Rect px;
+                if (const assets::WorldMapRow* m = view_.Map()) {
+                    const float side = 32.0f * float(std::max(1, m->tileRegions));
+                    px = {float(tx - m->regionLeft) * 32.0f, float(m->regionTop - tz) * 32.0f, side, side};
+                } else if (const assets::DungeonMapRow* d = view_.Dungeon(); d != nullptr && d->tilesAcross > 0 && d->tilesDown > 0) {
+                    const float w = float(d->drawW) / float(d->tilesAcross), h = float(d->drawH) / float(d->tilesDown);
+                    px = {float(tx - d->regionLeft) * w, float(d->regionTop - tz) * h, w, h};
+                } else {
+                    continue;
+                }
+                const ui::Vec2 s = view_.ToScreen({px.x, px.y}, at);
+                frame.paint.Fill({s.x, s.y, px.w, px.h}, mark.colour);
+            }
+        }
+    }
+    for (const MonsterMark& mark : marks_) {
+        if (view_.Id() != mark.map) continue;
+        const ui::Vec2 s = view_.ToScreen(mark.pixel, at);
+        frame.paint.Image("interface\\worldmap\\wmap_monster_icon.ddj", {std::floor(s.x - 8.0f), std::floor(s.y - 8.0f), 16.0f, 16.0f});
     }
     // The party's members, then the player's arrow (mm_sign_character.ddj, turned by its yaw).
     if (c_.state != nullptr) {
@@ -365,6 +457,221 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
     frame.paint.PopClip();
 }
 
+// --- The guide (CNIFWorldMapGuide, 11) ----------------------------------------------------------------------------------
+// Left of the map, opened and closed by the side arrow. Its tabs: the data's sections in service (the places, the
+// monsters), 56 x 24 from 20 across, 60 apart, 8 down, their _on art when chosen (_off otherwise) and their label. Its
+// list in the black tile (22, 43; 257 x 235): rows of 248 x 28, 30 apart from 3 down. A heading
+// (gd_long_index_open.ddj, its name in tan from 34, 6, its button gd_index_button_open while open, _close shut) opens its
+// entries under it, one heading at a time, a second click shutting it; an entry (gd_long_contents_event.ddj, the lamp
+// gd_contents_lamp.ddj while picked) shows its place on the map. A monster's entry reads "Lv12 name", red over the
+// player's level + 6, pink over + 3, light blue under the player's. Ours: the wheel scrolls the list; its scroll bar
+// (gd_scroll_*) and the lamp's place (beside the name) are inferred / not drawn.
+constexpr float kGuideRowX = 24.0f, kGuideRowY = 46.0f, kGuideRowW = 248.0f, kGuideRowH = 28.0f, kGuidePitch = 30.0f;
+const ui::Rect kGuideList{22.0f, 43.0f, 257.0f, 235.0f};
+
+void WorldMapWindow::ToggleGuide() {
+    ui::Widget* guide = Child(kGuide);
+    if (guide == nullptr) return;
+    guide->visible = !guide->visible;
+}
+
+void WorldMapWindow::MarkMonster(const assets::WorldMapGuideRow& row, ui::Color colour, bool keep) {
+    if (!keep) marks_.clear();
+    if (c_.worldMap == nullptr) return;
+    const int map = c_.worldMap->guide.MapOfArea(row.area);
+    if (map < 0) return;
+    // Its place: on the world, a region and its offset there (32 pixels to a region); on a dungeon floor, its pixel.
+    MapView place;
+    if (!place.Show(*c_.worldMap, map)) return;
+    assets::WorldMapLabel at;
+    at.map = map;
+    at.regionX = row.regionX;
+    at.regionZ = row.regionZ;
+    at.x = row.placeX;
+    at.y = row.placeY;
+    marks_.push_back({map, row.codename, place.LabelPixel(at), colour});
+}
+
+void WorldMapWindow::LevelMarks(bool on) {
+    marks_.clear();
+    levelPending_ = on && (c_.worldMap == nullptr || c_.characters == nullptr || c_.state == nullptr);
+    if (!on || levelPending_) return;
+    for (const assets::WorldMapGuideTab& t : c_.worldMap->guide.tabs) {
+        if (t.section != "MONSTER") continue;
+        for (const assets::WorldMapGuideRow& r : t.rows) {
+            const assets::ObjectRow* monster = r.heading ? nullptr : c_.characters->Find(std::string_view(r.codename));
+            if (monster == nullptr) continue;
+            const int over = monster->level - int(c_.state->self.level);
+            if (over >= 0 && over < 4) MarkMonster(r, ui::Argb(0x80D9D2C6), true);
+            else if (over >= 4 && over < 7) MarkMonster(r, ui::Argb(0x80B63143), true);
+        }
+    }
+}
+
+std::vector<const assets::WorldMapGuideRow*> WorldMapWindow::GuideRows() const {
+    std::vector<const assets::WorldMapGuideRow*> rows;
+    if (c_.worldMap == nullptr || guideTab_ < 0 || guideTab_ >= int(c_.worldMap->guide.tabs.size())) return rows;
+    for (const assets::WorldMapGuideRow& r : c_.worldMap->guide.tabs[std::size_t(guideTab_)].rows) rows.push_back(&r);
+    const std::size_t race = c_.state != nullptr && c_.state->self.race == 1 ? 1 : 0;
+    std::stable_sort(rows.begin(), rows.end(), [race](const auto* a, const auto* b) { return a->order[race] < b->order[race]; });
+    return rows;
+}
+
+std::vector<WorldMapWindow::GuideLine> WorldMapWindow::GuideLines() const {
+    std::vector<GuideLine> out;
+    int group = -1;
+    for (const assets::WorldMapGuideRow* r : GuideRows()) {
+        if (r->heading) {
+            out.push_back({r, ++group});
+        } else if (group >= 0 && group == guideOpen_) {
+            out.push_back({r, group});
+        }
+    }
+    return out;
+}
+
+std::string WorldMapWindow::GuideText(const assets::WorldMapGuideRow& row, ui::Color& colour) const {
+    colour = row.heading ? ui::Argb(0xFFEFDAA4) : ui::kWhite;
+    if (row.heading || !row.nameKey.empty()) {
+        if (!row.nameKey.empty() && (!c_.hasText || c_.hasText(row.nameKey))) return c_.Text(row.nameKey);
+        // A monsters' heading with no text of its own (DUNGEON_TEMPLE): the places' row of that codename.
+        if (c_.worldMap != nullptr) {
+            for (const assets::WorldMapGuideTab& t : c_.worldMap->guide.tabs) {
+                for (const assets::WorldMapGuideRow& r : t.rows) {
+                    if (&r != &row && r.codename == row.codename && !r.nameKey.empty()) return c_.Text(r.nameKey);
+                }
+            }
+        }
+        return row.codename;
+    }
+    // A monster: "Lv" its level and its name, coloured by its level against the player's.
+    const assets::ObjectRow* monster = c_.characters != nullptr ? c_.characters->Find(std::string_view(row.codename)) : nullptr;
+    if (monster == nullptr) return row.codename;
+    const int mine = c_.state != nullptr ? int(c_.state->self.level) : 0;
+    if (monster->level > mine + 6) colour = ui::Argb(0xFFFF0000);
+    else if (monster->level > mine + 3) colour = ui::Argb(0xFFEF8282);
+    else if (monster->level < mine) colour = ui::Argb(0xFF80C0E5);
+    return c_.Text("UIIT_STT_LEVEL_LV") + std::to_string(monster->level) + " " + c_.Text(monster->nameKey);
+}
+
+void WorldMapWindow::GuidePick(const assets::WorldMapGuideRow& row) {
+    if (c_.worldMap == nullptr) return;
+    guidePicked_ = &row;
+    following_ = false;
+    // Any pick: the monster box unticked, the marks gone (the original's pick first takes the box's back).
+    if (auto* box = ui::As<ui::CheckBox>(Child(kMonsterBox))) box->checked = false;
+    marks_.clear();
+    const assets::WorldMapGuide& guide = c_.worldMap->guide;
+    if (guideTab_ < int(guide.tabs.size()) && guide.tabs[std::size_t(guideTab_)].section == "AREA") {
+        // A place: its map (a map id), or its label's map centred on it (a worldmap_localinfo row).
+        if (row.linkKind == 0) {
+            ShowMap(row.link);
+            return;
+        }
+        for (const assets::WorldMapLabel& l : c_.worldMap->labels) {
+            if (l.id != row.link) continue;
+            if (!ShowMap(l.map)) return;
+            const ui::Vec2 p = view_.LabelPixel(l);
+            view_.CentreOn({p.x + float(l.width) / 2.0f, p.y + float(l.height) / 2.0f});
+            return;
+        }
+        return;
+    }
+    // A monster: its area's map centred on its place, its icon there and its tiles tinted (0x80E9C624); the monster box
+    // unticked, its marks gone.
+    if (auto* box = ui::As<ui::CheckBox>(Child(kMonsterBox))) box->checked = false;
+    MarkMonster(row, ui::Argb(0x80E9C624), false);
+    if (marks_.empty() || !ShowMap(marks_.back().map)) return;
+    view_.CentreOn(marks_.back().pixel);
+}
+
+void WorldMapWindow::DrawGuide(ui::Frame& frame, const ui::Rect& at) {
+    if (c_.worldMap == nullptr) return;
+    const assets::WorldMapGuide& guide = c_.worldMap->guide;
+    for (std::size_t i = 0; i < guide.tabs.size(); ++i) {
+        const assets::WorldMapGuideTab& t = guide.tabs[i];
+        const ui::Rect r{at.x + 20.0f + 60.0f * float(i), at.y + 8.0f, 56.0f, 24.0f};
+        std::string art = t.art;
+        if (int(i) != guideTab_) {
+            if (const std::size_t on = art.rfind("_on.ddj"); on != std::string::npos) art.replace(on, 7, "_off.ddj");
+        }
+        frame.paint.Image(art, r);
+        frame.paint.Text(c_.Text(t.labelKey), r, ui::kWhite, 0, 1, 1);
+    }
+    const ui::Rect list{at.x + kGuideList.x, at.y + kGuideList.y, kGuideList.w, kGuideList.h};
+    frame.paint.PushClip(list);
+    const std::vector<GuideLine> lines = GuideLines();
+    for (std::size_t k = std::size_t(std::max(0, guideTop_)); k < lines.size(); ++k) {
+        const float y = at.y + kGuideRowY + kGuidePitch * float(int(k) - guideTop_);
+        if (y > list.y + list.h) break;
+        const assets::WorldMapGuideRow& row = *lines[k].row;
+        const ui::Rect r{at.x + kGuideRowX, y, kGuideRowW, kGuideRowH};
+        ui::Color colour = ui::kWhite;
+        const std::string text = GuideText(row, colour);
+        if (row.heading) {
+            frame.paint.Image("interface\\guide\\gd_long_index_open.ddj", r);
+            frame.paint.Image(lines[k].group == guideOpen_ ? "interface\\guide\\gd_index_button_open.ddj" : "interface\\guide\\gd_index_button_close.ddj",
+                              {r.x + 6.0f, r.y + 2.0f, 24.0f, 24.0f});
+        } else {
+            frame.paint.Image("interface\\guide\\gd_long_contents_event.ddj", r);
+            if (&row == guidePicked_) frame.paint.Image("interface\\guide\\gd_contents_lamp.ddj", {r.x + 22.0f, r.y + 6.0f, 8.0f, 16.0f});
+        }
+        frame.paint.Text(text, {r.x + 34.0f, r.y + 6.0f, r.w - 38.0f, 16.0f}, colour, 0, 0, 1);
+    }
+    frame.paint.PopClip();
+}
+
+void WorldMapWindow::GuideMouse(ui::Frame& frame, const ui::Widget& owner, const ui::Rect& at) {
+    if (c_.worldMap == nullptr || frame.pointer.hovered != &owner) return;
+    const ui::Vec2 m = frame.pointer.position;
+    const std::vector<GuideLine> lines = GuideLines();
+    if (frame.input.wheel() != 0.0f) {
+        const int most = std::max(0, int(lines.size()) - int(kGuideList.h / kGuidePitch));
+        guideTop_ = std::clamp(guideTop_ + (frame.input.wheel() > 0.0f ? -1 : 1), 0, most);
+    }
+    if (!frame.input.Pressed(ui::MouseButton::Left)) return;
+    const auto inside = [&](const ui::Rect& r) { return m.x >= r.x && m.y >= r.y && m.x < r.Right() && m.y < r.Bottom(); };
+    for (std::size_t i = 0; i < c_.worldMap->guide.tabs.size(); ++i) {
+        if (!inside({at.x + 20.0f + 60.0f * float(i), at.y + 8.0f, 56.0f, 24.0f})) continue;
+        if (int(i) != guideTab_) GuideStep(int(i), -1, -1);
+        return;
+    }
+    if (!inside({at.x + kGuideList.x, at.y + kGuideList.y, kGuideList.w, kGuideList.h})) return;
+    for (std::size_t k = std::size_t(std::max(0, guideTop_)); k < lines.size(); ++k) {
+        const ui::Rect r{at.x + kGuideRowX, at.y + kGuideRowY + kGuidePitch * float(int(k) - guideTop_), kGuideRowW, kGuideRowH};
+        if (!inside(r)) continue;
+        if (lines[k].row->heading) {
+            guideOpen_ = guideOpen_ == lines[k].group ? -1 : lines[k].group;
+        } else {
+            GuidePick(*lines[k].row);
+        }
+        return;
+    }
+}
+
+void WorldMapWindow::GuideStep(int tab, int heading, int entry) {
+    if (ui::Widget* guide = Child(kGuide)) guide->visible = true;
+    if (c_.worldMap == nullptr || tab < 0 || tab >= int(c_.worldMap->guide.tabs.size())) return;
+    if (tab != guideTab_) {
+        guideTab_ = tab;
+        guideOpen_ = -1;
+        guideTop_ = 0;
+        guidePicked_ = nullptr;
+    }
+    if (heading < 0) return;
+    guideOpen_ = heading;
+    // The heading's line at the top, its entries under it.
+    const std::vector<GuideLine> lines = GuideLines();
+    for (std::size_t k = 0; k < lines.size(); ++k) {
+        if (!lines[k].row->heading || lines[k].group != heading) continue;
+        guideTop_ = int(k);
+        if (entry >= 0 && k + 1 + std::size_t(entry) < lines.size() && !lines[k + 1 + std::size_t(entry)].row->heading) {
+            GuidePick(*lines[k + 1 + std::size_t(entry)].row);
+        }
+        break;
+    }
+}
+
 void WorldMapWindow::PickPoint(std::uint32_t id) {
     auto chosen = std::move(choose_);
     choose_ = nullptr;
@@ -421,6 +728,16 @@ void WorldMapWindow::MapMouse(ui::Frame& frame, const ui::Widget& owner, const u
 void ShowWorldMap(HudContext& c, int map) {
     if (c.hud == nullptr) return;
     if (auto* window = dynamic_cast<WorldMapWindow*>(c.hud->Show(hud::kWorldMap))) window->Open(map);
+}
+
+void WorldMapMonsterBox(HudContext& c, bool on) {
+    if (c.hud == nullptr) return;
+    if (auto* window = dynamic_cast<WorldMapWindow*>(c.hud->Show(hud::kWorldMap))) window->TickMonsterBox(on);
+}
+
+void WorldMapGuideStep(HudContext& c, int tab, int heading, int entry) {
+    if (c.hud == nullptr) return;
+    if (auto* window = dynamic_cast<WorldMapWindow*>(c.hud->Show(hud::kWorldMap))) window->GuideStep(tab, heading, entry);
 }
 
 void ChooseReturnPoint(HudContext& c, std::function<void(std::uint32_t)> chosen, int listMarker) {

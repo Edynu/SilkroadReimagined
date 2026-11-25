@@ -244,6 +244,9 @@ void CheckBox::Draw(Frame& frame) {
     // child, when it made one, follows `checked` above).
     if (!checked) {
         if (const std::size_t at = box.rfind("_on.ddj"); at != std::string::npos && at + 7 == box.size()) box.replace(at, 7, "_off.ddj");
+    } else if (Child(0) == nullptr) {
+        // A .2dt box given its unchecked face ("..._off.ddj": the world map's monster box) shows its "_on" twin when checked.
+        if (const std::size_t at = box.rfind("_off.ddj"); at != std::string::npos && at + 8 == box.size()) box.replace(at, 8, "_on.ddj");
     }
     FitToTexture(frame.paint, box);
     frame.paint.Image(box, ScreenRect(), {node().uv[0], node().uv[1]}, {node().uv[2], node().uv[3]}, WithAlpha(kWhite, Opacity()));

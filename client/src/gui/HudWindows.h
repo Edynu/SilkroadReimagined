@@ -552,6 +552,11 @@ void RegisterActionWindow(ui::Interface& ui, HudContext& context); // CIFAction:
 // The world map (M; HudWorldMap.cpp): 1.188's CNIFWorldMap in the CIFWorldMap window's place.
 void RegisterWorldMapWindow(ui::Interface& ui, HudContext& context);
 void ShowWorldMap(HudContext& context, int map); // the window open on that map (0 the world, 2001.. a dungeon floor)
+// The world map's guide shown (the window opened first) on tab `tab` (0 the places, 1 the monsters), its heading `heading`
+// opened and that heading's entry `entry` picked (-1: none): the gallery's and the scripts' way.
+void WorldMapGuideStep(HudContext& context, int tab, int heading, int entry);
+// The world map's monster box (31) ticked or not: the monsters 0..6 levels over the player's marked.
+void WorldMapMonsterBox(HudContext& context, bool on);
 // The world map in the reverse return scroll's choosing mode: `chosen` hears the
 // picked map point's ID (_RefOptionalTeleport's); closing the map hears nothing. `listMarker` (the gallery's) lists
 // that marker's destinations at once.

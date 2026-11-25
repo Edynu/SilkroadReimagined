@@ -263,6 +263,72 @@ void DecodeFortressZones(std::string_view text, const std::vector<NamedSpot>& sp
     });
 }
 
+int WorldMapGuide::MapOfArea(const std::string& area) const {
+    if (area == "field") return 0;
+    for (const WorldMapGuideTab& t : tabs) {
+        if (t.section != "AREA") continue;
+        for (const WorldMapGuideRow& r : t.rows) {
+            if (r.area == area && r.linkKind == 0 && r.link > 0) return r.link;
+        }
+    }
+    return -1;
+}
+
+void DecodeWorldMapGuide(std::string_view text, std::string_view regions, WorldMapGuide& out) {
+    out.tabs.clear();
+    out.monsterTiles.clear();
+    WorldMapGuideTab* tab = nullptr;
+    Lines(text, [&](const std::vector<std::string_view>& c) {
+        if (c.empty()) return;
+        if (Trim(c[0]) == "#section") {
+            // "#section  NAME  service  art  label" (MAP_MANAGER: the maps' pages, not a tab).
+            tab = nullptr;
+            if (c.size() < 5 || Trim(c[2]) != "1" || Trim(c[1]) == "MAP_MANAGER") return;
+            out.tabs.push_back({std::string(Trim(c[1])), Text(c[3]), Text(c[4]), {}});
+            tab = &out.tabs.back();
+            return;
+        }
+        if (tab == nullptr || Trim(c[0]) != "1") return; // out of service, notes
+        WorldMapGuideRow r;
+        r.codename = Text(c[2]);
+        if (tab->section == "AREA") {
+            if (c.size() < 11) return;
+            r.nameKey = Text(c[3]);
+            r.area = Text(c[4]);
+            r.heading = Trim(c[5]) == "main";
+            for (int i = 0; i < 3; ++i) r.order[std::size_t(i)] = Int(c[6 + std::size_t(i)]);
+            r.linkKind = Int(c[9]);
+            r.link = Int(c[10]);
+        } else if (tab->section == "MONSTER") {
+            if (c.size() < 14) return;
+            r.area = Text(c[3]);
+            r.heading = Trim(c[4]) == "main";
+            for (int i = 0; i < 3; ++i) r.order[std::size_t(i)] = Int(c[5 + std::size_t(i)]);
+            r.nameKey = r.heading ? "UIIT_STT_" + r.codename : std::string();
+            r.regionX = Int(c[10]);
+            r.regionZ = Int(c[11]);
+            r.placeX = Int(c[12]);
+            r.placeY = Int(c[13]);
+        } else {
+            return;
+        }
+        if (r.codename.empty()) return;
+        tab->rows.push_back(std::move(r));
+    });
+    Lines(regions, [&](const std::vector<std::string_view>& c) {
+        if (c.size() < 2 || Text(c[0]).empty()) return;
+        std::vector<std::pair<int, int>>& tiles = out.monsterTiles[Text(c[0])];
+        std::string_view list = Trim(c[1]);
+        for (std::size_t at = 0; at < list.size();) {
+            std::size_t comma = list.find(',', at);
+            if (comma == std::string_view::npos) comma = list.size();
+            const std::string_view one = Trim(list.substr(at, comma - at));
+            if (const std::size_t x = one.find('x'); x != std::string_view::npos) tiles.push_back({Int(one.substr(0, x)), Int(one.substr(x + 1))});
+            at = comma + 1;
+        }
+    });
+}
+
 bool LoadWorldMapData(const FileSystem& fs, WorldMapData& out, std::string& error) {
     const auto info = fs.Read("server_dep\\silkroad\\textdata\\worldmap_mapinfo.txt");
     if (!info) {
@@ -276,6 +342,10 @@ bool LoadWorldMapData(const FileSystem& fs, WorldMapData& out, std::string& erro
     const auto bless = fs.Read("server_dep\\silkroad\\textdata\\refsiegeblessbuff.txt");
     const auto forge = fs.Read("server_dep\\silkroad\\textdata\\siegefortressitemforge.txt");
     DecodeFortressTables(bless ? core::DecodeTextFile(bless->Bytes()) : std::string(), forge ? core::DecodeTextFile(forge->Bytes()) : std::string(), out);
+    if (const auto guide = fs.Read("server_dep\\silkroad\\textdata\\worldmapguidedata.txt")) {
+        const auto regions = fs.Read("server_dep\\silkroad\\textdata\\worldmapguidedata_region.txt");
+        DecodeWorldMapGuide(core::DecodeTextFile(guide->Bytes()), regions ? core::DecodeTextFile(regions->Bytes()) : std::string(), out.guide);
+    }
     if (const auto caves = fs.Read("server_dep\\silkroad\\textdata\\refsiegedungeon.txt")) DecodeFortressDungeons(core::DecodeTextFile(caves->Bytes()), out);
     if (const auto zones = fs.Read("server_dep\\silkroad\\textdata\\eventzonedata.txt")) {
         std::vector<NamedSpot> spots;
