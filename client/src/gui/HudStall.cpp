@@ -414,6 +414,14 @@ public:
             return true;
         }
         if (n.kind != ui::Notice::Kind::Clicked || n.source == nullptr) return MainFrame::OnNotice(n);
+        // A column's header: the page's rows by it, the other way when it is clicked again (the original's).
+        if (n.control >= 1393 && n.control <= 1398) {
+            sortBackwards_ = sortColumn_ == n.control ? !sortBackwards_ : false;
+            sortColumn_ = n.control;
+            chosen_ = -1;
+            if (c_.stall != nullptr) Show(*c_.stall);
+            return true;
+        }
         switch (n.control) {
         case kSearch: Search(); return true;
         case kPages:
@@ -581,21 +589,51 @@ private:
     const proto::NetworkRow* Chosen() const {
         const game::StallView* v = c_.stall;
         const auto* rows = v != nullptr ? v->Rows(v->Page()) : nullptr;
-        return rows != nullptr && chosen_ >= 0 && std::size_t(chosen_) < rows->size() ? &(*rows)[std::size_t(chosen_)] : nullptr;
+        if (rows == nullptr || chosen_ < 0 || std::size_t(chosen_) >= rows->size()) return nullptr;
+        const std::size_t at = std::size_t(chosen_) < order_.size() ? order_[std::size_t(chosen_)] : std::size_t(chosen_);
+        return at < rows->size() ? &(*rows)[at] : nullptr;
+    }
+    // The page's rows in the order of the header clicked last: its number (the server's order), level, name, count or price.
+    void Order(const std::vector<proto::NetworkRow>* rows) {
+        order_.clear();
+        if (rows == nullptr) return;
+        for (std::size_t i = 0; i < rows->size(); ++i) order_.push_back(i);
+        const auto level = [&](std::size_t i) {
+            const assets::ItemRow* item = c_.items != nullptr ? c_.items->Find((*rows)[i].item.item) : nullptr;
+            return item != nullptr ? item->requiredLevel : 0;
+        };
+        const auto name = [&](std::size_t i) {
+            const assets::ItemRow* item = c_.items != nullptr ? c_.items->Find((*rows)[i].item.item) : nullptr;
+            return item != nullptr ? c_.Text(item->nameKey) : std::string();
+        };
+        std::stable_sort(order_.begin(), order_.end(), [&](std::size_t a, std::size_t b) {
+            const auto less = [&](std::size_t x, std::size_t y) {
+                switch (sortColumn_) {
+                case 1398: return level(x) < level(y);
+                case 1393: return name(x) < name(y);
+                case 1394: return (*rows)[x].item.quantity < (*rows)[y].item.quantity;
+                case 1395: return (*rows)[x].price < (*rows)[y].price;
+                default: return x < y;
+                }
+            };
+            return sortBackwards_ ? less(b, a) : less(a, b);
+        });
     }
     void Show(const game::StallView& v) {
         const auto* rows = v.Rows(v.Page());
+        Order(rows);
         for (std::size_t k = 0; k < rows_.size(); ++k) {
             ui::Widget* row = rows_[k];
             if (row == nullptr) continue;
-            const proto::NetworkRow* r = rows != nullptr && k < rows->size() ? &(*rows)[k] : nullptr;
+            const std::size_t at = k < order_.size() ? order_[k] : k;
+            const proto::NetworkRow* r = rows != nullptr && at < rows->size() ? &(*rows)[at] : nullptr;
             if (auto* lit = dynamic_cast<NetworkRow*>(row)) lit->chosen = r != nullptr && int(k) == chosen_;
             const assets::ItemRow* item = r != nullptr && c_.items != nullptr ? c_.items->Find(r->item.item) : nullptr;
             const game::ItemInstance instance = r != nullptr ? game::Inventory::FromRecord(r->item) : game::ItemInstance{};
             const auto set = [&](int id, const std::string& text) {
                 if (ui::Widget* w = row->Child(id)) w->SetText(text);
             };
-            set(kRowNumber, r != nullptr ? std::to_string(std::size_t(v.Page()) * proto::kNetworkPageRows + k + 1) : std::string());
+            set(kRowNumber, r != nullptr ? std::to_string(std::size_t(v.Page()) * proto::kNetworkPageRows + at + 1) : std::string());
             set(kRowLevel, item != nullptr ? std::to_string(item->requiredLevel) : std::string());
             set(kRowName, item != nullptr ? c_.Text(item->nameKey) + (instance.plus > 0 ? " (+" + std::to_string(instance.plus) + ")" : "") : std::string());
             set(kRowCount, r != nullptr ? std::to_string(std::max<int>(1, r->item.quantity)) : std::string());
@@ -632,6 +670,9 @@ private:
     std::uint64_t seen_ = ~std::uint64_t(0);
     int chosen_ = -1;
     double searchAgain_ = 0.0;
+    int sortColumn_ = 0;             // the header clicked last (1393 name, 1394 count, 1395 price, 1397 number, 1398 level)
+    bool sortBackwards_ = false;     // clicked again: the other way
+    std::vector<std::size_t> order_; // the page's rows as shown
 };
 
 } // namespace
