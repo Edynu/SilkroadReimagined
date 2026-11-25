@@ -449,6 +449,14 @@ private:
             float from = 0, in = 0, hold = 0, out = 0;
         };
         std::vector<Fade> fades;
+        // S_Lighting: the screen washed with a colour (0xRRGGBB) for `seconds`, by its kind (0 out, 1 in, 3 in / held /
+        // out, else the alpha as given).
+        struct Wash {
+            float from = 0, seconds = 1, alpha = 0, in = 0, hold = 0, out = 0;
+            int kind = 0;
+            std::uint32_t rgb = 0;
+        };
+        std::vector<Wash> washes;
         std::set<std::string> unshown; // commands logged once as not shown
         // Its texts on the screen (S_StaticCreateEx, gone at S_StaticRelease): placed against the screen as drawn.
         struct Static {

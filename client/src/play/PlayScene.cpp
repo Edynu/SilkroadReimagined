@@ -4,8 +4,9 @@
 // (S_CameraShake), the player hidden (S_Start's INVISIBLE_USER) and the names left out, the cinema's bars (S_SubTitle
 // STITLE_START / STITLE_FINISH), its sounds (S_SoundPlay), its characters (S_ObjectCreate in a free stage slot, its
 // animation by S_ObjectAniToIndex, gone at S_ObjectRelease), over at S_End.
-// Not shown yet (logged once): the music by its name (S_SetBGM), the light's fades (S_Lighting), the crowd of random
-// adventurers (S_ObjectCreateIndex, S_ObjectEquipSetIndex), the berserk quests' shots (S_DecoSkillTarget).
+// Not shown yet (logged once): the music by its name (S_SetBGM: the Roc's names no file of Music.pk2), the crowd of
+// random adventurers (S_ObjectCreateIndex, S_ObjectEquipSetIndex), the berserk quests' shots (S_DecoSkillTarget).
+// The screen washed with a colour: S_Lighting (a flash, a dip to black before a cut).
 // Its texts on the screen: S_StaticCreateEx / S_StaticRelease (the dialogue's lines in the White Viper's scenes).
 // Its characters, its own and the player (*player, over where the game has it until S_End): S_Teleport, S_ObjectTurn,
 // S_ObjectMoveTo walking or running (S_ObjectMotionState; S_ObjectOptionSet's speeds, *SCR_OBJ_NODRAW / DRAW), a clip
@@ -335,7 +336,20 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
             scene_.statics.push_back(std::move(st));
         } else if (c.verb == "S_StaticRelease") {
             std::erase_if(scene_.statics, [&](const QuestSceneRun::Static& s) { return s.name == arg(0); });
-        } else if (c.verb == "S_SetBGM" || c.verb == "S_Lighting" || c.verb == "S_ObjectCreateIndex" || c.verb == "S_ObjectEquipSetIndex" ||
+        } else if (c.verb == "S_Lighting") {
+            // <seconds> <alpha> <r> <g> <b> <kind> [<in> <held> <out>]: the screen washed with a colour for its time, then
+            // gone: kind 0 from the colour to nothing, 1 from nothing to the colour, 3 in, held and out over its three
+            // times, another the alpha as given.
+            QuestSceneRun::Wash wash;
+            wash.from = c.time;
+            wash.seconds = std::max(0.001f, c.Number(0));
+            const auto byte = [&](std::size_t i) { return std::uint32_t(std::clamp(int(c.Number(i)), 0, 255)); };
+            wash.alpha = float(byte(1)) / 255.0f;
+            wash.rgb = byte(2) << 16 | byte(3) << 8 | byte(4);
+            wash.kind = int(c.Number(5));
+            wash.in = std::max(0.0f, c.Number(6)), wash.hold = std::max(0.0f, c.Number(7)), wash.out = std::max(0.0f, c.Number(8));
+            scene_.washes.push_back(wash);
+        } else if (c.verb == "S_SetBGM" || c.verb == "S_ObjectCreateIndex" || c.verb == "S_ObjectEquipSetIndex" ||
                    c.verb == "S_DecoSkillTarget") {
             unshown(c.verb);
         }
@@ -488,6 +502,22 @@ void PlayScreen::DrawQuestSceneBars(ScreenContext& context, ui::Painter& paint) 
                                                    : std::max(0.0f, 1.0f - (into - f.in - f.hold) / std::max(0.001f, f.out));
         const ui::Rect r{along(f.screenH, w) - own(f.ownH, f.w) + f.x, along(f.screenV, h) - own(f.ownV, f.h) + f.y, f.w, f.h};
         paint.Image(f.path, r, {0, 0}, {1, 1}, ui::Argb((std::uint32_t(std::clamp(alpha, 0.0f, 1.0f) * 255.0f) << 24) | 0xFFFFFFu));
+    }
+    // The colour washes over the scene, the bars and the pictures (the texts over them), each gone after its time.
+    std::erase_if(scene_.washes, [&](const QuestSceneRun::Wash& wash) { return t > wash.from + wash.seconds; });
+    for (const QuestSceneRun::Wash& wash : scene_.washes) {
+        const float into = t - wash.from;
+        if (into < 0.0f) continue;
+        float alpha = wash.alpha;
+        if (wash.kind == 0) alpha = 1.0f - into / wash.seconds;
+        if (wash.kind == 1) alpha = into / wash.seconds;
+        if (wash.kind == 3) {
+            alpha = into < wash.in ? into / std::max(0.001f, wash.in)
+                    : into < wash.in + wash.hold ? 1.0f
+                                                 : 1.0f - (into - wash.in - wash.hold) / std::max(0.001f, wash.out);
+        }
+        const std::uint32_t a = std::uint32_t(std::clamp(alpha, 0.0f, 1.0f) * 255.0f);
+        paint.Fill({0.0f, 0.0f, w, h}, ui::Argb(a << 24 | wash.rgb));
     }
     for (const QuestSceneRun::Static& st : scene_.statics) {
         const ui::Rect r{along(st.screenH, w) - own(st.ownH, st.w) + st.x, along(st.screenV, h) - own(st.ownV, st.h) + st.y, st.w, st.h};
