@@ -91,11 +91,15 @@ private:
     std::string selected_;
     std::string message_;
     bool busy_ = false;
+    // The deletion's or the restoration's question (the layout's Warning section, 1.188's popup): open, and which.
+    bool warning_ = false, warningRestore_ = false;
     bool kicked_ = false; // the server said why it closes the connection (message_ keeps it)
     // Automated creation (--create with --race and --sex), straight to the server.
     bool europe_ = false, male_ = true;
     // Automated runs.
     std::string autoCreate_, autoSelect_;
+    std::string autoAsk_; // --ask-delete NAME: that one chosen and its Delete (or Restore) pressed, for a look at its question
+    bool askNow_ = false;
     bool autoPedestal_ = false; // --pedestal: press Create once the list is in (--pedestal-after-restart: back from a Restart)
     int autoPick_ = -1;         // --pick europe|china: pick that race at the pedestal
     bool exitOnSelect_ = false;

@@ -70,7 +70,9 @@ struct CharacterSummary {
     std::uint32_t mp = 0;
     bool deleting = false;
     std::uint32_t deleteMinutes = 0; // left before it is gone (deleting only)
-    std::uint8_t guildRank = 0;
+    // Its place in a guild and an academy (the lobby's warnings before a deletion): 0 none, 1 a member (an academy's
+    // apprentice or assistant), 2 the guild's master (the academy's founding guardian).
+    std::uint8_t guildRank = 0, academyRank = 0;
     std::string guildName;
     std::vector<EquippedItem> equipment;
     std::vector<EquippedItem> avatars;
@@ -89,6 +91,7 @@ struct CharacterSummary {
         v("deleting", deleting);
         v("deleteMinutes", deleteMinutes);
         v("guildRank", guildRank);
+        v("academyRank", academyRank);
         v("guildName", guildName, 32);
         v("equipment", equipment, 16);
         v("avatars", avatars, 8);

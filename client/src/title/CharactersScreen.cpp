@@ -6,6 +6,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "audio/GameAudio.h"
 #include "sr/assets/Dress.h"
 #include "world/StageEffects.h"
 #include "sr/core/Log.h"
@@ -46,6 +47,7 @@ void CharactersScreen::Enter(ScreenContext& context) {
     if (!std::exchange(shared_->scripted, true)) {
         autoCreate_ = context.config.GetString("create", "");
         autoSelect_ = context.config.GetString("select", "");
+        autoAsk_ = context.config.GetString("ask-delete", "");
     } else if (shared_->restarted && context.config.GetBool("reselect", false) && !std::exchange(shared_->reselected, true)) {
         // --reselect: back from --logout-after's Restart, the same character again (a re-entry's tries).
         autoSelect_ = context.config.GetString("select", "");
@@ -181,6 +183,10 @@ void CharactersScreen::HandleEvents(ScreenContext& context) {
     if (autoPick_ >= 0 && stage_ == Stage::Pedestal && arrived) {
         PickRace(std::exchange(autoPick_, -1));
         return;
+    }
+    if (!autoAsk_.empty()) {
+        Choose(std::exchange(autoAsk_, {}));
+        askNow_ = true;
     }
     if (!autoSelect_.empty()) {
         const std::string name = std::exchange(autoSelect_, {});
@@ -395,6 +401,7 @@ void CharactersScreen::PickRace(int race) {
 
 void CharactersScreen::Choose(const std::string& name) {
     if (name == selected_) return;
+    warning_ = false; // another character: the question is gone
     // From wherever the camera is now: to the character in 2 s, back to the dock in 1 s.
     assets::CameraKey from = assets::SampleCameraTrack(track_, trackTime_);
     from.time = 0.0f;
@@ -644,24 +651,71 @@ void CharactersScreen::Draw(ScreenContext& context, float width, float height) {
             }
         } else {
             if (const auto* start = node("GDR_BTN_START")) {
-                if (kit_->Button("##start", *start, {W - 313, by, 92, 41}, !busy_ && !chosen->deleting)) {
+                if (kit_->Button("##start", *start, {W - 313, by, 92, 41}, !busy_ && !warning_ && !chosen->deleting)) {
                     shared_->session->Select(selected_);
                     busy_ = true;
                 }
             }
             const bool deleting = chosen->deleting;
             if (const auto* remove = node(deleting ? "GDR_BTN_RESTORE" : "GDR_BTN_DELETE")) {
-                if (kit_->Button("##delete", *remove, {W - 209, by, 92, 41}, !busy_)) {
-                    if (deleting) {
-                        shared_->session->Restore(selected_);
+                bool pressed = kit_->Button("##delete", *remove, {W - 209, by, 92, 41}, !busy_ && !warning_);
+                if (askNow_ && still && !busy_) pressed = true, askNow_ = false; // --ask-delete
+                if (pressed) {
+                    // The original's: a guild's or an academy's member is only told why (the guild first: its master,
+                    // a member; then the academy's guardian, a student); else its question, the deletion's or the
+                    // restoration's.
+                    const char* role = chosen->guildRank == 2     ? "UIO_MSG_CHAR_DEL_WANNING_CONFIRM_MASTER"
+                                       : chosen->guildRank == 1   ? "UIO_MSG_CHAR_DEL_WANNING_CONFIRM_MEMBER"
+                                       : chosen->academyRank == 2 ? "UIO_MSG_CHAR_DEL_WANNING_CONFIRM_GUARDIAN"
+                                       : chosen->academyRank == 1 ? "UIO_MSG_CHAR_DEL_WANNING_CONFIRM_STUDENT"
+                                                                  : nullptr;
+                    if (role != nullptr) {
+                        message_ = role;
                     } else {
-                        shared_->session->Delete(selected_);
+                        warning_ = true;
+                        warningRestore_ = deleting;
+                        if (context.audio != nullptr) context.audio->PlayUi("SND_WINDOW_OPEN");
                     }
-                    busy_ = true;
                 }
             }
             if (const auto* back = node("GDR_BTN_BACK2")) {
-                if (kit_->Button("##back2", *back, {W - 105, by, 92, 41}, !busy_)) Choose({});
+                if (kit_->Button("##back2", *back, {W - 105, by, 92, 41}, !busy_ && !warning_)) Choose({});
+            }
+            if (warning_) {
+                // The question (section Warning; ours centred between the bars): the name, the text, Delete or
+                // Restore, Cancel.
+                const core::DesignRect box{std::round((W - 344) / 2), std::round((T + B - 192) / 2), 344, 192};
+                // The screen dimmed behind it (GDR_SCREENFADE to 0x80), then its picture (GDR_STA_WPOPUP, section Select).
+                kit_->FillScreen({0, 0, width, height}, ui::Rgba(0, 0, 0, 0x80));
+                if (const auto* popup = node("GDR_STA_WPOPUP")) kit_->Image(popup->ddj, box);
+                for (const auto& section : select->sections) {
+                    if (section.name != "Warning") continue;
+                    for (const auto& n : section.nodes) {
+                        const core::DesignRect r = UiKit::Local(n, box);
+                        if (n.name == "GDR_STA_WNAME") kit_->NodeText(n, chosen->name, r);
+                        if (n.name == "GDR_TB_INFO") {
+                            kit_->RichText(data.Text(warningRestore_ ? "UIO_STT_CHAR_RECOVERY_CONFIRM" : "UIO_STT_CHAR_DEL_CONFIRM"), r,
+                                           ui::kWhite, n.fontIndex, 0);
+                        }
+                        if (n.name == "GDR_BTN_WACCEPT") {
+                            assets::UiLayoutNode accept = n;
+                            accept.text = warningRestore_ ? "UIO_STT_CHAR_RECOVERY" : "UIO_SELCHAR_CTL_DELETE";
+                            if (kit_->Button("##waccept", accept, r, !busy_)) {
+                                warning_ = false;
+                                if (warningRestore_) {
+                                    shared_->session->Restore(selected_);
+                                } else {
+                                    shared_->session->Delete(selected_);
+                                }
+                                busy_ = true;
+                            }
+                        }
+                        if (n.name == "GDR_BTN_WCANCEL" && kit_->Button("##wcancel", n, r, !busy_)) {
+                            warning_ = false;
+                            if (context.audio != nullptr) context.audio->PlayUi("SND_WINDOW_CLOSE");
+                        }
+                    }
+                }
             }
         }
     }

@@ -299,6 +299,9 @@ struct CharacterRow {
     std::vector<std::uint32_t> skills; // LoadCharacter only: the skill learned in each group (its id: the level's row)
     bool deleting = false;
     std::int64_t deleteSeconds = 0; // left before it is gone
+    // ListCharacters only: its place in a guild and in an academy (the lobby's warnings before a deletion): 0 none,
+    // 1 a member (an academy's apprentice or assistant), 2 the guild's master (the academy's founding guardian).
+    std::uint8_t guildRole = 0, academyRole = 0;
     struct Item {
         EquipSlot slot;
         std::uint32_t item;

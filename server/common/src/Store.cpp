@@ -791,7 +791,9 @@ std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std
     }
     QueryResult r = db.Query(
         "SELECT c.charid, c.charname16, c.refobjid, c.scale, c.curlevel, c.expoffset, c.strength, c.intellect, c.remainstatpoint, c.hp, c.mp, "
-        "       c.deleted <> 0, coalesce(ceil(extract(epoch FROM d.deleteddate + make_interval(secs => $2) - localtimestamp))::bigint, 0) "
+        "       c.deleted <> 0, coalesce(ceil(extract(epoch FROM d.deleteddate + make_interval(secs => $2) - localtimestamp))::bigint, 0), "
+        "       coalesce((SELECT CASE WHEN gm.memberclass = 0 THEN 2 ELSE 1 END FROM _guildmember gm WHERE gm.charid = c.charid LIMIT 1), 0), "
+        "       coalesce((SELECT CASE WHEN tm.memberclass = 0 THEN 2 ELSE 1 END FROM _trainingcampmember tm WHERE tm.charid = c.charid LIMIT 1), 0) "
         "FROM _user u JOIN _char c ON c.charid = u.charid LEFT JOIN _deletedchar d ON d.charid = c.charid "
         "WHERE u.userjid = $1 AND c.charid <> 0 ORDER BY c.charid",
         {account, deleteSeconds});
@@ -816,6 +818,8 @@ std::vector<CharacterRow> ListCharacters(Database& db, std::int64_t account, std
         c.mp = std::uint32_t(r.Int(i, 10));
         c.deleting = r.Bool(i, 11);
         c.deleteSeconds = c.deleting ? std::max<std::int64_t>(0, r.Int(i, 12)) : 0;
+        c.guildRole = std::uint8_t(r.Int(i, 13));
+        c.academyRole = std::uint8_t(r.Int(i, 14));
         for (int k = 0; k < items.Rows(); ++k) {
             if (items.Int(k, 0) == c.id) {
                 c.equipment.push_back({EquipSlot(items.Int(k, 1)), std::uint32_t(items.Int(k, 2)), std::uint8_t(items.Int(k, 3))});

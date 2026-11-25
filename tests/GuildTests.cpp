@@ -378,6 +378,19 @@ TEST_CASE("Guilds: create, invite, ranks, notice, chat, kick, leave, disband, th
         CHECK(r.Text(2, 0) == "Gamma");
         CHECK(r.Int(2, 1) == game::kGuildMaster);
         CHECK(r.Int(2, 2) == -1);
+        // The lobby's list knows each one's place (its warnings before a deletion): the master 2, a member 1, none 0.
+        const auto roleOf = [&](const std::string& name) {
+            bool ok = false;
+            const auto account = server::FindAccount(t.Db(), "acc" + name, ok);
+            REQUIRE(account.has_value());
+            for (const server::CharacterRow& c : server::ListCharacters(t.Db(), account->id, rig.config.id, 0, ok)) {
+                if (c.name == name) return int(c.guildRole);
+            }
+            return -1;
+        };
+        CHECK(roleOf("Gamma") == 2);
+        CHECK(roleOf("Alpha") == 1);
+        CHECK(roleOf("Lowly") == 0);
     }
     gamma.c->Send(proto::GuildMasterTransfer{gamma.keeper, std::uint32_t(alpha.character)});
     CHECK(Error(gamma, GuildAction::MasterTransfer) == GuildError::Ok);

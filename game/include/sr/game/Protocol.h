@@ -42,7 +42,8 @@ using MessageId = std::uint16_t;
 // Raised whenever a message changes in a way an older peer cannot read.
 // 2: the moves packed (EntityMoved's places, a tick's moves in one frame).
 // 3: a ground item's owner in EntityAppeared.
-inline constexpr std::uint32_t kProtocolVersion = 3;
+// 4: the lobby's characters' academy role (CharacterSummary.academyRank).
+inline constexpr std::uint32_t kProtocolVersion = 4;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

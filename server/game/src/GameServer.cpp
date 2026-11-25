@@ -132,6 +132,8 @@ proto::CharacterSummary Summary(const CharacterRow& c) {
     s.mp = c.mp;
     s.deleting = c.deleting;
     s.deleteMinutes = c.deleting ? std::uint32_t((std::max<std::int64_t>(c.deleteSeconds, 0) + 59) / 60) : 0;
+    s.guildRank = c.guildRole;
+    s.academyRank = c.academyRole;
     for (const CharacterRow::Item& item : c.equipment) s.equipment.push_back({item.item, item.plus});
     return s;
 }
