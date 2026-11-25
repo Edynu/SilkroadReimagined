@@ -170,4 +170,10 @@ TEST_CASE("the loading screen's picture: by kind, then by the teleport's destina
     CHECK(LoadingPicture(LoadingKind::Teleport, 0x609E, 0) == "interface\\loading\\loading_river.ddj");
     CHECK(LoadingPicture(LoadingKind::Teleport, 0x6759, 0) == "interface\\loading\\loading_port2.ddj");
     CHECK(LoadingPicture(LoadingKind::Teleport, 0x1234, 0) == "interface\\loading\\loading_china_1.ddj");
+    // 1.188's additions.
+    CHECK(LoadingPicture(LoadingKind::Teleport, 0x5A30, 0) == "interface\\loading\\loading_alex.ddj");
+    CHECK(LoadingPicture(LoadingKind::Teleport, 0x5441, 0) == "interface\\loading\\loading_desert.ddj");
+    CHECK(LoadingPicture(LoadingKind::Teleport, 0x4A4B, 0) == "interface\\loading\\loading_pharaoh.ddj");
+    CHECK(LoadingPicture(LoadingKind::Teleport, 0x5C33, 0) == "interface\\loading\\loading_thiefzone.ddj");
+    CHECK(LoadingPicture(LoadingKind::Teleport, 0x65BD, 0) == "interface\\loading\\loading_loksan.ddj");
 }

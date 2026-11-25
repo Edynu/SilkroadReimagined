@@ -352,7 +352,8 @@ void NpcWindow::ShowNpc(std::uint32_t entity, const std::string& codename, const
             AddChoice(context_.Text(row->key), {Choice::Kind::ArenaDesk, context_.arena->Desk().state});
         }
     }
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    // No "End conversation." row on the first menu: the original's ends the talk by the window's button; its sub-menus
+    // (a talk, the destinations, ...) end with that row.
 }
 
 void NpcWindow::ShowEventDesk() {

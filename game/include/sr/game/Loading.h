@@ -12,9 +12,9 @@ namespace sr::game {
 
 enum class LoadingKind : std::uint8_t { FirstEntry, Rebirth, Teleport };
 
-// "interface\loading\<name>.ddj". `random` picks among the first entry's pictures. Two names the
-// original uses are missing from v1.150's Media.pk2 (loading_royalmausoleum for dungeons
-// 0x8002-0x8007, custumize_china_loading): the caller falls back to kLoadingFallback.
+// "interface\loading\<name>.ddj" by the 1.188 client's table. `random` picks among the first entry's pictures. A name
+// missing from the archive (1.188's custumize_china_loading, its character select's): the caller falls back to
+// kLoadingFallback.
 std::string LoadingPicture(LoadingKind kind, std::uint16_t destination, unsigned random);
 inline constexpr const char* kLoadingFallback = "interface\\loading\\loading_china_1.ddj";
 
