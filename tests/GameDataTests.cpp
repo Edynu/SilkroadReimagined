@@ -614,6 +614,19 @@ TEST_CASE("character creation models resolve through characterdata") {
             CHECK(table.Find(row->refObjId) == row);
         }
     }
+    // A model named as a compound of parts (.cpd) when the row names no .bsr: the Flame Master, as unique and in the
+    // White Viper's scenes.
+    for (const char* codename : {"MOB_TQ_FLAMEMASTER", "MOB_QT_TQ_FLAMEMASTER", "MOB_QT_TQ_THIEF_01"}) {
+        CAPTURE(codename);
+        const ObjectRow* row = table.Find(codename);
+        REQUIRE(row != nullptr);
+        CHECK(sr::core::NormalizeAssetPath(row->modelPath).ends_with(".cpd"));
+        const std::string path = CharacterTable::ResolveModel(fs, *row);
+        REQUIRE(!path.empty());
+        ModelData model;
+        CHECK_MESSAGE(LoadModel(fs, path, model, error), error);
+        CHECK(!model.parts.empty());
+    }
 }
 
 TEST_CASE("cover tables and starter equipment of the creatable characters") {

@@ -266,7 +266,9 @@ public:
     std::vector<assets::ResourceData::SoundEvent> StageSounds(std::size_t slot, std::string_view set, std::uint32_t state) const;
     // The length (seconds) of a state's clip from a set (empty: the stance) as a slot's character plays
     // it; negative while it loads (asked for here) or when it has none.
-    double StageClipSeconds(std::size_t slot, std::string_view set, std::uint32_t state);
+    double StageClipSeconds(std::size_t slot, std::string_view set, std::uint32_t state, bool* loops = nullptr);
+    // A look's clipSet naming a clip by its file instead of a set: kClipFile + the .ban's path (any state).
+    static constexpr std::string_view kClipFile = "file:";
     // Where an effect's anchor is this frame (the effect system's Place; StageEffects' held models).
     bool PlaceEffect(const gfx::EffectSystem::Anchor& anchor, glm::mat4& out) const;
     // How the characters' animation states found their clips so far (the skill bench's check): in

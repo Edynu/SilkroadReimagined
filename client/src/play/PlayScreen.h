@@ -116,6 +116,9 @@ private:
     void StepQuestScene(ScreenContext& context);
     bool QuestSceneCamera(float t, assets::CameraKey& key) const;
     void EndQuestScene();
+    // Its characters each frame once the walkers are placed (the player's too, over its own place): walked, turned,
+    // shown or hidden as the script left them.
+    void PlaceQuestSceneActors(ScreenContext& context);
     void DrawQuestSceneBars(ScreenContext& context, ui::Painter& paint);
     void CameraInput(ScreenContext& context);
     core::Sight Sight() const { return sight_ != nullptr ? *sight_ : core::Sight::Free; }
@@ -416,13 +419,36 @@ private:
         std::vector<assets::CameraKey> inserting, track;
         float trackFrom = 0;
         bool running = false;
+        bool trackStarted = false; // S_CameraStart since the last S_CameraCreate: later keys join the path
         std::optional<assets::CameraKey> held;
         std::vector<std::pair<std::string, std::size_t>> objects; // its characters' names -> stage slots
+        // A character of the scene as it stands, its own (S_ObjectCreate's) or the player ("*player", once the scene
+        // places it: where the game has it until then, and again after the scene).
         struct Placed {
-            WorldScreen::StageLook look;
+            WorldScreen::StageLook look; // the player's: only its clip (state, set, take, cycle) over the dressed look
             float x = 0, y = 0, z = 0, yaw = 0;
+            std::uint16_t region = 0; // the script's region of its place (a dungeon's: its own space)
+            bool placed = false;
+            // S_ObjectMoveTo: on its way there, walking or running (S_ObjectMotionState 1 / 2) at its speeds (S_ObjectOptionSet
+            // *SCR_OBJ_WALKSPEED / RUNSPEED; a character's characterdata ones, the player's 16 and 50 until set).
+            bool moving = false, walk = false;
+            float toX = 0, toY = 0, toZ = 0;
+            float walkSpeed = 16.0f, runSpeed = 50.0f;
+            bool hidden = false; // *SCR_OBJ_NODRAW
+            bool noIdle = false; // *SCR_OBJ_NOIDLE: a clip played through holds its last frame
+            double clipFrom = 0; // S_ObjectAniToName's clip started then (scene time)
+            std::vector<std::uint32_t> effects; // S_DecoEftAdd's on its bones, until S_DecoEftClear
         };
         std::map<std::string, Placed> looks;
+        std::map<std::string, std::uint32_t> effects; // S_EffectCreate's by name, until S_EffectRelease
+        // S_TextureFade: a picture over the screen (placed as the statics), in, held and out over its seconds.
+        struct Fade {
+            std::string path;
+            int screenH = 1, screenV = 1, ownH = 1, ownV = 1;
+            float w = 0, h = 0, x = 0, y = 0;
+            float from = 0, in = 0, hold = 0, out = 0;
+        };
+        std::vector<Fade> fades;
         std::set<std::string> unshown; // commands logged once as not shown
         // Its texts on the screen (S_StaticCreateEx, gone at S_StaticRelease): placed against the screen as drawn.
         struct Static {
@@ -434,6 +460,12 @@ private:
         };
         std::vector<Static> statics;
     } scene_;
+    // A scene character by its script name ("*player": the player, placed where it stands when first named); null
+    // when there is none.
+    QuestSceneRun::Placed* QuestScenePlaced(const std::string& name);
+    // A clip for it from now (scene time `at`): a state of a set (empty: its stance; WorldScreen::kClipFile: a file).
+    static void PlayClip(QuestSceneRun::Placed& placed, std::string set, std::uint32_t state, float at);
+    std::size_t QuestSceneSlot(const std::string& name) const; // StageEffects::kNone: not shown
     struct CameraShake {
         double from = 0, until = 0, next = 0;
         float amplitude = 0, step = 0.02f;

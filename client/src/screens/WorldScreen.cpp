@@ -423,6 +423,11 @@ std::uint32_t WorldScreen::ClipKey(std::string_view set, std::uint32_t state) {
 }
 
 std::string WorldScreen::ClipPath(const CharacterModel& m, std::string_view set, std::uint32_t state, bool* inSet) {
+    // A clip named by its file (a quest scene's S_ObjectAniToName): "file:" and its path, whatever the state.
+    if (set.starts_with(kClipFile)) {
+        if (inSet != nullptr) *inSet = true;
+        return std::string(set.substr(kClipFile.size()));
+    }
     std::string name = m.sets.StateAnimation(set.empty() ? std::string_view(m.stance) : set, state);
     if (inSet != nullptr) *inSet = !name.empty();
     if (name.empty() && !set.empty()) name = m.sets.StateAnimation(m.stance, state);
@@ -470,12 +475,13 @@ const assets::AnimationData* WorldScreen::ClipFor(CharacterModel& m, std::string
     return clip.data.get();
 }
 
-double WorldScreen::StageClipSeconds(std::size_t slot, std::string_view set, std::uint32_t state) {
+double WorldScreen::StageClipSeconds(std::size_t slot, std::string_view set, std::uint32_t state, bool* loops) {
     if (slot >= characters_.size()) return -1.0;
     const Character& c = characters_[slot];
     if (!c.active || c.type >= characterModels_.size()) return -1.0;
     bool missing = false;
     const assets::AnimationData* clip = ClipFor(characterModels_[c.type], set, state, missing);
+    if (loops != nullptr) *loops = clip != nullptr && clip->loop;
     return clip != nullptr ? double(clip->durationMs) / 1000.0 : -1.0;
 }
 

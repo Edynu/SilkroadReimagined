@@ -24,6 +24,13 @@ bool EndsWithBsr(std::string_view s) {
            (tail[3] == 'r' || tail[3] == 'R');
 }
 
+bool EndsWithCpd(std::string_view s) {
+    if (s.size() < 4) return false;
+    const std::string_view tail = s.substr(s.size() - 4);
+    return (tail[0] == '.') && (tail[1] == 'c' || tail[1] == 'C') && (tail[2] == 'p' || tail[2] == 'P') &&
+           (tail[3] == 'd' || tail[3] == 'D');
+}
+
 std::vector<std::string_view> Columns(std::string_view line) {
     std::vector<std::string_view> columns;
     for (std::size_t pos = 0;;) {
@@ -613,6 +620,10 @@ bool DecodeObjectRows(std::string_view text, std::vector<ObjectRow>& out, std::s
                 row.modelPath = std::string(columns[i]);
                 break;
             }
+        }
+        // A few name a compound of parts instead (.cpd: the Flame Master, the tomb's thieves).
+        for (std::size_t i = 3; i < columns.size() && row.modelPath.empty(); ++i) {
+            if (EndsWithCpd(columns[i])) row.modelPath = std::string(columns[i]);
         }
         out.push_back(std::move(row));
     }

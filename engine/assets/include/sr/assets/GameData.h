@@ -56,7 +56,7 @@ struct ObjectRow {
     bool canRide = false;        // col 66: a COS that is boarded through its Ride command (transports)
     bool canSell = false;        // col 17 (CanSell): a COS a stable keeper buys back (the transports)
     int sellPrice = 0;           // col 31 (SellPrice): what it pays
-    std::string modelPath; // .bsr; a clone row (a monster's variant) takes its base row's
+    std::string modelPath; // .bsr (else a .cpd, a compound of parts); a clone row (a monster's variant) takes its base row's
     std::string linkedCodename; // col 4: the base row of a clone, which has no model of its own
     bool inService = false;
 };

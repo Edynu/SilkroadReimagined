@@ -4872,6 +4872,7 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     if (holdForGate_ && pendingGate_ == 0 && !arrived_) holdForGate_ = waitingForGate_; // given up: nothing to wait for
     if (holdForGate_) context.holdCapture = true;
     PlaceWalkers(context);
+    PlaceQuestSceneActors(context);
     // A quest scene's INVISIBLE_USER: the player's own figure hidden while it plays.
     if (scene_.active && scene_.hideSelf && world_) {
         if (const std::size_t self = SlotOf(view_.Self()); self != StageEffects::kNone) world_->SetStageOpacity(self, 0.0f);
