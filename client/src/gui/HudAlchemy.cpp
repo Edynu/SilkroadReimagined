@@ -288,14 +288,16 @@ public:
                     }
                 }
             }
-            Put(place);
+            Put(place, true);
             return true;
         };
         ShowTab(g_tab);
     }
 
-    // A bag item put in (a right click on it, or dropped): the slot its kind goes to, if the tab takes it.
-    void Put(int place) {
+    // A bag item put in (a right click on it, or dropped): the slot its kind goes to, if the tab takes it. A wrong kind
+    // dropped on Disjoint or Dismantle is told what the page's rondo breaks down (the original's drop); put in by a right
+    // click, that it is not a material or equipment (its put-in's lines).
+    void Put(int place, bool dropped = false) {
         if (socketPage_ != nullptr && socketPage_->visible) {
             SocketPut(place);
             return;
@@ -310,7 +312,10 @@ public:
         int key = -1;
         const int code = Accepts(*row, *item, key);
         if (code != 0) {
-            if (const char* k = RefusalKey(code); k != nullptr && c_.systemLine) c_.systemLine(c_.Text(k));
+            const char* k = dropped && code == 3 ? "UIIT_MSG_ENCHANTERR_RONDO1_DISSOLVE_MATERIAL"
+                            : dropped && code == 5 ? "UIIT_MSG_ENCHANTERR_RONDO2_DISSOLVE_EQUIPITEM"
+                                                   : RefusalKey(code);
+            if (k != nullptr && c_.systemLine) c_.systemLine(c_.Text(k));
             return;
         }
         if (key == 0 && (g_tab == kStrengthen || g_tab == kManufacture)) slots_.fill({});
@@ -418,6 +423,18 @@ public:
     void Update(ui::Frame& frame) override {
         ui::MainFrame::Update(frame);
         const double now = frame.time;
+        // The action button's tip, by the tab (the original's managers set it).
+        // (Under the pointer even while disabled: nothing, or this window, is hovered then.)
+        const ui::Widget* over = frame.pointer.hovered;
+        while (over != nullptr && over != this) over = over->parent();
+        if (ui::Widget* button = alchemyPage_ != nullptr && alchemyPage_->visible ? alchemyPage_->Child(kAction) : nullptr;
+            button != nullptr && (over == this || frame.pointer.hovered == nullptr) && button->visible && button->Hit(frame.pointer.position)) {
+            const char* tip = g_tab == kDisjoint     ? "UIIT_STT_ALCHEMYBOX_TIP_DISJOINTING_ALLSLOT_BUTTON"
+                              : g_tab == kDismantle   ? "UIIT_STT_ALCHEMYBOX_TIP_DISMANTLING_BUTTON"
+                              : g_tab == kManufacture ? "UIIT_STT_ALCHEMYBOX_TIP_MANUFACTURING_BUTTON"
+                                                      : "UIIT_STT_ALCHEMYBOX_TIP_STRENGTHENING_BUTTON";
+            frame.interface.ShowTooltip(c_.Text(tip), button->ScreenRect());
+        }
         // The gauge.
         if (auto* gauge = Gauge()) gauge->SetValue(gaugeStart_ >= 0.0 ? float(std::clamp((now - gaugeStart_) / gaugeSeconds_, 0.0, 1.0)) : 0.0f, true);
         if (successAt_ > 0.0 && now >= successAt_) {
@@ -582,6 +599,8 @@ private:
     // The Alchemy page or the Socket page; leaving the Socket page ends its pick mode and cancels an insertion.
     void ShowPage(bool socket) {
         if (!socket) SocketReset(true);
+        // The title by the page: "Alchemy" or "Socket" (as the original's tabs set it).
+        if (ui::Widget* title = Child(0)) title->SetText(c_.Text(socket ? "UIIT_CTL_SOCKET_TAP_TITLE" : "UIIT_CTL_WK_ALCHEMY"));
         if (alchemyPage_ != nullptr) alchemyPage_->visible = !socket;
         if (socketPage_ != nullptr) socketPage_->visible = socket;
         RefreshSocket();
@@ -1216,6 +1235,23 @@ private:
         for (int k = 0; k < count; ++k) {
             auto* slot = ui::As<ui::Slot>(page->Child(SlotIds()[k]));
             if (slot == nullptr) continue;
+            // Its tip while it holds nothing (the original's managers set them): the strengthening's equipment, stone or
+            // elixir and lucky powder; the manufacturing's tablet and elements; the disjoint's by-products; the dismantle's
+            // equipment.
+            const char* tip = nullptr;
+            switch (g_tab) {
+            case kStrengthen:
+                tip = k == 0 ? "UIIT_STT_ALCHEMYBOX_TIP_STRENGTHENING_EQUIPMENT_SLOT"
+                      : k == 1 ? "UIIT_STT_ALCHEMYBOX_TIP_STRENGTHENING_ITEM_SLOT"
+                      : k == 2 ? "UIIT_STT_ALCHEMYBOX_TIP_STRENGTHENING_ITEM_SLOT2"
+                               : nullptr;
+                break;
+            case kManufacture: tip = k == 0 ? "UIIT_STT_ALCHEMYBOX_TIP_MANUFACTURING_MAIN_SLOT" : "UIIT_STT_ALCHEMYBOX_TIP_MANUFACTURING_ELEMENT_SLOT"; break;
+            case kDisjoint: tip = k >= 1 ? "UIIT_STT_ALCHEMYBOX_TIP_DISJOINTING_BYPRODUCT_SLOT" : nullptr; break;
+            case kDismantle: tip = k == 1 ? "UIIT_STT_ALCHEMYBOX_TIP_DISMANTLING_EQUIPMENT_SLOT" : nullptr; break;
+            default: break;
+            }
+            slot->tooltip = tip != nullptr ? c_.Text(tip) : std::string();
             const game::ItemInstance* item = ItemAt(k);
             const assets::ItemRow* row = RowAt(k);
             if (item != nullptr && row != nullptr) {

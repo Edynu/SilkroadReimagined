@@ -1297,6 +1297,16 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 if (page_ == "quest-reward:confirm") OpenQuestRewardConfirm(hudContext_, q->id, 1, {0});
             }
         }
+        // --page alchemy[:TAB]: the alchemy window on a tab (0 Disjoint, 1 Dismantle, 2 Manufacture, 3 Strengthen; --mouse on a
+        // slot or the button: its tip).
+        if (page_.starts_with("alchemy") && !alchemyShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+            hud_.Created()) {
+            alchemyShown_ = true;
+            if (tables_->Usable()) hudContext_.items = &tables_->items;
+            hudContext_.magicOptions = host_.data().MagicOptions();
+            ToggleAlchemyWindow(hudContext_);
+            if (page_.size() > 8) AlchemyShowTab(hudContext_, std::atoi(page_.c_str() + 8));
+        }
         // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
         // (one goal met: "Completed" in its colour).
         if (page_ == "quest-list" && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
