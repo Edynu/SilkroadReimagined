@@ -1021,6 +1021,9 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                       {0x1834, "UIIT_MSG_STRGERR_STORAGE_OPERATION_BLOCKED"},
                       {0x1829, "UIIT_MSG_STRGERR_SPECIFY_POSITIVE_NUMBER_ONLY"},
                       {0x180F, "UIIT_MSG_STRGERR_NOT_ENOUGH_GOLD"},
+                      // A potion's or a pill's (0xB04C's): its user dead, its kind's reuse not over.
+                      {0x1889, "UIIT_SKILL_USE_FAIL_CHAR_DEAD"},
+                      {0x185B, "UIIT_MSG_STRGERR_WAIT_FOR_REUSE_DELAY"},
                       // A quest's trap: a monster within 5 times its radius (0x3038), another trap or object in it (0x3037).
                       {0x3038, "UIIT_MSG_QUEST_ERR_CANNOT_MAKE_TRAP_EXIST_MONSTER"},
                       {0x3037, "UIIT_MSG_QUEST_ERR_CANNOT_MAKE_TRAP"}};
@@ -1870,9 +1873,11 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
                     distance = std::hypot(a.x - b.x, a.z - b.z);
                 }
                 if (hit->attacker == view_.Self() || distance < 200.0) {
+                    // A hit red over a player, white over the others; a state's tick (poison, burn, ...) yellow over a
+                    // player, orange over the others (the original's).
                     const bool player = IsPlayer(*target);
-                    damageTexts_.push_back({target->position, hit->damage, (hit->flags & proto::kDamageCritical) != 0,
-                                            player ? ui::Argb(0xFFFF3A3A) : ui::Argb(0xFFFFFFFF), context.time});
+                    const ui::Color colour = tick ? (player ? ui::Argb(0xFFFFD33A) : ui::Argb(0xFFFF713A)) : player ? ui::Argb(0xFFFF3A3A) : ui::Argb(0xFFFFFFFF);
+                    damageTexts_.push_back({target->position, hit->damage, (hit->flags & proto::kDamageCritical) != 0, colour, context.time});
                 }
             }
         }

@@ -226,11 +226,27 @@ void GameAudio::Blocked(std::string_view weapon, bool critical, glm::vec3 at) {
     sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
 }
 
-void GameAudio::Hit(std::uint32_t attacker, bool critical, glm::vec3 at) {
+void GameAudio::Hit(std::uint32_t attacker, bool critical, glm::vec3 at, bool player, bool berserk) {
     if (!Ready()) return;
     const auto it = lastSkill_.find(attacker);
     if (it == lastSkill_.end()) return; // its swing was not seen
     const audio::EffectSoundTable& t = tables_->effects;
+    if (critical) {
+        // SND_CRIDMG: the skill's own rows (the Flame Master's), else a player's rows tied to no skill, the HWAN one in
+        // berserk and the other out of it.
+        const audio::EffectSoundRow* row = t.Pick({{}, "SND_CRIDMG", it->second}, random_);
+        if (row == nullptr && player) {
+            std::vector<const audio::EffectSoundRow*> fit;
+            for (const audio::EffectSoundRow* r : t.Find({"PLAYER", "SND_CRIDMG", {}})) {
+                if ((r->events[0] == "HWAN") == berserk) fit.push_back(r);
+            }
+            if (!fit.empty()) row = fit[std::uniform_int_distribution<std::size_t>(0, fit.size() - 1)(random_)];
+        }
+        if (row != nullptr) {
+            sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
+            return;
+        }
+    }
     audio::EffectSoundTable::Key key{{}, "SND_DMG", it->second};
     key.events[2] = "CRITYCAL";
     const audio::EffectSoundRow* row = critical ? t.Pick(key, random_) : nullptr;

@@ -28,10 +28,10 @@ bool PlayScreen::HandleArena(ScreenContext& context, const proto::EventEvent& ev
         // FF 82: the actor's 5-second gauge ((5); the original's own character, the actor being the one
         // told; ours tells those around and draws it over the actor), the bar a job suit's change shows.
         if (out.actionBar != 0) jobChanges_[out.actionBar] = {context.time, game::ArenaView::kActionSeconds};
-        // FF 40: a floating number over the player (through the hits' number); its colour ours.
+        // FF 40: a floating number over the player (through the hits' number), blue (the original's).
         if (out.points != 0) {
             if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
-                damageTexts_.push_back({self->position, out.points, false, ui::Argb(0xFFFFFFFF), context.time});
+                damageTexts_.push_back({self->position, out.points, false, ui::Argb(0xFF3A3AFF), context.time});
             }
         }
         core::LogInfo("game: arena: {} {:#x} (mode {}, kind {}, kinds {:#x}, value {}, {}{}{})", n->personal != 0 ? "code" : "state", int(n->code), int(n->mode),

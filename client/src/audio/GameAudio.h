@@ -82,8 +82,9 @@ public:
     // A skill stage's sound (skilleffect.txt's SndBegin / SndEnd: a prim\snd\ path) at a place (K8).
     void PlayEffect(std::string_view path, glm::vec3 at);
     // One of its hits landed there (SND_DMG of the attacker's last skill; a critical one prefers the
-    // CRITYCAL rows).
-    void Hit(std::uint32_t attacker, bool critical, glm::vec3 at);
+    // CRITYCAL rows). A critical sounds SND_CRIDMG first, as the original's: the skill's own rows, else a player's
+    // (`player`) PLAYER rows tied to no skill (batCriHit; in berserk, `berserk`, the HWAN row's batHwanCriHit).
+    void Hit(std::uint32_t attacker, bool critical, glm::vec3 at, bool player = false, bool berserk = false);
     // A blocked hit (effectsound's PLAYER SND_BLOCKING): by the attacker's weapon
     // ("BOW", "CROSSBOW"; empty: any other) and whether it was critical.
     void Blocked(std::string_view weapon, bool critical, glm::vec3 at);

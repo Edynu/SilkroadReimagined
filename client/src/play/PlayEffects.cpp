@@ -740,7 +740,12 @@ void PlayScreen::FlyEffects(ScreenContext& context) {
             continue;
         }
         const game::WorldView::Entity* e = view_.Find(it->target);
-        if (e != nullptr && context.audio != nullptr) context.audio->Hit(it->attacker, it->critical, world_->OriginRelative(e->position) + glm::vec3(0.0f, 10.0f, 0.0f));
+        if (e != nullptr && context.audio != nullptr) {
+            const game::WorldView::Entity* a = view_.Find(it->attacker);
+            const bool player = a != nullptr && IsPlayer(*a);
+            context.audio->Hit(it->attacker, it->critical, world_->OriginRelative(e->position) + glm::vec3(0.0f, 10.0f, 0.0f), player,
+                               berserkers_.contains(it->attacker));
+        }
         it = hitSounds_.erase(it);
     }
     // The swings' second sounds, where the attacker is then.
