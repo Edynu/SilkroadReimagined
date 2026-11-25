@@ -128,6 +128,12 @@ void UiData::Load(core::JobSystem& jobs, const assets::FileSystem& files, std::v
             }
             // The world map's maps, floors and labels.
             if (std::string why; !assets::LoadWorldMapData(*files, state->worldMap, why)) core::LogWarning("ui: world map: {}", why);
+            // The game guide: its topics and events, its pages' texts (texthelp.txt: SRO_GGW_*).
+            if (std::string why; !assets::LoadGameGuide(*files, state->gameGuide, why)) core::LogWarning("ui: game guide: {}", why);
+            if (const auto file = files->Read("server_dep\\silkroad\\textdata\\texthelp.txt")) {
+                assets::TextCatalog help;
+                if (assets::DecodeTextCatalog(core::DecodeTextFile(file->Bytes()), help, error)) state->text.merge(help);
+            }
             // regioninfo.txt's dungeon fields: a dungeon region's minimap folder (its lines name the
             // regions as "x 128 ALL": the region id 0x8000 | x).
             if (const auto file = files->Read("server_dep\\silkroad\\textdata\\regioninfo.txt")) {

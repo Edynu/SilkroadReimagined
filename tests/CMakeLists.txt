@@ -55,7 +55,7 @@ add_executable(sr_tests
 target_link_libraries(sr_tests PRIVATE sr::assets sr::net sr::ui sr::game httplib::httplib asio doctest::doctest sr_compile_options)
 sr_copy_openssl_runtime(sr_tests)
 # The client's HUD manager and windows, tested headless (they need only sr::ui and sr::game).
-set(SR_HUD_SOURCES Hud HudChat HudGuild HudGuildBoxes HudCommunity HudAcademy HudOpenMarket HudInventory HudMinimap HudNotices HudPerformance HudNpc HudPlayer HudTarget HudOptions HudSkills HudSkillTooltip HudUnderBar HudWindows HudParty HudAutoPotion HudGuildMaster HudGuildWar HudFortress HudActions HudFortressMap HudFortressWork HudMapView HudWorldMap HudExchange HudStall HudFreePvp HudQuest HudInstance HudFlagWorld HudArena HudCos HudAlchemy HudItemOptions HudJobs HudTrade HudMagicPop HudMall HudServices HudTemple)
+set(SR_HUD_SOURCES Hud HudChat HudGuild HudGuildBoxes HudCommunity HudAcademy HudOpenMarket HudInventory HudMinimap HudNotices HudPerformance HudNpc HudPlayer HudTarget HudOptions HudSkills HudSkillTooltip HudUnderBar HudWindows HudParty HudAutoPotion HudGuildMaster HudGuildWar HudFortress HudActions HudFortressMap HudFortressWork HudMapView HudWorldMap HudExchange HudStall HudFreePvp HudQuest HudGameGuide HudInstance HudFlagWorld HudArena HudCos HudAlchemy HudItemOptions HudJobs HudTrade HudMagicPop HudMall HudServices HudTemple)
 list(TRANSFORM SR_HUD_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/client/src/gui/)
 list(TRANSFORM SR_HUD_SOURCES APPEND .cpp)
 target_sources(sr_tests PRIVATE ${SR_HUD_SOURCES} ${PROJECT_SOURCE_DIR}/client/src/gui/UiWarmupList.cpp)

@@ -44,6 +44,7 @@ add_executable(SroReimagined
     src/gui/HudExchange.cpp
     src/gui/HudStall.cpp
     src/gui/HudQuest.cpp
+    src/gui/HudGameGuide.cpp
     src/gui/HudFreePvp.cpp
     src/gui/HudAlchemy.cpp
     src/gui/HudItemOptions.cpp

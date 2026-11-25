@@ -560,6 +560,7 @@ void RichText::Draw(Frame& frame) {
     SetText({});
     Static::Draw(frame);
     SetText(saved);
+    contentHeight = 0.0f;
     // The original takes only "<sml2>...</sml2>"; anything else keeps the old content (none here).
     std::string_view markup = saved;
     if (markup.size() < 14 || !markup.starts_with("<sml2>") || markup.find("</sml2>") == std::string_view::npos) return;
@@ -570,13 +571,16 @@ void RichText::Draw(Frame& frame) {
         std::string text;
         Color color;
         bool newline = false;
+        bool bold = false;  // <strong>
+        std::string image;  // <img src="...">: a picture on a line of its own
     };
     std::vector<Word> words;
     std::vector<Color> colors{textColor};
     int align = node().hAlign;
+    int strong = 0;
     std::string current;
     const auto flush = [&] {
-        if (!current.empty()) words.push_back({std::exchange(current, {}), colors.back()});
+        if (!current.empty()) words.push_back({std::exchange(current, {}), colors.back(), false, strong > 0, {}});
     };
     for (std::size_t i = 0; i < markup.size();) {
         if (markup[i] == '<') {
@@ -592,6 +596,19 @@ void RichText::Draw(Frame& frame) {
                 align = 2;
             } else if (tag == "left") {
                 align = 0;
+            } else if (tag == "strong") {
+                ++strong;
+            } else if (tag == "/strong") {
+                strong = std::max(0, strong - 1);
+            } else if (tag.starts_with("img")) {
+                if (const std::size_t q = tag.find("src=\""); q != std::string_view::npos) {
+                    const std::size_t close = tag.find('"', q + 5);
+                    Word image;
+                    image.image = std::string(tag.substr(q + 5, close == std::string_view::npos ? std::string_view::npos : close - q - 5));
+                    words.push_back({{}, colors.back(), true});
+                    words.push_back(std::move(image));
+                    words.push_back({{}, colors.back(), true});
+                }
             } else if (tag.starts_with("font")) {
                 Color c = colors.back();
                 if (const std::size_t q = tag.find("color=\""); q != std::string_view::npos) {
@@ -604,6 +621,10 @@ void RichText::Draw(Frame& frame) {
                 colors.pop_back();
             }
             i = end + 1;
+        } else if (markup[i] == '\\' && i + 1 < markup.size() && markup[i + 1] == 'n') {
+            // A text table's written "\n" between the tags: no break of its own (the tags break the lines).
+            flush();
+            i += 2;
         } else {
             current += markup[i];
             if (markup[i] == ' ') flush();
@@ -612,6 +633,12 @@ void RichText::Draw(Frame& frame) {
     }
     flush();
     const float lineHeight = TextLineHeight(font);
+    // A picture's size on the page: its own, no wider than the page.
+    const auto pictureSize = [&](const Word& w) {
+        Vec2 size = frame.paint.TextureSize(w.image);
+        if (size.x > client.w && size.x > 0.0f) size = {client.w, size.y * client.w / size.x};
+        return size;
+    };
     std::vector<std::vector<const Word*>> lines(1);
     float x = 0.0f;
     for (const Word& w : words) {
@@ -620,7 +647,7 @@ void RichText::Draw(Frame& frame) {
             x = 0.0f;
             continue;
         }
-        const float width = frame.paint.TextWidth(w.text, font);
+        const float width = w.image.empty() ? frame.paint.TextWidth(w.text, font) : pictureSize(w).x;
         if (x > 0.0f && x + width > client.w) {
             lines.emplace_back();
             x = 0.0f;
@@ -630,17 +657,34 @@ void RichText::Draw(Frame& frame) {
     }
     float y = client.y;
     for (const auto& line : lines) {
-        float width = 0.0f;
-        for (const Word* w : line) width += frame.paint.TextWidth(w->text, font);
+        float width = 0.0f, height = lineHeight;
+        for (const Word* w : line) {
+            if (!w->image.empty()) {
+                const Vec2 size = pictureSize(*w);
+                width += size.x;
+                height = std::max(height, size.y);
+            } else {
+                width += frame.paint.TextWidth(w->text, font);
+            }
+        }
         float at = align == 1 ? client.x + (client.w - width) * 0.5f : align == 2 ? client.Right() - width : client.x;
         at = std::trunc(at);
         for (const Word* w : line) {
+            if (!w->image.empty()) {
+                const Vec2 size = pictureSize(*w);
+                if (size.x > 0.0f) frame.paint.Image(w->image, {at, y, size.x, size.y}, {0, 0}, {1, 1}, WithAlpha(kWhite, opacity));
+                at += size.x;
+                continue;
+            }
             const float ww = frame.paint.TextWidth(w->text, font);
             frame.paint.Text(w->text, {at, y, ww + 2.0f, lineHeight}, WithAlpha(w->color, opacity), font, 0, 0);
+            // Strong: struck again a pixel to the right (ours: the original's bold kind of text).
+            if (w->bold) frame.paint.Text(w->text, {at + 1.0f, y, ww + 2.0f, lineHeight}, WithAlpha(w->color, opacity), font, 0, 0);
             at += ww;
         }
-        y += lineHeight;
+        y += height;
     }
+    contentHeight = y - client.y;
 }
 
 // --- Combo box -----------------------------------------------------------------------------------

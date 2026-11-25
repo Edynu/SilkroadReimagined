@@ -104,6 +104,7 @@ void RegisterHudWindows(ui::Interface& ui, HudContext& context) {
     RegisterFreePvpWindow(ui, context); // HudFreePvp.cpp
     RegisterAlchemyWindow(ui, context); // HudAlchemy.cpp
     RegisterQuestWindows(ui, context);  // HudQuest.cpp
+    RegisterGameGuideWindows(ui, context); // HudGameGuide.cpp
     RegisterInstanceWindows(ui, context); // HudInstance.cpp
     RegisterCosWindows(ui, context);      // HudCos.cpp
     RegisterFlagWorldWindows(ui, context); // HudFlagWorld.cpp

@@ -526,6 +526,8 @@ class RichText : public Static {
 public:
     using Static::Static;
     void Draw(Frame& frame) override;
+    // The height its content took when last drawn (a page's scroll).
+    float contentHeight = 0.0f;
 };
 
 // CIFComboBox: a black field with the chosen text and a down arrow that opens the list below it.

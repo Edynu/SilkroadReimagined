@@ -27,6 +27,7 @@
 #include "sr/game/SkillText.h"
 #include "sr/assets/ItemGlow.h"
 #include "sr/assets/Dress.h"
+#include "sr/assets/GameGuide.h"
 #include "sr/assets/ExeCursors.h"
 #include <algorithm>
 #include "sr/assets/Animation.h"
@@ -2919,4 +2920,32 @@ TEST_CASE("a European passive's lifts read as the 1.188 tooltip words them ('set
     const std::string back = lines("SKILL_EU_WARRIOR_TWOHANDP_RETURN_A_01");
     CHECK(back.find(lookup("UIIT_STT_DAMAGE") + " " + lookup("PARAM_RETURN") + " " + lookup("UIIT_STT_PROBABILITY") + " 20%") != std::string::npos);
     CHECK(back.find(lookup("UIIT_STT_PHY_DAMAGE") + " " + lookup("PARAM_RETURN") + " " + lookup("UIIT_STT_EU_RATIO") + " 20%") != std::string::npos);
+}
+
+TEST_CASE("the game guide's topics and events decode (gameguidedata.txt, eventguidedata.txt)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    GameGuideData guide;
+    REQUIRE_MESSAGE(LoadGameGuide(fs, guide, error), error);
+    MESSAGE(guide.topics.size() << " topics, " << guide.events.size() << " events");
+    CHECK(guide.topics.size() == 1023);
+    CHECK(guide.events.size() == 56);
+    // Every page a text key (the game guide's, the quests'), every event a page of the guide.
+    std::size_t headings = 0;
+    for (const GameGuideRow& t : guide.topics) {
+        CHECK((t.level == 0 || t.level == 1));
+        CHECK((t.pageKey.starts_with("SRO_GGW_") || t.pageKey.starts_with("SN_PAYCON_"))); // the quest guide (from 100000): the quests' pages
+        if (t.level == 0) ++headings;
+    }
+    CHECK(headings == 44);
+    for (const EventGuideRow& e : guide.events) {
+        CHECK(std::any_of(guide.topics.begin(), guide.topics.end(), [&](const GameGuideRow& t) { return t.id == e.guide; }));
+        CHECK((e.kind >= 1 && e.kind <= 9));
+    }
 }

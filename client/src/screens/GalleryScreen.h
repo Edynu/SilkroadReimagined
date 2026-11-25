@@ -65,6 +65,7 @@ private:
     HudContext hudContext_;
     game::QuestView sampleQuests_; // --page quest-reward: a beta quest's definition
     bool rewardShown_ = false;
+    bool guideShown_ = false; // --page game-guide
     game::CommunityView sampleCommunity_; // the Community pages' sample friends, blocks and letters
     game::GuildView sampleGuild_; // the guild window's sample guild and union
     game::FortressView sampleFortress_; // the fortress official's window on sample data

@@ -25,6 +25,7 @@ add_library(sr_assets STATIC
     src/Cooldown.cpp
     src/Environment.cpp
     src/WorldMap.cpp
+    src/GameGuide.cpp
     src/RegionInfo.cpp
     src/StallNetworkData.cpp
 )

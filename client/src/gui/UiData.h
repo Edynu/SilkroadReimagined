@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "sr/assets/GameGuide.h"
 #include "sr/assets/WorldMap.h"
 #include "sr/assets/FileSystem.h"
 #include "sr/assets/GameData.h"
@@ -55,6 +56,8 @@ public:
     const std::vector<assets::ActionRow>* Actions() const { return Ready() ? &state_->actions : nullptr; }
     // The world map's maps, floors and labels (worldmap_mapinfo.txt, worldmap_localinfo.txt); null until ready.
     const assets::WorldMapData* WorldMap() const { return Ready() ? &state_->worldMap : nullptr; }
+    // The game guide's topics and events (gameguidedata.txt, eventguidedata.txt); null until ready.
+    const assets::GameGuideData* GameGuide() const { return Ready() ? &state_->gameGuide : nullptr; }
     // A dungeon region's minimap folder (regioninfo.txt: the third field of its #FIELD line, "donwhang",
     // "jinsi"; minimap_d\<folder>\); empty when none.
     std::string DungeonFolder(std::uint16_t region) const {
@@ -86,6 +89,7 @@ private:
         std::vector<assets::MagicOptGroupRow> magicOptGroups;
         std::vector<assets::ActionRow> actions; // the Action window's icons
         assets::WorldMapData worldMap;
+        assets::GameGuideData gameGuide;
         std::unordered_map<std::uint16_t, std::string> dungeonFolders; // regioninfo.txt's dungeon fields
         std::unordered_map<std::string, std::string> npcGreetings, npcTalks;
         ui::Font font;

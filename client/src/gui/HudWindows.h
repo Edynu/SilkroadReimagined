@@ -18,6 +18,7 @@
 
 #include "sr/assets/CollectionBook.h"
 #include "sr/assets/Gacha.h"
+#include "sr/assets/GameGuide.h"
 #include "sr/assets/GameData.h"
 #include "sr/core/Options.h"
 #include "sr/assets/Shop.h"
@@ -227,6 +228,8 @@ struct HudContext {
     std::function<void(std::uint32_t action)> useAction;
     std::function<void(game::proto::MessageId id, std::vector<std::byte> payload)> fortressRequest;
     std::function<const std::vector<assets::Ui2dtRecord>*(const std::string& path)> layout2dt;
+    // The game guide's topics and events (null until the interface's data is in).
+    std::function<const assets::GameGuideData*()> gameGuide;
     const game::WorldView* world = nullptr; // the minimap's dots (null: none)
     Hud* hud = nullptr;
     double time = 0; // the clock the state's times are on (seconds)
@@ -1465,6 +1468,8 @@ std::uint32_t WornSocketSkill(HudContext& context, int index, bool dragged);
 // The quest windows (HudQuest.cpp): the quest list (Q), the reward window (a quest's page,
 // its reward and its button; `npc` the finisher talked to, 0 to look), the quick window.
 void RegisterQuestWindows(ui::Interface& ui, HudContext& context);
+// The game guide (HudGameGuide.cpp).
+void RegisterGameGuideWindows(ui::Interface& ui, HudContext& context);
 void ToggleQuestWindow(HudContext& context);
 // The level-up's quest guide: the rows kept, the side icon up (none: put away).
 void ShowQuestGuide(HudContext& context, std::vector<game::proto::QuestGuide::Row> rows);

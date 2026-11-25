@@ -512,6 +512,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.communityRequest = [](game::proto::MessageId, std::vector<std::byte>) {};
     hudContext_.fortress = &sampleFortress_;
     hudContext_.layout2dt = [this](const std::string& path) { return host_.data().Layout2dt(path); };
+    hudContext_.gameGuide = [this] { return host_.data().GameGuide(); };
     hudContext_.world = &sampleWorld_;
     hudContext_.hud = &hud_;
     hudContext_.time = context.time;
@@ -1190,6 +1191,11 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             ShowQuestGuide(hudContext_, {{1, "SN_QNO_CH_SMITH_1", "SN_NN_QNO_CH_SMITH_1", "SN_NC_QNO_CH_SMITH_1"},
                                          {2, "SN_QNO_CH_POTION_1", "SN_NN_QNO_CH_POTION_1", "SN_NC_QNO_CH_POTION_1"}});
             if (page_ == "quest-guide:window") hud_.Show(45);
+        }
+        // --page game-guide: the Help key's guide (its start page and its menu; --click picks a heading and a topic).
+        if (page_ == "game-guide" && !guideShown_ && interface_ != nullptr && host_.data().Ready()) {
+            guideShown_ = true;
+            hud_.Show(hud::kGameGuide);
         }
         // --page quest-reward[:confirm]: the reward window at its finisher on a beta quest's definition (one weapon to
         // choose), and with its first item picked and "Reward" pressed, the confirm (res_ui\corfim.2dt).

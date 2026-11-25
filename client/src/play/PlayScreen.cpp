@@ -3036,6 +3036,7 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
         if (context.audio != nullptr && world_ && self != nullptr) context.audio->PlayEffect(path, world_->OriginRelative(self->position));
     };
     hudContext_.layout2dt = [this](const std::string& path) { return gui_.data().Layout2dt(path); };
+    hudContext_.gameGuide = [this] { return gui_.data().GameGuide(); };
     hudContext_.world = &view_;
     hudContext_.hud = &hud_;
     hudContext_.time = context.time;
