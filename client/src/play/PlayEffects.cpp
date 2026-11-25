@@ -693,7 +693,12 @@ void PlayScreen::ItemUseEffect(std::uint32_t entity, std::uint32_t item) {
     const auto* stages = name.empty() ? nullptr : tables_->skillAnimations.Stages(name);
     const std::size_t slot = SlotOf(entity);
     if (stages == nullptr || slot == StageEffects::kNone) return;
-    for (const assets::SkillEffectStage& s : *stages) stageEffects_.Play(*world_, slot, s.object, s.start, gfx::EffectSystem::Kind::World);
+    for (const assets::SkillEffectStage& s : *stages) {
+        if (!s.object.empty()) stageEffects_.Play(*world_, slot, s.object, s.start, gfx::EffectSystem::Kind::World);
+        // Its sound (SndBegin), after the stage's delay (the move column's): a firework's launch at once, its bursts
+        // 1.3 s and 2 s on (skilleffect.txt's rows of a sound and no object; inferred from them).
+        stageEffects_.Sound(s.soundBegin, now_ + s.moveDelayMs / 1000.0, slot);
+    }
     core::LogInfo("game: {} uses {} ({})", entity, row->codename, name);
 }
 

@@ -174,6 +174,9 @@ public:
     }
     // One effect on a slot's anchor (a hit, a blood, a level up).
     Handle Play(WorldScreen& world, std::size_t slot, const std::string& path, const Stage::Anchor& at, gfx::EffectSystem::Kind kind);
+    // A stage's sound on a slot at `at` (the clock's seconds): an item use's (a firework's launch, then its bursts by
+    // their stages' delays).
+    void Sound(const std::string& path, double at, std::size_t slot) { Cue(path, at, slot); }
     // The effects of the weapons and shields among `worn` (itemdata ids, their pluses beside them in `plus`) on a
     // slot, kept: the rare ones' glows and, from +8, the enchantment's sparks (assets::ItemGlowTable).
     static std::vector<Handle> ItemGlows(WorldScreen& world, std::size_t slot, const assets::FileSystem& files,
