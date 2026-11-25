@@ -137,10 +137,9 @@ bool PreparePlayerStart(core::Config& config) {
     };
     fallback("log", "SroReimagined.log");
     fallback("cursor-dir", "cursors");
-    // The logo, then the title screen: the developers' screens (the viewer, the benchmarks, the gallery) are not a
-    // player's, whatever the command line says.
-    config.Set("screen", "logo");
-    config.Set("after-logo", "title");
+    // Straight to the title screen, as 1.188 starts (its logo is on the title): the developers' screens (the viewer, the
+    // benchmarks, the gallery) are not a player's, whatever the command line says.
+    config.Set("screen", "title");
     // The shard's gateway and certificate are built in (PlayerServer.h): nothing to set here.
 
     // The game folder: the one remembered when it is still whole, else the player picks one. Holding Shift while the

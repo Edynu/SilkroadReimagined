@@ -246,6 +246,10 @@ void TitleScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     SR_ZONE("title: update");
     shared_->session->Update();
     HandleEvents();
+    if (quitAsked_) {
+        context.quit = true;
+        return;
+    }
     if (!next.empty()) {
         context.holdCapture = true; // leaving: the next screen draws the frame worth capturing
         return;
@@ -435,7 +439,8 @@ void TitleScreen::DrawLoginWindow(const assets::UiLayout& layout, float cx, floa
     if (const auto* label = layout.Find("GDR_STA_SERVER")) kit_->NodeText(*label, shared_->serverName, UiKit::Local(*label, window));
     if (const auto* ok = layout.Find("GDR_BTN_OK")) submit |= kit_->Button("##ok", *ok, Rect(cx - 100.0f, cy + 156.0f, ok->rect.w, ok->rect.h), !busy_);
     if (const auto* cancel = layout.Find("GDR_BTN_CANCEL")) {
-        if (kit_->Button("##cancel", *cancel, Rect(cx + 9.0f, cy + 156.0f, cancel->rect.w, cancel->rect.h))) next = "logo";
+        // Cancel ends the game (the original's CPSQuit).
+        if (kit_->Button("##cancel", *cancel, Rect(cx + 9.0f, cy + 156.0f, cancel->rect.w, cancel->rect.h))) quitAsked_ = true;
     }
     if (submit && !busy_) Submit();
 }

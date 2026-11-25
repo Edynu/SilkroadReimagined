@@ -72,6 +72,7 @@ private:
     bool serverListOpen_ = false;
     bool focusAccount_ = true;
     bool busy_ = false;
+    bool quitAsked_ = false; // the login box's Cancel: the game ends
     bool autoLogin_ = false;
     std::string message_;
     // The shard turned this client away as out of date (its words, ClientGate.h on the servers): a box over the title

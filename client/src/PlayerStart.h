@@ -2,8 +2,8 @@
 
 // The players' build (SR_PLAYER_BUILD): how the client starts when a player opens it rather than a developer's command
 // line. The exe's own folder is the working folder (its settings, the options file, the log and the cursors live beside
-// it); the shard it plays on, its gateway and its servers' certificate, is built in (PlayerServer.h); the title screen
-// follows the logo; the original game's folder is asked for on the first start (a folder picker), checked and
+// it); the shard it plays on, its gateway and its servers' certificate, is built in (PlayerServer.h); it starts on
+// the title screen, as 1.188 does; the original game's folder is asked for on the first start (a folder picker), checked and
 // remembered in SroReimagined.cfg, and again whenever it no longer holds the game's archives or the player holds Shift
 // while the game starts (or passes --choose-game). There is no console: what goes wrong is shown in a message box and
 // written to SroReimagined.log.
