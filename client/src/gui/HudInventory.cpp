@@ -563,6 +563,8 @@ std::vector<ui::TooltipLine> ItemTooltipBody(const assets::ItemRow& row, const g
             constexpr const char* kSorts[] = {nullptr, "UIIT_STT_SILKMALL_HAT", "UIIT_CTL_DRESS", "UIIT_CTL_WK_AVATAR_ATTACH", "UIIT_CTL_WK_ETC"};
             const int sort = row.typeId[3];
             if (sort >= 1 && sort <= 4) line(c.Text("UIIT_STT_ITEM_TYPE") + ": " + c.Text(kSorts[sort]), kKindBeige);
+            // A dress: whether an attachment goes on it ("Attachment: Able to equip" / "Unable to equip"; its ChildItemCount).
+            if (sort == 2) line(c.Text("UIIT_STT_SILKMALL_ATTACH") + ": " + c.Text(row.childItems != 0 ? "UIIT_STT_AVATAR_WEAR" : "UIIT_STT_AVATAR_NOT_WEAR"), kKindBeige);
         }
         line(c.Text("UIIT_STT_AVATAR_MAGICOPTION_MAXCOUNT") + ": " + std::to_string(row.maxMagicOptions) + c.Text("UIIT_STT_UNIT"), kKindBeige);
         if (auto needs = Requirements(row, c); !needs.empty()) {
