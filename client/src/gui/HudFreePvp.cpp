@@ -80,8 +80,13 @@ public:
     bool OnNotice(const ui::Notice& n) override {
         if (n.kind != ui::Notice::Kind::Clicked || n.source == nullptr) return false;
         const int id = n.source->id();
-        if (id == kFold) { // the body folded away or back
-            if (ui::Widget* body = Child(kBody)) body->visible = !body->visible;
+        if (id == kFold) { // the body folded away or back; the button's own look by it (the original's frpvp_button2 folded)
+            if (ui::Widget* body = Child(kBody)) {
+                body->visible = !body->visible;
+                if (auto* button = ui::As<ui::Static>(n.source)) {
+                    button->texture = body->visible ? "interface\\frpvp\\frpvp_button.ddj" : "interface\\frpvp\\frpvp_button2.ddj";
+                }
+            }
             return true;
         }
         if (id == kCancel) {
