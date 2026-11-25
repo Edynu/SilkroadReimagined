@@ -216,6 +216,10 @@ void PlayScreen::Enter(ScreenContext& context) {
     if (const std::string movement = context.config.GetString("movement", ""); !movement.empty() && context.options != nullptr) {
         context.options->beta.movement = movement == "pathfinding" ? core::BetaOptions::Movement::Pathfinding : core::BetaOptions::Movement::Classic;
     }
+    // --names original|far: the Beta page's names over heads for this run (tries).
+    if (const std::string names = context.config.GetString("names", ""); !names.empty() && context.options != nullptr) {
+        context.options->beta.namesFar = names == "far";
+    }
     if (const int gate = context.config.GetInt("use-gate", 0); gate > 0) {
         pendingGate_ = std::uint32_t(gate);
         gateTries_ = 20;
@@ -1367,6 +1371,65 @@ const assets::TeleportGate* PlayScreen::GateUnder(float x, float y, float width,
     return best;
 }
 
+// The Game page's name rows, as the original reads them: monsters' and COS' (the monster row), NPCs', the player's own,
+// other players' (or, with the guild row on, those of the player's own guild). Gates keep theirs.
+bool PlayScreen::NameShown(std::uint32_t id, const game::WorldView::Entity& e, ScreenContext& context) const {
+    if (context.options == nullptr) return true;
+    const core::GameOptions& rows = context.options->game;
+    switch (e.kind) {
+    case proto::EntityKind::Monster:
+    case proto::EntityKind::Cos: return rows.Get("monsterNames");
+    case proto::EntityKind::Character: {
+        if (GapGate(e) != nullptr) return true;
+        if (IsNpc(e)) return rows.Get("npcNames");
+        if (id == view_.Self()) return rows.Get("ownName");
+        if (rows.Get("playerNames")) return true;
+        if (!rows.Get("guildNames") || !guild_.InGuild()) return false;
+        const proto::EntityGuild* tag = guild_.EntityTag(id);
+        return tag != nullptr && tag->guild == guild_.Guild().id;
+    }
+    default: return true;
+    }
+}
+
+// The status gauges over heads, as the original chooses them by the Game page's rows: the player's own HP and MP (its own
+// row), its own COS's HP (the COS row), a party member's HP and MP (the party row), the selected monster's HP (the
+// monster row).
+int PlayScreen::StatusGauge(std::uint32_t id, const game::WorldView::Entity& e, ScreenContext& context, float& hp, float& mp) const {
+    if (context.options == nullptr) return 0;
+    const core::GameOptions& rows = context.options->game;
+    const auto share = [](std::uint32_t now, std::uint32_t most) { return most == 0 ? 0.0f : float(std::min(now, most)) / float(most); };
+    if (id == view_.Self()) {
+        if (!rows.Get("ownStatus")) return 0;
+        hp = share(player_.self.hp, player_.self.maxHp);
+        mp = share(player_.self.mp, player_.self.maxMp);
+        return 2;
+    }
+    switch (e.kind) {
+    case proto::EntityKind::Cos:
+        if (!rows.Get("cosStatus")) return 0;
+        for (const OwnCos& c : ownCoses_) {
+            if (c.entity != id) continue;
+            hp = share(c.hp, c.maxHp);
+            return 1;
+        }
+        return 0;
+    case proto::EntityKind::Character: {
+        if (!rows.Get("partyStatus") || IsNpc(e) || !player_.party.InParty()) return 0;
+        const proto::PartyMemberRecord* m = player_.party.MemberByEntity(id);
+        if (m == nullptr) return 0;
+        hp = std::min(1.0f, float(m->hpTenths) / 10.0f);
+        mp = std::min(1.0f, float(m->mpTenths) / 10.0f);
+        return 2;
+    }
+    case proto::EntityKind::Monster:
+        if (!rows.Get("monsterStatus") || player_.target.entity != id) return 0;
+        hp = share(player_.target.hp, player_.target.maxHp);
+        return 1;
+    default: return 0;
+    }
+}
+
 bool PlayScreen::IsNpc(const game::WorldView::Entity& e) const {
     // By its model alone: a custom NPC has a name too (the server's, the Beta Helper; game/BetaQuests.h).
     if (!tables_ || !tables_->Usable() || e.kind != proto::EntityKind::Character) return false;
@@ -2435,6 +2498,20 @@ void PlayScreen::HandleInput(ScreenContext& context) {
             shared_->session->SetViewLimits(std::uint16_t(want[0]), std::uint16_t(want[1]), std::uint16_t(want[2]));
         }
     }
+    // The Game page's beginner mark, told to the server when the Option window changes it and it differs from the mark
+    // the server keeps (the original's 0x7402 from the window's apply; the server takes it up to level 19 only).
+    if (context.options != nullptr && world_ && !replay_ && shared_ && shared_->session) {
+        const bool wanted = context.options->game.beginnerMark;
+        if (beginnerOption_ != int(wanted)) {
+            const bool first = beginnerOption_ < 0;
+            beginnerOption_ = int(wanted);
+            const auto own = entityMarks_.find(view_.Self());
+            const std::uint8_t marks = own != entityMarks_.end() ? own->second : 0;
+            if (!first && ((marks & proto::kMarkBeginner) != 0) != wanted) {
+                shared_->session->SendGame(proto::SetMarks::kId, proto::Encode(proto::SetMarks{std::uint8_t(marks ^ proto::kMarkBeginner)}));
+            }
+        }
+    }
     // The player's orbs in berserk: all five at its start, one going out each fifth of its time.
     {
         const double left = berserkUntil_ - context.time, part = double(game::kBerserkMs) / 1000.0 / 5.0;
@@ -3412,22 +3489,36 @@ void PlayScreen::TakeSpeech(double now) {
 void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
     if (!world_ || !tables_ || !tables_->Usable()) return;
     // Each one's name just over its head (the speech's point, 22 up), centred, with a shadow:
-    // players white, NPCs in the kind colour (ours: the original's colours and font are not traced).
+    // players white (the player's own gold-orange), NPCs light blue, monsters by the level difference.
     const float width = float(context.device.SwapchainWidth()), height = float(context.device.SwapchainHeight());
     const double alpha = clock_.Alpha();
     const float pitch = ui::TextLineHeight(0);
     const game::WorldView::Entity* self = view_.Find(view_.Self());
     const proto::FlatPosition me = self != nullptr ? proto::ToFlat(self->position) : proto::FlatPosition{};
+    const bool namesFar = context.options != nullptr && context.options->beta.namesFar;
     itemLabels_.clear();
     for (const auto& [id, e] : view_.Entities()) {
         // Only over a body on the stage (not one still waiting for a slot or its model).
         if (e.kind != proto::EntityKind::GroundItem && !slots_.contains(id)) continue;
-        // Players' names always; the others' within the name distance of the player (an item's within 300).
-        if (self != nullptr && (e.kind != proto::EntityKind::Character || e.look.name.empty())) {
+        // Who gets a name. The original's: within 300 of the player (the body's distance, height included), and the one
+        // under the mouse at any distance; then the Game page's rows by kind (NameShown). Ours (the Beta page's choice):
+        // players' names at any distance, the others' within the name distance. An item on the ground: within 300 both ways.
+        const bool hovered = id == hoveredEntity_;
+        if (self != nullptr && !hovered) {
             const proto::FlatPosition p = proto::ToFlat(e.position);
-            const float reach = e.kind == proto::EntityKind::GroundItem ? std::min(nameDistance_, 300.0f) : nameDistance_;
-            if (std::hypot(p.x - me.x, p.z - me.z) > reach) continue;
+            const double flat = std::hypot(p.x - me.x, p.z - me.z);
+            if (e.kind == proto::EntityKind::GroundItem) {
+                if (flat > double(std::min(nameDistance_, 300.0f))) continue;
+            } else if (namesFar) {
+                if ((e.kind != proto::EntityKind::Character || e.look.name.empty()) && flat > double(nameDistance_)) continue;
+            } else if (std::hypot(flat, double(e.position.y - self->position.y)) >= 300.0) {
+                continue;
+            }
         }
+        // The name by the Game page's rows; its other lines (a guild's, a pet's) and its status gauge stand anyway.
+        const bool nameShown = hovered || NameShown(id, e, context);
+        float gaugeHp = 0.0f, gaugeMp = 0.0f;
+        const int gauge = StatusGauge(id, e, context, gaugeHp, gaugeMp);
         std::string name = e.look.name;
         std::string petLine; // a COS's own name, under its owner's
         // A player in a job's suit shows "*" and its alias instead, and no guild line.
@@ -3453,7 +3544,7 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
             }
         } else if (name.empty() && IsNpc(e)) {
             if (const assets::ObjectRow* row = tables_->characters.Find(e.look.model)) name = gui_.data().Text(row->nameKey);
-            colour = ui::Argb(0xFFEFDAA4);
+            colour = ui::Argb(0xFF9ED0FF); // the original's NPC light blue
         } else if (const assets::TeleportGate* gate = name.empty() ? GapGate(e) : nullptr) {
             name = gui_.data().Text(gate->nameKey); // "Gap of Dimensions"; its lines under it
             colour = ui::Argb(0xFFEFDAA4);
@@ -3512,7 +3603,26 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
         if (e.kind == proto::EntityKind::GroundItem) itemLabels_.push_back({id, at, depth});
         // At the head's depth: hidden behind walls, as the original's.
         paint.PushDepth(depth);
-        ui::DrawLabel(paint, name, at, colour, 0, 1, 1, ui::kTextShadow);
+        if (nameShown) ui::DrawLabel(paint, name, at, colour, 0, 1, 1, ui::kTextShadow);
+        bool guildLine = false; // a guild line over the name (the status gauge goes over it)
+        // The marks beside a player's name, 16 x 16 at the name's top, as the original draws them (and, as it does, only
+        // with the Game page's own-name row on): its job's icon 4 right of the name while in a job suit (the trader's,
+        // the thief's, the hunter's), the beginner mark 20 left of it while the player wears one.
+        if (e.kind == proto::EntityKind::Character && !IsNpc(e) && GapGate(e) == nullptr &&
+            (context.options == nullptr || context.options->game.Get("ownName"))) {
+            static constexpr const char* kJobIcons[3] = {"interface\\ifcommon\\com_job_merchant.ddj", "interface\\ifcommon\\com_job_thief.ddj",
+                                                         "interface\\ifcommon\\com_job_hunter.ddj"};
+            if (job != entityJobs_.end() && job->second.state >= 1 && job->second.state <= 3) {
+                paint.Image(kJobIcons[job->second.state - 1], {at.x + at.w + 3.0f, at.y, 16.0f, 16.0f});
+            }
+            if (const auto marks = entityMarks_.find(id); marks != entityMarks_.end() && (marks->second & proto::kMarkBeginner) != 0) {
+                paint.Image("icon\\etc\\icon_rudiment.ddj", {at.x + 1.0f - 20.0f, at.y, 16.0f, 16.0f});
+            }
+        }
+        // A party monster's mark (europe_partymob, 16 x 16) 20 left of its name, as the original's monsters draw it.
+        if (e.kind == proto::EntityKind::Monster && (e.rarity >> 4) == 1) {
+            paint.Image("icon\\item\\etc\\europe_partymob.ddj", {at.x + 1.0f - 20.0f, at.y, 16.0f, 16.0f});
+        }
         // A job suit's change or a flag pole's action: a 48 x 2 bar (4.8 a second) 10 below the point 2 over the body,
         // its right end coming in a tenth at a time, yellow.
         if (const auto bar = jobChanges_.find(id); bar != jobChanges_.end()) {
@@ -3531,7 +3641,7 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
                 ui::DrawLabel(paint, line, {std::floor(x - lw / 2.0f), below, lw, pitch}, ui::Argb(0xFFFFFFFF), 0, 1, 1, ui::kTextShadow);
             }
         } else if (e.kind == proto::EntityKind::Character && !IsNpc(e) && !inJob) {
-            DrawGuildLine(paint, id, at);
+            if (context.options == nullptr || context.options->game.Get("guildNames")) guildLine = DrawGuildLine(paint, id, at); // the guild row
         } else if (!petLine.empty()) {
             // Light yellow (1.188 CICCos's setup, its name line's colour 0xFFFFFF55).
             const float pw = paint.TextWidth(petLine, 0) + 2.0f;
@@ -3541,6 +3651,18 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
         if (const auto booth = entityStalls_.find(id); booth != entityStalls_.end()) {
             const float bw = paint.TextWidth(booth->second.name, 0) + 2.0f;
             ui::DrawLabel(paint, booth->second.name, {std::floor(x - bw / 2.0f), at.y - pitch - 4.0f, bw, pitch}, ui::Argb(0xFFFEB5FF), 0, 1, 1, ui::kTextShadow);
+        }
+        // The status gauge 25 over the name, past the guild line when one shows (the original lifts the name's point 20 for
+        // that line, then 25 for the gauge), centred: a player's quick_hpmp_form (74 x 12: the HP bar at 2,1 and the MP bar at
+        // 2,7, each 70 x 4), a monster's or a COS's quick_hp_form (74 x 6, the HP bar).
+        if (gauge != 0) {
+            const float top = std::floor(at.y - 25.0f - (guildLine ? 20.0f : 0.0f)), left = std::floor(x - 37.0f);
+            paint.Image(gauge == 2 ? "interface\\ifcommon\\quick_hpmp_form.ddj" : "interface\\ifcommon\\quick_hp_form.ddj",
+                        {left, top, 74.0f, gauge == 2 ? 12.0f : 6.0f});
+            paint.Image("interface\\ifcommon\\quick_hp.ddj", {left + 2.0f, top + 1.0f, 70.0f * gaugeHp, 4.0f}, {0.0f, 0.0f}, {gaugeHp, 1.0f});
+            if (gauge == 2) {
+                paint.Image("interface\\ifcommon\\quick_mp.ddj", {left + 2.0f, top + 7.0f, 70.0f * gaugeMp, 4.0f}, {0.0f, 0.0f}, {gaugeMp, 1.0f});
+            }
         }
         paint.PopDepth();
     }
@@ -3679,6 +3801,7 @@ void PlayScreen::PickCursor(ScreenContext& context) {
         cursorPicked_ = context.time;
         cursor_ = 0x95;
         hoveredGap_ = 0;
+        hoveredEntity_ = 0;
         const bool overWindow = gui_.interface() != nullptr && gui_.context().mouseOverUi();
         if (!overWindow && world_ && !replay_) {
             const ui::Vec2 m = mouse_.x >= 0.0f ? mouse_ : context.input->mouse(); // --mouse: held there
@@ -3689,6 +3812,7 @@ void PlayScreen::PickCursor(ScreenContext& context) {
                 cursor_ = 0x99; // the open hand (153)
             } else if (const std::uint32_t npc = NpcUnder(m.x, m.y, w, h); npc != 0) {
                 cursor_ = 0x98; // the speech bubble (152)
+                hoveredEntity_ = npc;
                 if (const game::WorldView::Entity* e = view_.Find(npc); e != nullptr && GapGate(*e) != nullptr) {
                     hoveredGap_ = npc;
                     // A job temple's door asked again under the mouse, every 2 s: Seth's players (the original's come with
@@ -3701,10 +3825,17 @@ void PlayScreen::PickCursor(ScreenContext& context) {
                 }
             } else if (const std::uint32_t monster = MonsterUnder(m.x, m.y, w, h); monster != 0 && !OwnStructure(monster)) {
                 cursor_ = 0x97; // the sword (151)
+                hoveredEntity_ = monster;
             } else if (const std::uint32_t other = PlayerUnder(m.x, m.y, w, h); other != 0 && PlayerIsEnemy(other)) {
                 cursor_ = 0x97; // the sword too: one the player may fight (its guild at war, a fortress war's enemy)
+                hoveredEntity_ = other;
             } else if (GateUnder(m.x, m.y, w, h, ground ? &at : nullptr) != nullptr) {
                 cursor_ = 0xA1;
+            }
+            // The one under the mouse shows its name at any distance (the original's hover flag): any player too.
+            if (hoveredEntity_ == 0 && cursor_ == 0x95) {
+                if (const std::uint32_t monster = MonsterUnder(m.x, m.y, w, h); monster != 0) hoveredEntity_ = monster;
+                else hoveredEntity_ = PlayerUnder(m.x, m.y, w, h);
             }
         }
     }

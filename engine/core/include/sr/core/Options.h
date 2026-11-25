@@ -48,7 +48,7 @@ struct VideoOptions {
     int ambientOcclusion = 0; // 0 off, 1 low (half resolution), 2 high
     int softParticles = 0;    // effects fade where they meet the scene
     int foliageSway = 0;      // trees and grass move in the wind
-    int effectGlow = 7;       // ours: the effects' brightness in tenths (10 the original's; 7: their glow 30 % down)
+    int effectGlow = 10;      // the effects' brightness in tenths: 10 the original's (the default); lower is ours
     int characterLighting = 0; // 0 the original's, 1 modern (wrap and rim light)
     int water = 0;            // 0 the original's, 1 modern (refraction, depth colour, caustics, Fresnel, foam)
     int weather = 1;          // 0 none, 1 the original's (rain, snow, lightning), 2 modern (+ wet ground, overcast light)
@@ -160,9 +160,12 @@ struct OnlineOptions {
 // Ours, the Option window's Beta page: how a click on the ground moves the player. Classic walks straight where it was
 // clicked and stops at the first wall, as the original's does (a click on the sky: that way); Pathfinding searches a way
 // round walls and buildings on the client first, then walks it as straight legs the server checks as it checks clicks.
+// Names over heads: the original's (every kind within 300 of the player, the one under the mouse at any distance) or ours
+// (players' names at any distance, the others' within the name distance).
 struct BetaOptions {
     enum class Movement : int { Classic = 0, Pathfinding = 1 };
     Movement movement = Movement::Classic;
+    bool namesFar = false;
 };
 
 struct Options {

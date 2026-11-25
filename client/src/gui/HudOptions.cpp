@@ -1,7 +1,7 @@
 // The Option window (CIFOption, the system menu's Option button):
 // five pages over a draft of the player's options, and two of ours (Online: how many players
 // and monsters the server sends, up to its own shares; Beta: the experiments a player may
-// choose, the movement's pathfinding first); Default resets the
+// choose: the movement's pathfinding, our names over heads); Default resets the
 // page shown, Confirm keeps everything (saved, applied), Cancel drops the draft (the audio heard
 // while moving the bars goes back), Apply keeps the video page without closing. The original's
 // rows first; our Modern rows below them.
@@ -34,10 +34,10 @@ constexpr Geometry kGeometry[kPages] = {
     {413, {27, 130, 332, 230}, 379, {29, 113, 197}}, {319, {27, 100, 332, 165}, 285, {52, 155, 258}},
     {312, {27, 78, 332, 180}, 278, {52, 155, 258}},  {413, {27, 103, 332, 256}, 379, {52, 155, 258}},
     {415, {27, 78, 332, 281}, 380, {52, 155, 258}},  {383, {27, 100, 332, 229}, 349, {52, 155, 258}},
-    {319, {27, 100, 332, 165}, 285, {52, 155, 258}},
+    {383, {27, 100, 332, 229}, 349, {52, 155, 258}},
 };
 constexpr int kOnlinePage = 5;
-constexpr int kBetaPage = 6; // ours: the audio page's geometry, one box
+constexpr int kBetaPage = 6; // ours: the Online page's geometry, one box
 // The original's labels on the option pages (ifoption_audio.txt's FontColor).
 constexpr ui::Color kLabelColor = ui::Rgba(239, 218, 163);
 
@@ -199,6 +199,7 @@ private:
     ui::Widget* onlineValues_[3] = {}; // what each bar is at
     ui::Widget* onlineInfo_[2] = {};   // the server's limits, the traffic to expect
     ui::RadioButton* betaMovement_ = nullptr; // Classic, Pathfinding
+    ui::RadioButton* betaNames_ = nullptr;    // the names over heads: the original's, ours
     int capturing_ = -1; // the key slot waiting for a key
     bool filled_ = false; // filled once its controls made their own parts (the first frame)
 };
@@ -377,10 +378,11 @@ void OptionWindow::BuildOnline(ui::Interface& ui) {
 }
 
 void OptionWindow::BuildBeta(ui::Interface& ui) {
-    // One box (opt_inner_box, as the Online page's): the movement's two ways, a radio of two, and what they are.
-    ui::Widget* page = MakeNode(ui, *this, "CIFStatic", 10 + kBetaPage, {11.0f, 62.0f, 364.0f, 210.0f});
+    // One box (opt_inner_box, as the Online page's): the movement's two ways, a radio of two, and what they are; then the
+    // names over heads, the original's or ours.
+    ui::Widget* page = MakeNode(ui, *this, "CIFStatic", 10 + kBetaPage, {11.0f, 62.0f, 364.0f, 270.0f});
     page->visible = false;
-    MakeNode(ui, *page, "CIFFrame", 4, {11.0f, 10.0f, 342.0f, 166.0f}, "interface\\option\\opt_inner_box_");
+    MakeNode(ui, *page, "CIFFrame", 4, {11.0f, 10.0f, 342.0f, 232.0f}, "interface\\option\\opt_inner_box_");
     ui::Widget* caption = MakeNode(ui, *page, "CIFStatic", 10, {18.0f, 14.0f, 326.0f, 12.0f});
     caption->SetText("Movement (experimental)");
     if (auto* s = ui::As<ui::Static>(caption)) s->textColor = kLabelColor;
@@ -401,6 +403,16 @@ void OptionWindow::BuildBeta(ui::Interface& ui) {
         text->SetText(lines[line]);
         if (auto* s = ui::As<ui::Static>(text)) s->textColor = ui::kWhite;
     }
+    ui::Widget* names = MakeNode(ui, *page, "CIFStatic", 40, {18.0f, 180.0f, 326.0f, 12.0f});
+    names->SetText("Names over heads");
+    if (auto* s = ui::As<ui::Static>(names)) s->textColor = kLabelColor;
+    if (auto* radio = ui::As<ui::RadioButton>(MakeNode(ui, *page, "CIFRadioButton", 41, {18.0f, 198.0f, 326.0f, 48.0f}))) {
+        radio->origin = {0.0f, 0.0f};
+        radio->labelWidth = 300.0f;
+        radio->spacing = 22.0f;
+        radio->SetUnits(ui, {"The original's: within 300, and the one under the mouse", "Ours: players' names at any distance"});
+        betaNames_ = radio;
+    }
 }
 
 int OptionWindow::OnlineMax(int kind) const {
@@ -408,10 +420,16 @@ int OptionWindow::OnlineMax(int kind) const {
     return std::max(1, int(kind == 0 ? context_.view->maxPlayers : context_.view->maxMonsters));
 }
 
+namespace {
+int startPage = 0; // SetOptionStartPage
+} // namespace
+
+void SetOptionStartPage(int page) { startPage = page; }
+
 void OptionWindow::Begin() {
     if (context_.options != nullptr) draft_ = *context_.options;
     capturing_ = -1;
-    ShowPage(0);
+    ShowPage(std::exchange(startPage, 0));
     Fill();
 }
 
@@ -489,6 +507,7 @@ void OptionWindow::Fill() {
         if (auto* radio = ui::As<ui::RadioButton>(input->Child(20))) radio->selected = draft_.input.mouseMode;
     }
     if (betaMovement_ != nullptr) betaMovement_->selected = int(draft_.beta.movement);
+    if (betaNames_ != nullptr) betaNames_->selected = draft_.beta.namesFar ? 1 : 0;
     for (std::size_t i = 0; i < keySlots_.size(); ++i) {
         const int vk = draft_.input.keys[i];
         if (ui::Widget* key = keySlots_[i]->Child(11)) key->SetText(int(i) == capturing_ ? std::string("...") : core::InputOptions::KeyName(vk));
@@ -577,6 +596,7 @@ void OptionWindow::Update(ui::Frame& frame) {
     }
     // The movement as the Beta page's radio shows it.
     if (betaMovement_ != nullptr) draft_.beta.movement = core::BetaOptions::Movement(std::clamp(betaMovement_->selected, 0, 1));
+    if (betaNames_ != nullptr) draft_.beta.namesFar = betaNames_->selected == 1;
     // A key slot clicked waits for a key.
     if (page_ == 3 && frame.input.Released(ui::MouseButton::Left)) {
         for (std::size_t i = 0; i < keySlots_.size(); ++i) {

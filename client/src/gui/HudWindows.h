@@ -1334,6 +1334,8 @@ void ApplyKeyOptions(const core::InputOptions& input, ui::KeyBindings& bindings)
 std::string BoundKeyName(const ui::KeyBindings& bindings, ui::KeyAction action);
 // CIFOption (the system menu's Option window; HudOptions.cpp).
 std::unique_ptr<ui::Widget> MakeOptionWindow(const assets::UiLayoutNode& node, HudContext& context);
+// The page the Option window opens on next (captures: --menu options:N); once, then the video page again.
+void SetOptionStartPage(int page);
 // CIFSkill (73, the main window's Skills page; HudSkills.cpp).
 std::unique_ptr<ui::Widget> MakeSkillWindow(const assets::UiLayoutNode& node, HudContext& context);
 // CIFAutoPotion (135, the T key; HudAutoPotion.cpp): the original's layout

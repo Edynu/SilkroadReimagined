@@ -230,7 +230,7 @@ const std::array<VideoOptions::ExtraRow, 21>& VideoOptions::ExtraRows() {
         {"weather", &VideoOptions::weather, 2, 1},
         {"volumetricFog", &VideoOptions::volumetricFog, 2, 0},
         {"clouds", &VideoOptions::clouds, 1, 0},
-        {"effectGlow", &VideoOptions::effectGlow, 10, 7},
+        {"effectGlow", &VideoOptions::effectGlow, 10, 10},
     }};
     return kRows;
 }
@@ -394,6 +394,7 @@ std::string Options::Serialize() const {
     out << "game.beginnerMark=" << game.beginnerMark << "\n";
     out << "online.players=" << online.players << "\nonline.monsters=" << online.monsters << "\nonline.radius=" << online.radius << "\n";
     out << "beta.movement=" << (beta.movement == BetaOptions::Movement::Pathfinding ? "pathfinding" : "classic") << "\n";
+    out << "beta.names=" << (beta.namesFar ? "far" : "original") << "\n";
     return out.str();
 }
 
@@ -468,6 +469,9 @@ Options Options::Parse(std::string_view text) {
         } else if (key == "beta.movement") {
             if (value == "pathfinding") o.beta.movement = BetaOptions::Movement::Pathfinding;
             else if (value == "classic") o.beta.movement = BetaOptions::Movement::Classic;
+        } else if (key == "beta.names") {
+            if (value == "far") o.beta.namesFar = true;
+            else if (value == "original") o.beta.namesFar = false;
         } else if (key == "online.radius") {
             if (ParseInt(value, n) && n >= OnlineOptions::kMinRadius && n <= OnlineOptions::kMaxRadius) o.online.radius = n;
         } else if (key == "camera.sight") {

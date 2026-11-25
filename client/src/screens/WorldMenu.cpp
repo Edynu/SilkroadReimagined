@@ -60,10 +60,13 @@ void WorldScreen::UpdateMenu(ScreenContext& context, FrameSnapshot& snapshot) {
         if (m.ui == nullptr) return; // the layouts are still loading
         m.hud.Create(*m.ui, screen);
         for (ui::Widget* w : m.ui->Windows()) w->visible = false; // nothing until Escape
-        // --menu system|options: open at the start (captures).
+        // --menu system|options[:PAGE]: open at the start (captures; PAGE 0..6, 5 Online, 6 Beta).
         const std::string open = context.config.GetString("menu", "");
         if (open == "system") m.hud.Escape();
-        if (open == "options") m.hud.OpenOptions();
+        if (open.starts_with("options")) {
+            if (open.size() > 8 && open[7] == ':') SetOptionStartPage(std::atoi(open.c_str() + 8));
+            m.hud.OpenOptions();
+        }
     }
     m.host.Frame(context, snapshot, *context.input, 1.0f);
     if (context.input->KeyPressed(ui::Key::Escape) && !context.keyboardBlocked && !m.host.context().typing()) m.hud.Escape();

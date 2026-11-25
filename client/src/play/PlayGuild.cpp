@@ -699,13 +699,13 @@ void PlayScreen::GuildScript(ScreenContext& context) {
     }
 }
 
-void PlayScreen::DrawGuildLine(ui::Painter& paint, std::uint32_t entity, const ui::Rect& nameAt) {
+bool PlayScreen::DrawGuildLine(ui::Painter& paint, std::uint32_t entity, const ui::Rect& nameAt) {
     // [guild] or [guild * title], 20 pixels over the name, centred, in the guild's
     // colour (the player's own orange, its union's light green, the others light blue).
     std::string guild, nickname;
     std::uint32_t id = 0, unionId = 0, crest = 0, unionCrest = 0;
     if (entity == view_.Self()) {
-        if (!guild_.InGuild()) return;
+        if (!guild_.InGuild()) return false;
         guild = guild_.Guild().name;
         id = guild_.Guild().id;
         unionId = guild_.Guild().unionId;
@@ -720,7 +720,7 @@ void PlayScreen::DrawGuildLine(ui::Painter& paint, std::uint32_t entity, const u
         crest = tag->crest;
         unionCrest = tag->unionCrest;
     } else {
-        return;
+        return false;
     }
     const std::string line = game::GuildView::HeadLine(guild, nickname);
     const float w = paint.TextWidth(line, 0) + 2.0f;
@@ -733,6 +733,7 @@ void PlayScreen::DrawGuildLine(ui::Painter& paint, std::uint32_t entity, const u
     const float side = float(game::kCrestSide), top = std::floor(at.y + (at.h - side) / 2.0f);
     if (const std::string path = CrestTexture(proto::kCrestGuild, id, crest); !path.empty()) paint.Image(path, {at.x - 20.0f, top, side, side});
     if (const std::string path = CrestTexture(proto::kCrestUnion, unionId, unionCrest); !path.empty()) paint.Image(path, {at.x - 36.0f, top, side, side});
+    return true;
 }
 
 } // namespace sr::client

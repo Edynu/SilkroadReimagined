@@ -512,6 +512,11 @@ private:
     std::set<std::uint32_t> book_;
     game::proto::SummonList summonList_;
     std::uint32_t hoveredGap_ = 0; // the gap under the mouse (its tooltip)
+    std::uint32_t hoveredEntity_ = 0; // the NPC, monster or player under the mouse (its name shows at any distance)
+    int beginnerOption_ = -1;         // the Game page's beginner mark last seen (-1: not yet; a change is told to the server)
+    bool NameShown(std::uint32_t id, const game::WorldView::Entity& e, ScreenContext& context) const;
+    // The status gauge over one's head (the Game page's status rows): 0 none, 1 HP alone, 2 HP and MP; the shares filled.
+    int StatusGauge(std::uint32_t id, const game::WorldView::Entity& e, ScreenContext& context, float& hp, float& mp) const;
     double gapHoverAskedAt_ = -1e9; // a temple door's facts last asked under the mouse
     bool IsPillar(const game::WorldView::Entity& e) const;
     void HandleInstance(ScreenContext& context, const game::proto::InstanceEvent& event);
@@ -711,7 +716,7 @@ private:
     void GuildOptions(ScreenContext& context);
     void HandleGuild(ScreenContext& context, const game::proto::GuildEvent& event);
     void GuildScript(ScreenContext& context);
-    void DrawGuildLine(ui::Painter& paint, std::uint32_t entity, const ui::Rect& nameAt);
+    bool DrawGuildLine(ui::Painter& paint, std::uint32_t entity, const ui::Rect& nameAt); // false: no guild line
     std::uint32_t NearestNpc(bool guildOnly) const; // the nearest NPC in sight (a guild NPC), 0: none
     std::vector<std::string> guildScript_;
     double guildNext_ = -1.0, guildAfter_ = 3.0, guildStep_ = 2.0;

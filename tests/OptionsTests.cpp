@@ -111,6 +111,12 @@ TEST_CASE("options survive a round trip through their file text; bad lines are i
     moving.beta.movement = BetaOptions::Movement::Pathfinding;
     CHECK(Options::Parse(moving.Serialize()).beta.movement == BetaOptions::Movement::Pathfinding);
     CHECK(Options::Parse("beta.movement=flying\n").beta.movement == BetaOptions::Movement::Classic);
+    // The names over heads: the original's by default, ours kept.
+    CHECK(!Options{}.beta.namesFar);
+    Options far;
+    far.beta.namesFar = true;
+    CHECK(Options::Parse(far.Serialize()).beta.namesFar);
+    CHECK(!Options::Parse("beta.names=everywhere\n").beta.namesFar);
     CHECK(back.video.active == 1);
     CHECK(back.video.records == o.video.records);
     CHECK(back.video.custom == o.video.custom);

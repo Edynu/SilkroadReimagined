@@ -51,7 +51,8 @@ ui::Color PlayScreen::PlayerNameColour(std::uint32_t id, const game::WorldView::
     }
     if (party) return ui::Argb(0xFF62F5B1);
     if (war) return ui::Argb(0xFFFF0000);
-    return ui::Argb(0xFFFFFFFF);
+    // The player's own name gold-orange (the original sets it on its own character), the others white.
+    return ui::Argb(self ? 0xFFFEAD2E : 0xFFFFFFFF);
 }
 
 void PlayScreen::ClickPlayer(ScreenContext& context, std::uint32_t other, bool ctrl, bool alt) {
