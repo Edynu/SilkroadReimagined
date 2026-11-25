@@ -282,7 +282,7 @@ void Hud::DropGoldBox() {
     if (ui::Widget* box = ui_->Open(node)) ui_->Centre(*box, screen_);
 }
 
-void Hud::Rebirth(int level, std::function<void(int kind)> answer, const std::vector<std::string>& warLines, double riseAt, std::string countdown,
+void Hud::Rebirth(int level, std::function<void(int kind)> answer, const std::vector<std::string>& warLines, double riseAt,
                   const std::string& firstButton) {
     if (ui_ == nullptr || RebirthShown()) return;
     assets::UiLayoutNode node;
@@ -294,7 +294,7 @@ void Hud::Rebirth(int level, std::function<void(int kind)> answer, const std::ve
     node.rect = {std::floor(screen_.x / 2.0f) - 154.0f, std::floor(screen_.y / 2.0f) - 74.0f, 400.0f, warLines.empty() ? 210.0f : 242.0f};
     if (auto* box = dynamic_cast<RebirthBox*>(ui_->Open(node))) {
         box->Ask(level, std::move(answer));
-        if (!warLines.empty()) box->WarLines(warLines, riseAt, std::move(countdown));
+        if (!warLines.empty()) box->WarLines(warLines, riseAt);
         if (!firstButton.empty()) {
             if (ui::Widget* b = box->Child(200)) b->SetText(ui_->resources().Text(firstButton));
         }

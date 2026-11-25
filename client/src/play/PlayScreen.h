@@ -298,6 +298,8 @@ private:
     // The player's death: the death window 3 s after the fall,
     // again on a click on the own bar while it lies; gone when the character is up again.
     double diedAt_ = -1;
+    double warCountAt_ = -1; // dead in a fortress war's area: when (-2 elsewhere), the banner's count from it
+    int warCountShown_ = -1;
     void DeathWindow(double now, bool reopen);
     bool IsDead(const game::WorldView::Entity& e) const;
     // Under a stealth or an invisibility (its buffs: the player's own, others' EntityBuffs).

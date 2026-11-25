@@ -1161,13 +1161,13 @@ void RebirthBox::Ask(int level, std::function<void(int)> answer) {
     }
 }
 
-void RebirthBox::WarLines(const std::vector<std::string>& lines, double riseAt, std::string countdown) {
+void RebirthBox::WarLines(const std::vector<std::string>& lines, double riseAt) {
     riseAt_ = riseAt;
-    countdown_ = std::move(countdown);
     if (ui_ == nullptr) return;
+    // Plain lines (the original's box's own statics; only its question is rich text), 16 apart under it.
     for (std::size_t i = 0; i < lines.size() && i < 4; ++i) {
         assets::UiLayoutNode text;
-        text.type = "CIFPML";
+        text.type = "CIFStatic";
         text.id = 310 + int(i);
         text.hAlign = 1;
         text.rect = {0.0f, 134.0f + float(i) * 16.0f, 400.0f, 16.0f};
@@ -1182,23 +1182,12 @@ void RebirthBox::WarLines(const std::vector<std::string>& lines, double riseAt, 
 
 void RebirthBox::Update(ui::Frame& frame) {
     ui::MainFrame::Update(frame);
-    if (countdown_.empty()) return;
-    ui::Widget* question = Child(300);
-    if (question == nullptr) return;
-    const double left = riseAt_ - frame.time;
-    if (left > 0.0) {
-        char text[128];
-        std::snprintf(text, sizeof text, countdown_.c_str(), int(std::ceil(left)));
-        question->SetText(text);
-    } else if (ui_ != nullptr) {
-        question->SetText(ui_->resources().Text("UIIT_MSG_MSGBOX_ASK_SELF_REBIRTH_1"));
-        countdown_.clear();
-    }
+    now_ = frame.time;
 }
 
 bool RebirthBox::OnNotice(const ui::Notice& notice) {
     if (notice.kind != ui::Notice::Kind::Clicked || notice.source->parent() != this) return ui::MainFrame::OnNotice(notice);
-    if (notice.control == 200 && !countdown_.empty()) return true; // not yet: the server would refuse it silently
+    if (notice.control == 200 && now_ < riseAt_) return true; // not yet: the server would refuse it silently (ours: the click kept)
     int kind = -1;
     if (notice.control == 200) kind = 1;
     else if (notice.control == 201 || notice.control == 2) kind = level_ <= 10 && notice.control == 201 ? 2 : 0;

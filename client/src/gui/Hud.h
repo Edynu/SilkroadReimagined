@@ -188,7 +188,7 @@ public:
     // The death window (RebirthBox), placed as the original's message boxes: at (W/2 - 154, H/2 - 74)
     // of the screen; and closed again (back to life: every message box goes).
     // `firstButton`: another text key for its first button (a Capture the Flag match's "Resurrect at your camp.").
-    void Rebirth(int level, std::function<void(int kind)> answer, const std::vector<std::string>& warLines = {}, double riseAt = 0.0, std::string countdown = {},
+    void Rebirth(int level, std::function<void(int kind)> answer, const std::vector<std::string>& warLines = {}, double riseAt = 0.0,
                  const std::string& firstButton = {});
     void CloseRebirth();
     // Its button (200 the first, 201 the second) pressed as by a click (scripts); false when it is not shown.

@@ -1171,15 +1171,15 @@ public:
     bool OnNotice(const ui::Notice& notice) override;
     // `answer` gets 1 (the return point), 2 (where it lies) or 0 (closed: waiting to be raised).
     void Ask(int level, std::function<void(int kind)> answer);
-    // In a fortress's war: its lines under the question, and no rising before `riseAt` (the box's clock).
-    void WarLines(const std::vector<std::string>& lines, double riseAt, std::string countdown);
+    // In a fortress's war: its lines under the question, and no rising before `riseAt` (the box's clock; the count
+    // itself is the warning banner's, PlayScreen::DeathWindow).
+    void WarLines(const std::vector<std::string>& lines, double riseAt);
     void Update(ui::Frame& frame) override;
 
 private:
     ui::Interface* ui_ = nullptr;
     int level_ = 1;
-    double riseAt_ = 0.0;
-    std::string countdown_; // "%d seconds till resurrection."
+    double riseAt_ = 0.0, now_ = 0.0;
     std::function<void(int)> answer_;
 };
 

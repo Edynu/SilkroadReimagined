@@ -719,6 +719,13 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 hud_.Practice(q, [] {});
             }
             if (page_ == "rebirth") hud_.Rebirth(20, [](int) {});
+            if (page_ == "rebirth-war") { // an attacker's in a fortress war: its four lines and the 15 s count
+                const auto text = [this](const char* key) { return host_.data().Text(key); };
+                hud_.Rebirth(20, [](int) {},
+                             {text("UIIT_MSG_FORT_REVIVE_TEXT_01"), text("UIIT_MSG_FORT_REVIVE_TEXT_NEW_01"), text("UIIT_MSG_FORT_REVIVE_PENALTY_TEXT_01"),
+                              text("UIIT_MSG_FORT_REVIVE_PENALTY_TEXT_02")},
+                             context.time + 15.0);
+            }
             if (page_.starts_with("academy")) {
                 SampleAcademy(sample_);
                 hud_.OpenPage(hud::kPageAcademy);
@@ -1179,7 +1186,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 sampleFlag_.Apply(proto::EntityFlagTeam{sample_.self.entity, 0});
                 if (page_ == "ctf-card") ShowSubscribedBox(hudContext_);
                 if (page_ == "ctf-camp") {
-                    hud_.Rebirth(sample_.self.level, [](int) {}, {}, 0.0, {}, "UIIT_MSG_FLAGWAR_GO_TO_REVIVAL");
+                    hud_.Rebirth(sample_.self.level, [](int) {}, {}, 0.0, "UIIT_MSG_FLAGWAR_GO_TO_REVIVAL");
                     OpenCampCountdown(hudContext_);
                 }
                 if (page_.starts_with("ctf-desk") || page_ == "ctf-talk" || page_ == "ctf-swap") {

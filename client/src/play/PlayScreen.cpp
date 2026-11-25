@@ -2058,7 +2058,24 @@ void PlayScreen::DeathWindow(double now, bool reopen) {
     if (!dead) {
         if (diedAt_ != -1) hud_.CloseRebirth(); // up again: every message box goes (as the original's)
         diedAt_ = -1;
+        warCountAt_ = -1;
+        warCountShown_ = -1;
         return;
+    }
+    // Dead in a fortress's area during its war: "%d seconds till resurrection." on the warning banner from the death,
+    // once a second from 15 down to 0 (the original's interface timer).
+    if (warCountAt_ == -1) {
+        const game::WorldView::Entity* self = view_.Find(view_.Self());
+        warCountAt_ = self != nullptr && fortress_.WarArea(self->position.region) != 0 ? now : -2;
+    }
+    if (warCountAt_ >= 0 && warCountShown_ != 0) {
+        const int left = std::max(0, 15 - int(now - warCountAt_));
+        if (left != warCountShown_) {
+            warCountShown_ = left;
+            char text[128];
+            std::snprintf(text, sizeof text, gui_.data().Text("UIIT_MSG_FORT_REVIVE_COUNT").c_str(), left);
+            player_.Notify(game::Banner::Kind::Warning, text, now);
+        }
     }
     if (reopen) {
         diedAt_ = now - 3.0;
@@ -2068,8 +2085,9 @@ void PlayScreen::DeathWindow(double now, bool reopen) {
         diedAt_ = now; // came into the world dead
     }
     if (hud_.RebirthShown() || now - diedAt_ < 3.0) return;
-    // In a fortress's area during its war: where this side rises, and the wait (the box opens 3 s after
-    // the death and counts what is left of the 15).
+    // In a fortress's area during its war: where this side rises (the box opens 3 s after the death, rising is the
+    // server's from 15 s on). The holder's guild by the Gate of Resurrection, its union's by the Gate of Fortress; the
+    // others at their command post's tent (its two lines), else before the Gate of Fortress.
     std::vector<std::string> warLines;
     const game::WorldView::Entity* self = view_.Find(view_.Self());
     const std::uint32_t war = self != nullptr ? fortress_.WarArea(self->position.region) : 0;
@@ -2081,6 +2099,7 @@ void PlayScreen::DeathWindow(double now, bool reopen) {
         } else if (mine != 0 && guild_.Guild().unionId != 0 && guild_.Union().id == guild_.Guild().unionId && std::any_of(guild_.Union().guilds.begin(), guild_.Union().guilds.end(), [&](const auto& g) { return g.id == holder; })) {
             warLines.push_back(text("UIIT_MSG_FORT_REVIVE_TEXT_04"));
         } else {
+            warLines.push_back(text("UIIT_MSG_FORT_REVIVE_TEXT_01"));
             warLines.push_back(text("UIIT_MSG_FORT_REVIVE_TEXT_NEW_01"));
         }
         warLines.push_back(text("UIIT_MSG_FORT_REVIVE_PENALTY_TEXT_01"));
@@ -2092,7 +2111,7 @@ void PlayScreen::DeathWindow(double now, bool reopen) {
         if (kind > 0 && !replay_) shared_->session->Resurrect(std::uint8_t(kind));
         if (kind == 1) FlagDeath(now); // the camp countdown (PlayFlagWorld.cpp)
         diedAt_ = -2;
-    }, warLines, diedAt_ + 15.0, warLines.empty() ? std::string() : gui_.data().Text("UIIT_MSG_FORT_REVIVE_COUNT"), match ? "UIIT_MSG_FLAGWAR_GO_TO_REVIVAL" : "");
+    }, warLines, warLines.empty() ? 0.0 : (warCountAt_ >= 0 ? warCountAt_ : diedAt_) + 15.0, match ? "UIIT_MSG_FLAGWAR_GO_TO_REVIVAL" : "");
 }
 
 void PlayScreen::RefreshTarget(double now) {
