@@ -589,6 +589,7 @@ bool DecodeObjectRows(std::string_view text, std::vector<ObjectRow>& out, std::s
             row.maxHp = static_cast<std::uint32_t>(std::strtoul(std::string(columns[59]).c_str(), nullptr, 10));
             if (const int scale = Int(columns[48]); scale > 0) row.scalePercent = scale;
         }
+        if (columns.size() > 61) row.inventorySize = Int(columns[61]);
         if (columns.size() > 93) {
             row.materialKind = Int(columns[93]);
             row.rarity = Int(columns[15]);

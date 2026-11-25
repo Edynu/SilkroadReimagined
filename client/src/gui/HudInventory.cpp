@@ -340,6 +340,27 @@ std::vector<ui::TooltipLine> ExpendableLines(const assets::ItemRow& row, const H
     const auto has = [&](const char* key) { return !c.hasText || c.hasText(key); };
     const int type3 = row.typeId[2], type4 = row.typeId[3];
     const auto& p = row.params;
+    // A ride's or a transport's scroll (3/3/3/2): what it summons ("Summon item: Vehicle" / "Trans", beige), the animal's
+    // HP, its moving speed (its run speed / 10: "Moving speed 9 m", "3.6 m") and a transport's places.
+    if (game::IsCosScroll(row) && c.characters != nullptr) {
+        std::string name = std::string(row.paramTexts[0]);
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        if (std::string ladder = row.paramTexts[1]; !ladder.empty() && ladder.rfind("xxx", 0) != 0) {
+            name += "_" + ladder.substr(0, ladder.find(','));
+            while (!name.empty() && name.back() == ' ') name.pop_back();
+        }
+        if (const assets::ObjectRow* cos = c.characters->Find(std::string_view(name))) {
+            const game::CosKind kind = game::CosKindOf(*cos);
+            if (kind == game::CosKind::Ride || kind == game::CosKind::Transport) {
+                line(c.Text("UIIT_STT_ITEM_SUMMON") + ": " + c.Text(kind == game::CosKind::Ride ? "SN_TAB_VEHICLE" : "SN_TAB_CART"), kKindBeige);
+                line(c.Text("PARAM_HP") + " " + std::to_string(cos->maxHp));
+                const int speed = int(cos->runSpeed);
+                line(speed % 10 == 0 ? std::format("{} {} {}", c.Text("PARAM_HSTE"), speed / 10, c.Text("UIIT_STT_DISTANCE_UNIT"))
+                                     : std::format("{} {:.1f} m", c.Text("PARAM_HSTE"), double(speed) / 10.0));
+                if (kind == game::CosKind::Transport) line(c.Text("UIIT_STT_SLOT_AMOUNT") + " " + std::to_string(cos->inventorySize));
+            }
+        }
+    }
     if (type3 == 1) { // potions
         if (type4 == 9) {
             if (p[0] > 0) line(c.Text("PARAM_HEAL_HGP") + " [" + std::to_string(p[0]) + "%]");

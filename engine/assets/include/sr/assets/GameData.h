@@ -32,6 +32,7 @@ struct ObjectRow {
     std::string nameKey;         // col 5 (SN_...)
     int level = 0;               // col 57
     std::uint32_t maxHp = 0;     // col 59
+    int inventorySize = 0;       // col 61 (InventorySize): a transport's bag places (a donkey 32, a camel 44)
     int rarity = 0;              // col 15: a monster's kind (0 general, 3 unique; champions and giants are made at spawn); a transport's capacity class (1, 2)
     bool cashItem = false;       // col 7: a mall object (a mall transport's bag is 1.4 times a bought one's)
     std::uint32_t experience = 0; // col 79: what killing it gives
