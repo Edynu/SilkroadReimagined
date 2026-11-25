@@ -1112,7 +1112,8 @@ void StageEffects::Fly(WorldScreen& world, double now) {
     }
 }
 
-void StageEffects::Homing(WorldScreen& world, std::size_t from, std::size_t to, const std::string& effect, double now, std::uint32_t seed) {
+void StageEffects::Homing(WorldScreen& world, std::size_t from, std::size_t to, const std::string& effect, double now, std::uint32_t seed,
+                          const std::string& arrival, const std::string& landSound) {
     glm::mat4 root(1.0f);
     if (!world.StageBone(from, {}, root)) return;
     // The original's mover: a pause of up to 800 ms, a bend of -60..+60 degrees drawn at
@@ -1136,6 +1137,8 @@ void StageEffects::Homing(WorldScreen& world, std::size_t from, std::size_t to, 
     flight.seconds = 1.0f;
     flight.arc = 0.4f;
     flight.tilt = glm::radians(90.0f + float((h >> 16) % 121u) - 60.0f);
+    flight.arrival = arrival; // the original's absorption into the player (its indraft effect)
+    flight.landSound = landSound;
     flight.effect = world.Effects().Start(request);
     if (flight.effect != 0) flights_.push_back(std::move(flight));
 }

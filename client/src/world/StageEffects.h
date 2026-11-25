@@ -111,7 +111,8 @@ public:
 
     // An effect homing from one slot's body to another's (a kill's orbs): after a pause of its own it
     // flies on a sideways curve to where the target is then, following it. `seed` varies the pause and curve.
-    void Homing(WorldScreen& world, std::size_t from, std::size_t to, const std::string& effect, double now, std::uint32_t seed);
+    void Homing(WorldScreen& world, std::size_t from, std::size_t to, const std::string& effect, double now, std::uint32_t seed,
+                const std::string& arrival = {}, const std::string& landSound = {});
 
     // A skill's stages from its swing; `target` kNone for none (the caster). `actStart`: its buff start
     // (ACT_S) too, at the shot (another's buff: one's own comes with the buff itself). `animation`: the

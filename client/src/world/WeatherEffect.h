@@ -31,6 +31,12 @@ public:
     void Fill(gfx::WeatherView& view) const;
     // A lightning strike now (tests and captures; rain brings its own).
     void Strike(int pattern);
+    // The pattern of the strike since the last call (its thunder: the original's lightning1..3.wav by it), -1 none.
+    int TakeThunder() {
+        const int t = thunder_;
+        thunder_ = -1;
+        return t;
+    }
     void Clear();
 
     struct Stats {
@@ -64,6 +70,7 @@ private:
     std::uint32_t random_ = 0x5EED1234u;
     std::vector<float> flashesDue_; // seconds until each scheduled flash
     float flashAge_ = -1.0f;        // seconds into the current flash; < 0 none
+    int thunder_ = -1;              // the last strike's pattern, not yet heard (TakeThunder)
     std::uint64_t strikes_ = 0;
 };
 

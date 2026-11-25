@@ -1623,13 +1623,16 @@ struct BerserkAnswer {
         v("status", status);
     }
 };
-// The player's gauge (0..5; the original's point update kind 4).
+// The player's gauge (0..5; the original's point update kind 4); `from` the monster whose kill gave the points (its orbs fly
+// from it to the player), 0 none (a potion, the mode's end).
 struct BerserkPoints {
     static constexpr MessageId kId = 0x10EA;
     std::uint8_t points = 0;
+    std::uint32_t from = 0;
     template <typename V>
     void Visit(V& v) {
         v("points", points);
+        v("from", from);
     }
 };
 // An entity goes berserk or out of it (the original's body state 1): those who see it, the player too,

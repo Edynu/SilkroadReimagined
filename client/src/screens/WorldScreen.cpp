@@ -18,6 +18,7 @@
 #include <cstring>
 #include <sstream>
 
+#include "audio/GameAudio.h"
 #include "sr/assets/Animation.h"
 #include "sr/assets/FileSystem.h"
 #include "sr/core/Log.h"
@@ -1724,6 +1725,10 @@ void WorldScreen::UpdateWeather(ScreenContext& context, FrameSnapshot& snapshot)
     };
     weatherEffect_.Update(weather_.Kind(), weather_.Effective(), glm::vec3(camera_.targetX, camera_.targetY, camera_.targetZ), dt,
                           waterAt);
+    // A strike's thunder as the original's: lightning1..3.wav by the strike's pattern, heard where the camera looks.
+    if (const int thunder = weatherEffect_.TakeThunder(); thunder >= 0 && context.audio != nullptr) {
+        context.audio->PlayEffect(std::format("prim\\snd\\etc\\lightning{}.wav", thunder + 1), glm::vec3(camera_.targetX, camera_.targetY, camera_.targetZ));
+    }
     weatherEffect_.Fill(snapshot.scene.weather);
     // The ground under it (ours, the Modern look): wet within about 30 s of rain (its strength: the amount over 150), dry
     // again over 2 minutes; snow (the climates' 3..10 a light fall, 8 and more a full one) lies within 90 s and melts

@@ -648,13 +648,15 @@ void PlayScreen::KillOrbs(const proto::ExperienceGained& gained, double now) {
         }
         return std::max(1, 3 - int(5.0 * (1.0 - r)));
     };
-    const auto send = [&](const char* effect, int n) {
-        for (int i = 0; i < n; ++i) stageEffects_.Homing(*world_, from, self, effect, now, orbsSent_++);
+    // Each lands as the original's orbs do: its kind's absorption (the experience's blue indraft, the skill experience's
+    // red) and hyanget.wav.
+    const auto send = [&](const char* effect, const char* arrival, int n) {
+        for (int i = 0; i < n; ++i) stageEffects_.Homing(*world_, from, self, effect, now, orbsSent_++, arrival, "prim\\snd\\ui\\hyanget.wav");
     };
     const std::size_t level = player_.self.level;
     const double basis = level < tables_->monsterExperience.size() ? double(tables_->monsterExperience[level]) : 0.0;
-    if (gained.experience > 0) send("battle\\hwan_g.efp", basis > 0.0 ? count(double(gained.experience) / basis) : 3);
-    if (gained.skillExperience > 0) send("battle\\hwan_y.efp", count(double(gained.skillExperience) / 100.0));
+    if (gained.experience > 0) send("battle\\hwan_g.efp", "battle\\hwn_blue_indraft.efp", basis > 0.0 ? count(double(gained.experience) / basis) : 3);
+    if (gained.skillExperience > 0) send("battle\\hwan_y.efp", "battle\\hwn_red_indraft.efp", count(double(gained.skillExperience) / 100.0));
 }
 
 // An item used (ItemUsed, the original's 0x305C), on the user, as the 1.188 client picks it: a potion's

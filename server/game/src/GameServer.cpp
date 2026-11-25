@@ -2403,7 +2403,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         Monsters::Damaged d = monsters ? monsters->Damage(monster, attacker, damage, now, affliction) : Monsters::Damaged{};
         if (coses && d.hit && !d.killed) coses->OwnerFights(attacker, monster); // an aggressive attack pet joins in
         if (d.killed) {
-            if (PlayerWorld* player = PlayerByEntity(attacker)) RollBerserk(*player, d);
+            if (PlayerWorld* player = PlayerByEntity(attacker)) RollBerserk(*player, d, monster);
         }
         return d;
     }
@@ -6677,17 +6677,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // --- Berserk (game/Berserk.h) ---------------------------------------------
 
     // The gauge changed: 0..5, none gained in berserk; kept, told.
-    void AddBerserkPoints(PlayerWorld& player, int points) {
+    void AddBerserkPoints(PlayerWorld& player, int points, std::uint32_t from = 0) {
         if (points > 0 && player.berserkUntil) return;
         const std::uint8_t now = std::uint8_t(std::clamp(int(player.berserkPoints) + points, 0, int(game::kBerserkPoints)));
         if (now == player.berserkPoints) return;
         player.berserkPoints = now;
-        if (Peer* peer = peers->Find(world->PeerOf(player.entity))) SendMessage(*peer->connection, proto::BerserkPoints{now});
+        if (Peer* peer = peers->Find(world->PeerOf(player.entity))) SendMessage(*peer->connection, proto::BerserkPoints{now, from});
         database.Submit([character = player.selected, now](Database& db) { SaveBerserkPoints(db, character, now); });
     }
     // A player's killing hit, made while not in berserk: a roll for points, its share going
     // to every living member of an exp-shared party in the world, else to the player.
-    void RollBerserk(PlayerWorld& player, const Monsters::Damaged& d) {
+    void RollBerserk(PlayerWorld& player, const Monsters::Damaged& d, std::uint32_t monster) {
         if (player.berserkUntil || player.dead) return;
         const assets::ObjectRow* row = config.characters ? config.characters->Find(d.refObjId) : nullptr;
         const game::BerserkGain gain = game::BerserkPointGain(player.level, row != nullptr ? row->level : player.level, d.rarity,
@@ -6695,11 +6695,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (int(berserkRandom() % 10000u) >= gain.chance) return;
         if (parties && (parties->SettingsOf(player.entity) & game::kPartyExpShare) != 0) {
             for (const std::uint32_t member : parties->MemberEntities(player.entity)) {
-                if (PlayerWorld* m = PlayerByEntity(member); m != nullptr && !m->dead) AddBerserkPoints(*m, gain.points);
+                if (PlayerWorld* m = PlayerByEntity(member); m != nullptr && !m->dead) AddBerserkPoints(*m, gain.points, monster);
             }
             return;
         }
-        AddBerserkPoints(player, gain.points);
+        AddBerserkPoints(player, gain.points, monster);
     }
     // The request: dead or in it already 3, transformed or
     // hidden 5 (ours: the original's body modes 6 and 7 as stealth), the gauge not full 1; then what

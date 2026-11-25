@@ -838,11 +838,23 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         KillOrbs(*gained, context.time);
         const UiData& d = gui_.data();
         if (gained->experience > 0) {
-            player_.Post(game::GameMessage::Kind::Acquisition, FormatText(d.Text("UIIT_MSG_STATE_GAIN_EXP_NEW"), {std::to_string(gained->experience)}), context.time);
+            player_.Post(game::GameMessage::Kind::Acquisition, FormatText(d.Text("UIIT_MSG_STATE_GAIN_EXP"), {std::to_string(gained->experience)}), context.time);
         }
         if (gained->skillExperience > 0) {
             player_.Post(game::GameMessage::Kind::Acquisition, FormatText(d.Text("UIIT_MSG_STATE_GET_SKILL_EXP"), {std::to_string(gained->skillExperience)}),
                          context.time);
+        }
+    } else if (const auto* points = std::get_if<proto::BerserkPoints>(&event); points != nullptr && points->from != 0) {
+        // Berserk points from a kill: an orb a point from the monster to the player (the original's hwan_v), landing in its
+        // violet absorption with hyanget.wav.
+        if (world_ && points->points > player_.self.berserk) {
+            const std::size_t from = SlotOf(points->from), self = SlotOf(view_.Self());
+            if (from != StageEffects::kNone && self != StageEffects::kNone) {
+                for (int i = 0; i < int(points->points - player_.self.berserk); ++i) {
+                    stageEffects_.Homing(*world_, from, self, "battle\\hwan_v.efp", context.time, orbsSent_++, "battle\\hwn_violet_indraft.efp",
+                                         "prim\\snd\\ui\\hyanget.wav");
+                }
+            }
         }
     } else if (const auto* item = std::get_if<proto::ItemGained>(&event)) {
         // A pick-up's line in the system messages, the Acquisition kind (the player's own or its grab pet's): "[%d] gold
@@ -868,6 +880,17 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         }
         if (player_.self.entity != 0 && progress->skillPoints > player_.self.skillPoints) {
             const std::string line = FormatText(d.Text("UIIT_STT_SKILL_POINT_RECOVER_RESULT"), {std::to_string(progress->skillPoints - player_.self.skillPoints)});
+            player_.Post(game::GameMessage::Kind::Acquisition, line, context.time);
+        }
+        // Skill points taken (a murderer's death) and experience lost (a death's penalty), told as the progress they
+        // leave: the original's lines for each.
+        if (player_.self.entity != 0 && progress->skillPoints < player_.self.skillPoints) {
+            const std::string line = FormatText(d.Text("UIIT_MSG_JSERR_SINCE_YOU_DIE_IN_MURDERER_SP_DEPRIVED_BY_SERVER"),
+                                                {std::to_string(player_.self.skillPoints - progress->skillPoints)});
+            player_.Post(game::GameMessage::Kind::Acquisition, line, context.time);
+        }
+        if (player_.self.entity != 0 && progress->level == player_.self.level && progress->experience < player_.self.experience) {
+            const std::string line = FormatText(d.Text("UIIT_MSG_STATE_LOSE_EXP"), {std::to_string(player_.self.experience - progress->experience)});
             player_.Post(game::GameMessage::Kind::Acquisition, line, context.time);
         }
     } else if (const auto* offered = std::get_if<proto::RevivalOffered>(&event)) {
@@ -4299,7 +4322,7 @@ void PlayScreen::PlaceWalkers(ScreenContext& context) {
         // Its flinch (P1): a one-shot the mixer averages with a swing's (half and half on its bones).
         if (const auto f = flinches_.find(id); f != flinches_.end()) look.flinch = f->second;
         world_->SetStage(slot->second, look, at.x, at.y, at.z, yaw);
-        // Fading in as it appears (ours: 1 s until the original's is traced).
+        // Fading in as it appears, from transparent over 2 s, as the original's characters do (the player's own at once).
         float opacity = 1.0f;
         if (const auto a = appeared_.find(id); a != appeared_.end()) {
             opacity = float(std::clamp((context.time - a->second) / kFadeInSeconds, 0.0, 1.0));

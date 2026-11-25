@@ -42,6 +42,7 @@ void WeatherEffect::Clear() {
 
 void WeatherEffect::Strike(int pattern) {
     ++strikes_;
+    thunder_ = pattern % 3;
     // The original's three patterns (its thunder sound picks the same one): a flash now and one
     // after 1 s; one after 1 s; a flash now and one after 0.5 s.
     switch (pattern % 3) {
