@@ -1263,6 +1263,33 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 if (page_ == "quest-reward:confirm") OpenQuestRewardConfirm(hudContext_, q->id, 1, {0});
             }
         }
+        // --page quest-talk[:N]: a finisher's talk of several pages with the player's rows under them (the White Viper's
+        // return to Leebaek: _09 with the row _10, _11 with _12, _13 with "Receive reward."); N rows picked first.
+        if (page_.starts_with("quest-talk") && !questTalkShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+            hud_.Created()) {
+            questTalkShown_ = true;
+            namespace proto = game::proto;
+            const std::string npcCode = "NPC_CH_GENARAL_SP";
+            sampleQuests_.Apply(proto::QuestDefinition{
+                "quest QNO_GALLERY_TALK\nid 90001\nlevel 88\nname @SN_QNO_TQ_BAEKRYOUNG_10\nstart level 88-\ngiver " + npcCode + "\nfinish " + npcCode +
+                "\ntalk " + npcCode + " done @SN_TALK_QNO_TQ_BAEKRYEONG_10_09 row @SN_TALK_QNO_TQ_BAEKRYEONG_10_10\ntalk " + npcCode +
+                " done @SN_TALK_QNO_TQ_BAEKRYEONG_10_11 row @SN_TALK_QNO_TQ_BAEKRYEONG_10_12\ntalk " + npcCode + " done @SN_TALK_QNO_TQ_BAEKRYEONG_10_13\n"});
+            hudContext_.quests = &sampleQuests_;
+            core::LogInfo("gallery: quest-talk: {} definitions", sampleQuests_.Defs().size());
+            constexpr std::uint32_t kLeebaek = 952;
+            const assets::ObjectRow* row = tables_->Usable() ? tables_->characters.Find(npcCode) : nullptr;
+            if (auto* npc = dynamic_cast<NpcWindow*>(hud_.Show(hud::kNpc))) {
+                npc->ShowNpc(kLeebaek, npcCode, row != nullptr ? row->nameKey : std::string("SN_NPC_CH_GENARAL_SP"), proto::kNpcTalk);
+                proto::QuestSays says;
+                says.npc = kLeebaek;
+                says.quest = 90001;
+                says.moment = "done";
+                says.choice = proto::QuestChoice::HandIn;
+                npc->ShowQuestSays(says);
+                const int picks = page_.size() > 11 ? std::atoi(page_.c_str() + 11) : 0;
+                for (int k = 0; k < picks; ++k) npc->Choose(1);
+            }
+        }
         // --page arena-rule | arena-guild | arena-score | arena-flag | arena-result | arena-desk[:cancel]: the Battle Arena's
         // windows on a sample match: the rule window with both kinds (score selected), the
         // guild window on the sample guild (two chosen), the score and rank windows on a sample board with the

@@ -192,6 +192,7 @@ void NpcWindow::Created(ui::Interface& ui) {
 void NpcWindow::Begin(const std::string& title, const std::string& greetingKey) {
     choices_.clear();
     pages_.clear();
+    pageRows_.clear();
     page_ = 0;
     held_.clear();
     if (ui::Widget* t = Child(0)) t->SetText(title);
@@ -373,6 +374,7 @@ void NpcWindow::ShowEventSays(const proto::EventSays& says) {
     const auto said = [&](const std::string& key) { return context_.hasText && context_.hasText(key) ? context_.Text(key) : std::string(); };
     choices_.clear();
     pages_.clear();
+    pageRows_.clear();
     page_ = 0;
     held_.clear();
     if (ui::Widget* title = Child(0)) title->SetText(context_.Text(npcNameKey_));
@@ -468,20 +470,28 @@ void NpcWindow::ShowQuestSays(const proto::QuestSays& says) {
     picked_.clear();
     // The quest's talk for the moment (each of its lines a page), or the goal's own (a delivery's, a talk's); when it
     // has none for an offer, the quest's name says what it is.
-    std::vector<game::QuestText> said;
+    std::vector<game::QuestText> said, rows;
     if (!says.text.empty()) {
         said.push_back(game::QuestText{says.text, {}}); // a talk game's own words
     } else if (says.moment.empty()) {
         if (says.goal < q->goals.size() && !q->goals[says.goal].talk.Empty()) said.push_back(q->goals[says.goal].talk);
     } else {
         said = game::QuestView::TalksOf(*q, npcCodename_, says.moment);
-        if (said.empty() && says.moment == "offer-again") said = game::QuestView::TalksOf(*q, npcCodename_, "offer");
+        rows = game::QuestView::TalkRowsOf(*q, npcCodename_, says.moment);
+        if (said.empty() && says.moment == "offer-again") {
+            said = game::QuestView::TalksOf(*q, npcCodename_, "offer");
+            rows = game::QuestView::TalkRowsOf(*q, npcCodename_, "offer");
+        }
         if (said.empty() && (says.moment == "done-now" || says.moment == "finished")) said.push_back(game::QuestText{"SN_TALK_COMMON_END", {}});
     }
     if (said.empty() && says.moment.rfind("offer", 0) == 0) said.push_back(q->name);
     paging_ = says;
     pages_.clear();
-    for (const game::QuestText& t : said) pages_.push_back(QuestTextOf(t));
+    pageRows_.clear();
+    for (std::size_t k = 0; k < said.size(); ++k) {
+        pages_.push_back(QuestTextOf(said[k]));
+        pageRows_.push_back(k < rows.size() ? QuestTextOf(rows[k]) : std::string());
+    }
     page_ = 0;
     ShowQuestPage();
 }
@@ -496,9 +506,11 @@ void NpcWindow::ShowQuestPage() {
         box_->AddParagraph(pages_[page_], ui::kWhite);
         box_->AddParagraph({}, ui::kWhite);
     }
-    // Pages to come, or a talk held meanwhile: "Next" (the original's SN_TALK_COMMON_NEXT).
+    // Pages to come, or a talk held meanwhile: the page's row, the player's answer (the original's coded quests' talks),
+    // else "Next" (the original's SN_TALK_COMMON_NEXT). On the last page its row says the moment's choice.
+    const std::string row = page_ < pageRows_.size() ? pageRows_[page_] : std::string();
     if (page_ + 1 < pages_.size() || (!held_.empty() && says.choice == proto::QuestChoice::None)) {
-        AddChoice(context_.Text("SN_TALK_COMMON_NEXT"), {Choice::Kind::QuestNext, 0});
+        AddChoice(!row.empty() ? row : context_.Text("SN_TALK_COMMON_NEXT"), {Choice::Kind::QuestNext, 0});
         return;
     }
     // The answers as the original's talk lists them (numbers the server's list of text keys; its own
@@ -526,11 +538,12 @@ void NpcWindow::ShowQuestPage() {
             AddChoice(context_.Text("SN_TALK_COMMON_EXIT"), {Choice::Kind::End, 0});
             break;
         }
-        AddChoice(context_.Text(says.moment == "done" ? "SN_TALK_COMMON_REWARD" : "SN_TALK_COMMON_OK"), {Choice::Kind::QuestHandIn, says.quest});
+        AddChoice(!row.empty() ? row : context_.Text(says.moment == "done" ? "SN_TALK_COMMON_REWARD" : "SN_TALK_COMMON_OK"),
+                  {Choice::Kind::QuestHandIn, says.quest});
         break;
     }
     case proto::QuestChoice::None:
-        AddChoice(context_.Text("SN_TALK_COMMON_EXIT"), {Choice::Kind::End, 0});
+        AddChoice(!row.empty() ? row : context_.Text("SN_TALK_COMMON_EXIT"), {Choice::Kind::End, 0});
         break;
     case proto::QuestChoice::Rows:
         // A talk game's rows (the original's own lists, e.g. QNO_CH_BIGMAN_1's drinks): the one picked goes back by index.
@@ -759,6 +772,7 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
             const proto::QuestSays next = held_.front();
             held_.pop_front();
             pages_.clear();
+            pageRows_.clear();
             page_ = 0;
             ShowQuestSays(next);
         }

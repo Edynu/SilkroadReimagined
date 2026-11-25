@@ -120,6 +120,9 @@ struct QuestTalk {
     std::string npc;
     std::string moment; // greeting, offer, accepted, denied, not-done, bag-full, done, done-now, middle, offer-again, ...
     QuestText text;
+    // The player's row under this page (the original's coded quests' talks: the player's answer or choice, "No. I was
+    // only bitterly defeated..."): in place of "Next" on a page with more to come, of the moment's own words on its last.
+    QuestText row;
     bool operator==(const QuestTalk&) const = default;
 };
 // The moment's name for the original's BASIC_MENUSTRING_* (empty when unknown) and back.

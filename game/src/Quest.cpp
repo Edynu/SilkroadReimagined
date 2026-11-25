@@ -1109,7 +1109,9 @@ std::string WriteQuest(const QuestDef& q) {
     for (const QuestDef::Tier& t : q.tiers) {
         w.Line(std::format("tier {} {} sp {}{}", t.item, t.count, t.sp, t.talk.Empty() ? std::string() : " talk " + Text(t.talk)));
     }
-    for (const QuestTalk& t : q.talks) w.Line(std::format("talk {} {} {}", t.npc, t.moment, Text(t.text)));
+    for (const QuestTalk& t : q.talks) {
+        w.Line(std::format("talk {} {} {}", t.npc, t.moment, Text(t.text)) + (t.row.Empty() ? std::string() : " row " + Text(t.row)));
+    }
     return w.out;
 }
 
@@ -1299,7 +1301,9 @@ bool ParseQuest(std::string_view text, QuestDef& out, std::string& error) {
             if (ok) out.tiers.push_back(std::move(t));
         } else if (head == "talk") {
             QuestTalk t;
-            ok = r.Word(t.npc, "the NPC") && r.Word(t.moment, "the moment") && r.Text(t.text, "what is said") && r.End();
+            ok = r.Word(t.npc, "the NPC") && r.Word(t.moment, "the moment") && r.Text(t.text, "what is said");
+            if (ok && r.Take("row")) ok = r.Text(t.row, "the player's row");
+            ok = ok && r.End();
             if (ok && BasicMenuStringOf(t.moment).empty()) {
                 ok = false;
                 why = std::format("'{}' is no moment (greeting, offer, offer-again, accepted, denied, not-done, middle, bag-full, done, "

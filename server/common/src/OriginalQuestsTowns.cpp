@@ -274,7 +274,7 @@ talk NPC_CA_WAREHOUSE offer-again @SN_TALK_QNO_CA_WAREHOUSE_4_02
 # (_15 with the row _03): alone into INS_QNO_TQ_BAEKRYEONG_10 (the 5th floor by the Flame Master's place, its start
 # _RefInstance_World_Start_Pos 19), where the client plays its scene (qno_tq_baekryoung_10: ShinMoo, the Man of Flames,
 # defeats the player); 39 s on the talk with ShinMoo is met and the player goes out (leaving before undoes it; ShinMoo is
-# the scene's own, no NPC row). Back at Leebaek: _09, _11, _13 (the player's rows _10, _12 our Next), then the pay.
+# the scene's own, no NPC row). Back at Leebaek: _09, _11, _13 (the player's rows _10, _12 under the first two), then the pay.
 quest QNO_TQ_BAEKRYOUNG_10
 start level 88-
 start after all QNO_TQ_BAEKRYOUNG_9
@@ -289,8 +289,8 @@ talk NPC_CH_GENARAL_SP offer @SN_TALK_QNO_TQ_BAEKRYEONG_10_01
 talk NPC_CH_GENARAL_SP accepted @SN_TALK_QNO_TQ_BAEKRYEONG_10_02
 talk NPC_CH_GENARAL_SP denied @SN_TALK_QNO_TQ_BAEKRYEONG_10_04
 talk NPC_CH_GENARAL_SP trial @SN_TALK_QNO_TQ_BAEKRYEONG_10_15
-talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_09
-talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_11
+talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_09 row @SN_TALK_QNO_TQ_BAEKRYEONG_10_10
+talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_11 row @SN_TALK_QNO_TQ_BAEKRYEONG_10_12
 talk NPC_CH_GENARAL_SP done @SN_TALK_QNO_TQ_BAEKRYEONG_10_13
 
 # QNO_TQ_BAEKRYOUNG_13 ("To Flame Sprite Passage 1"; SR_GameServer's own class). Leebaek's letter for ShinMoo: under way,

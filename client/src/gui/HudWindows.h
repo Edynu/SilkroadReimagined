@@ -1122,6 +1122,7 @@ private:
     void ShowQuestPage();
     game::proto::QuestSays paging_;
     std::vector<std::string> pages_;
+    std::vector<std::string> pageRows_; // each page's row, the player's answer (empty: "Next", or the moment's words)
     std::size_t page_ = 0;
     std::deque<game::proto::QuestSays> held_;
 };

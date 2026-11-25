@@ -327,6 +327,22 @@ TEST_CASE("Quests: the original's coded quests read from our definitions of them
     CHECK(game::QuestView::TalksOf(story, "NPC_WC_FERRY4", "finished").size() == 1);
     REQUIRE(byCode.contains("QNO_KT_POTION_2"));
     CHECK(game::QuestView::TalksOf(*byCode["QNO_KT_POTION_2"], "NPC_KT_POTION", "offer").size() == 2);
+    // The player's rows under a talk's pages (the original's coded talks: an answer, a choice), the last page's in
+    // place of the moment's own words; written back as read.
+    REQUIRE(byCode.contains("QNO_TQ_BAEKRYOUNG_10"));
+    const auto viper = game::QuestView::TalkRowsOf(*byCode["QNO_TQ_BAEKRYOUNG_10"], "NPC_CH_GENARAL_SP", "done");
+    REQUIRE(viper.size() == 3);
+    CHECK(viper[0].key == "SN_TALK_QNO_TQ_BAEKRYEONG_10_10");
+    CHECK(viper[1].key == "SN_TALK_QNO_TQ_BAEKRYEONG_10_12");
+    CHECK(viper[2].Empty());
+    REQUIRE(byCode.contains("QNO_CA_TREASURE_5"));
+    CHECK(game::QuestView::TalkRowsOf(*byCode["QNO_CA_TREASURE_5"], "NPC_CA_SMITH", "done").back().key == "SN_TALK_QNO_CA_TREASURE_5_15");
+    {
+        game::QuestDef again;
+        std::string why;
+        REQUIRE_MESSAGE(game::ParseQuest(game::WriteQuest(*byCode["QNO_TQ_BAEKRYOUNG_10"]), again, why), why);
+        CHECK(again.talks == byCode["QNO_TQ_BAEKRYOUNG_10"]->talks);
+    }
     REQUIRE(byCode.contains("QNO_WC_FERRY3_1"));
     CHECK(byCode["QNO_WC_FERRY3_1"]->finisher == "NPC_WC_SMITH");
     // The Roc's key chain and prizes: the seven Guardrokies in a party, each finish clearing the one

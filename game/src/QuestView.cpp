@@ -19,6 +19,13 @@ std::vector<QuestText> QuestView::TalksOf(const QuestDef& q, const std::string& 
     return out;
 }
 
+std::vector<QuestText> QuestView::TalkRowsOf(const QuestDef& q, const std::string& npc, const std::string& moment) {
+    std::vector<QuestText> out;
+    for (const QuestTalk& t : q.talks)
+        if (t.npc == npc && t.moment == moment) out.push_back(t.row);
+    return out;
+}
+
 const QuestDef* QuestView::Find(std::uint32_t quest) const {
     const auto it = defs_.find(quest);
     return it != defs_.end() ? &it->second : nullptr;

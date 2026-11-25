@@ -56,6 +56,8 @@ public:
     // Every line of that moment in their order: the pages the NPC's window shows one after another (the original's
     // multi-page talks, LuaQuestShowMenuCommon's pages: QNO_KT_POTION_2's offer, QNO_WC_FERRY4_1's story).
     static std::vector<QuestText> TalksOf(const QuestDef& q, const std::string& npc, const std::string& moment);
+    // Those pages' rows, page by page (empty: none, "Next" or the moment's own words).
+    static std::vector<QuestText> TalkRowsOf(const QuestDef& q, const std::string& npc, const std::string& moment);
     // The mark over an NPC (its codename), none when it has nothing for the player.
     std::optional<proto::QuestMark> MarkOf(const std::string& npc) const {
         const auto it = marks_.find(npc);
