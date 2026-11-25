@@ -199,7 +199,14 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
     for (const game::GuildView::Line& line : guild_.Apply(event)) {
         const std::string shown = FormatText(text(line.key), {line.argument, line.secondKey.empty() ? line.second : text(line.secondKey), line.third});
         core::LogInfo("game: guild: {}", shown);
+        // A war's end: won or lost, in the 1.188 client's "Alarm" box (its message box, UIIT_STT_EVENTGUIDE), not a line.
+        if (line.key == "UIIT_MSG_GUILDWAR_WINERGUILD" || line.key == "UIIT_MSG_GUILDWAR_LOSEGUILD") {
+            hud_.Inform("UIIT_STT_EVENTGUIDE", {shown}, {});
+            continue;
+        }
         player_.Post(game::GameMessage::Kind::General, shown, context.time);
+        // A war begun: on the warning banner too.
+        if (line.key == "UIIT_MSG_GUILDWAR_GOTOWAR") player_.Notify(game::Banner::Kind::Warning, shown, context.time);
     }
     player_.self.guild = guild_.Guild().id;
     // The election's window asked open (its row at the guild NPC).
