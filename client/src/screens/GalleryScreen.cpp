@@ -1068,6 +1068,32 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 OpenMarketScript(hudContext_, "om-register", "");
             }
         }
+        // --page open-market-alarm: the consignment notification's side icon and its window on three sample listings (one on
+        // sale, one sold, one expired).
+        if (page_ == "open-market-alarm" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
+            stallShown_ = true;
+            if (tables_->Usable()) {
+                namespace proto = game::proto;
+                hudContext_.items = &tables_->items;
+                const auto listing = [&](std::uint32_t id, const char* code, game::openmarket::Status status, std::uint32_t seconds) {
+                    proto::OpenMarketListing l;
+                    l.listing = id;
+                    l.status = std::uint8_t(status);
+                    if (const assets::ItemRow* r = tables_->items.Find(std::string_view(code))) l.item = {0, r->refObjId, 0, 0, 40, 1, {}};
+                    l.price = 450000;
+                    l.secondsLeft = seconds;
+                    return l;
+                };
+                proto::OpenMarketListings mine;
+                mine.listings = {listing(1, "ITEM_CH_BLADE_02_A_RARE", game::openmarket::Status::OnSale, 2 * 86400 + 3600),
+                                 listing(2, "ITEM_ETC_HP_POTION_02", game::openmarket::Status::Sold, 27 * 86400),
+                                 listing(3, "ITEM_CH_BOW_01_B", game::openmarket::Status::Expired, 5 * 3600)};
+                sample_.openMarket.Apply(proto::OpenMarketEvent{mine}, context.time);
+                hudContext_.openMarketRequest = [](proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: open market request 0x{:04X}", id); };
+                ShowMarketAlarmGuide(hudContext_, true);
+                ToggleMarketAlarm(hudContext_);
+            }
+        }
         // --page open-market-buy: the Open Market's Search page with one result, chosen and bought (its purchase box).
         if (page_ == "open-market-buy" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
             stallShown_ = true;

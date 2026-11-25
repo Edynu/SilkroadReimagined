@@ -29,6 +29,8 @@ void PlayScreen::HandleOpenMarket(ScreenContext& context, const proto::OpenMarke
         if (gui_.data().Ready()) post(context.time);
         else textLater_.push_back(post);
     }
+    // A sale's or an expiry's notice: the notification icon blinks.
+    if (std::holds_alternative<proto::OpenMarketNews>(event)) MarketAlarmNews(hudContext_);
     if (const auto* a = std::get_if<proto::OpenMarketAnswer>(&event)) {
         if (a->code != game::openmarket::code::kOk) core::LogInfo("game: open market: request {:#x} refused, code {:#x}", a->request, a->code);
         else if (a->request == proto::OpenMarketBuy::kId) OpenMarketSearchAgain(hudContext_); // the bought row off the list

@@ -172,6 +172,10 @@ void PlayScreen::HandleMallItems(ScreenContext& context, const proto::MallEvent&
             core::LogInfo("game: time service {} item {}: {} s left, bonus {}/{} s{}", int(s.category), s.item, s.secondsLeft, s.bonus >> 16, s.bonus & 0xFFFF,
                           s.paused ? " (paused)" : "");
         }
+        // The Open Market ticket running: the consignment notification's side icon.
+        const bool ticket = std::any_of(t->services.begin(), t->services.end(),
+                                        [](const proto::TimedService& s) { return s.category == game::openmarket::kTicketCategory && s.secondsLeft > 0; });
+        ShowMarketAlarmGuide(hudContext_, ticket);
     } else if (const auto* g = std::get_if<proto::StorageGrown>(&event)) {
         core::LogInfo("game: {} grown to {}", g->target == 1 ? "the bag" : "the storage", int(g->size));
     }

@@ -1433,6 +1433,11 @@ void UpdateTemplePoints(HudContext& context, const game::proto::TemplePoints& po
 // The board's icon in the side icons' row (proto::TempleIcon; CIFConfirmReputationGuide 0xA5): shown or hidden.
 void ShowTempleGuide(HudContext& context, bool show);
 void ShowOpenMarket(HudContext& context, bool shown);
+// The consignment notification window (197, open_market_2.2dt) and its side icon (198) while a ticket runs; the icon blinks
+// after a sale's or an expiry's notice.
+void ToggleMarketAlarm(HudContext& context);
+void ShowMarketAlarmGuide(HudContext& context, bool shown);
+void MarketAlarmNews(HudContext& context);
 bool OpenMarketTakesItems(HudContext& context);
 void OpenMarketPut(HudContext& context, int place);
 bool OpenMarketScript(HudContext& context, const std::string& verb, const std::string& arg);

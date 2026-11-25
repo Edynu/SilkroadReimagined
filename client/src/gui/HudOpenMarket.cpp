@@ -37,6 +37,8 @@ constexpr const char* kConfirmLayout = "res_ui\\open_market_1_3.2dt";
 constexpr int kConfirmBoxId = 196;
 constexpr const char* kBuyLayout = "res_ui\\open_market_1_4.2dt";
 constexpr int kBuyBoxId = 199;
+constexpr const char* kAlarmLayout = "res_ui\\open_market_2.2dt";
+constexpr int kAlarmWindowId = 197, kAlarmGuideId = 198;
 
 template <typename T>
 void Send(HudContext& c, const T& message) {
@@ -175,6 +177,142 @@ public:
 private:
     HudContext& c_;
     ui::Interface* ui_ = nullptr;
+};
+
+// The consignment notification window (CNIFOpenMarketAlramWnd, open_market_2.2dt, while a ticket runs): the player's
+// listings in three groups, each a row "Sale Registered (n/room)", "Sale Complete (..)", "Deletion Pending (..)" with
+// its fold button (58: gil_friend_grop_open / close), its listings under it ("- name" and the minutes left; the
+// pending deletions in red). Opened, it asks the server for the listings.
+class AlarmWindow : public ui::MainFrame {
+public:
+    AlarmWindow(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+    void Created(ui::Interface& ui) override {
+        MainFrame::Created(ui);
+        const auto* records = c_.layout2dt ? c_.layout2dt(kAlarmLayout) : nullptr;
+        if (records == nullptr || records->empty()) return;
+        const std::vector<ui::Widget*> made = Build2dt(ui, *this, *records, {});
+        for (std::size_t i = 0; i < records->size(); ++i) {
+            if ((*records)[i].className == "CNIFOpenMarketAlramSlot" && made[i] != nullptr) rows_.push_back(made[i]);
+        }
+        std::sort(rows_.begin(), rows_.end(), [](const ui::Widget* a, const ui::Widget* b) { return a->rect.y < b->rect.y; });
+        bar_ = ui::As<ui::ScrollBar>(Find(80));
+        Send(c_, proto::OpenMarketMine{});
+    }
+    void Update(ui::Frame& frame) override {
+        MainFrame::Update(frame);
+        if (c_.state == nullptr) return;
+        const int scroll = bar_ != nullptr ? bar_->position() : 0;
+        const int minute = int(c_.time / 60.0);
+        if (c_.state->openMarket.version == seen_ && scroll == scroll_ && minute == minute_) return;
+        seen_ = c_.state->openMarket.version;
+        scroll_ = scroll;
+        minute_ = minute;
+        Fill();
+    }
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && n.control == 58 && n.source != nullptr) {
+            for (std::size_t i = 0; i < rows_.size() && i < shown_.size(); ++i) {
+                if (n.source->parent() == rows_[i] && shown_[i].header) {
+                    folded_[std::size_t(shown_[i].group)] = !folded_[std::size_t(shown_[i].group)];
+                    Fill();
+                    return true;
+                }
+            }
+        }
+        return MainFrame::OnNotice(n);
+    }
+
+private:
+    struct Line {
+        int group = 0;
+        bool header = false;
+        const proto::OpenMarketListing* listing = nullptr;
+        int count = 0;
+    };
+    void Fill() {
+        const game::OpenMarketView& m = c_.state->openMarket;
+        static constexpr const char* kGroups[3] = {"UIIT_STT_OPEN_MARKET_ANNOUNCING_UI_TRADE_ENTER", "UIIT_STT_OPEN_MARKET_ANNOUNCING_UI_TRADE_FINISH",
+                                                   "UIIT_STT_OPEN_MARKET_ANNOUNCING_UI_DELETE_WAIT"};
+        static constexpr game::openmarket::Status kStatus[3] = {game::openmarket::Status::OnSale, game::openmarket::Status::Sold,
+                                                                game::openmarket::Status::Expired};
+        std::vector<Line> lines;
+        for (int g = 0; g < 3; ++g) {
+            std::vector<const proto::OpenMarketListing*> in;
+            for (const proto::OpenMarketListing& l : m.Listings()) {
+                if (l.status == std::uint8_t(kStatus[g])) in.push_back(&l);
+            }
+            lines.push_back({g, true, nullptr, int(in.size())});
+            if (!folded_[std::size_t(g)]) {
+                for (const auto* l : in) lines.push_back({g, false, l, 0});
+            }
+        }
+        const int most = std::max(0, int(lines.size()) - int(rows_.size()));
+        if (bar_ != nullptr) bar_->SetRange(0, most);
+        const int first = std::clamp(scroll_, 0, most);
+        shown_.clear();
+        const double passed = c_.time - m.ListingsAt();
+        for (std::size_t i = 0; i < rows_.size(); ++i) {
+            ui::Widget* row = rows_[i];
+            const std::size_t at = std::size_t(first) + i;
+            row->visible = at < lines.size();
+            if (!row->visible) continue;
+            const Line& l = lines[at];
+            shown_.push_back(l);
+            ui::Widget* text = row->Child(21);
+            ui::Widget* time = row->Child(41);
+            auto* fold = ui::As<ui::Button>(row->Child(58));
+            if (fold != nullptr) {
+                fold->visible = l.header;
+                fold->texture = folded_[std::size_t(l.group)] ? "interface\\guild\\gil_friend_grop_open.ddj" : "interface\\guild\\gil_friend_grop_close.ddj";
+            }
+            const ui::Color colour = !l.header && l.group == 2 ? ui::Argb(0xFFFF4A4A) : ui::kWhite;
+            if (auto* t = ui::As<ui::Static>(text)) t->textColor = colour;
+            if (auto* t = ui::As<ui::Static>(time)) t->textColor = colour;
+            if (l.header) {
+                if (text != nullptr) text->SetText(std::format("{} ({}/{})", c_.Text(kGroups[l.group]), l.count, int(m.State().room)));
+                if (time != nullptr) time->SetText({});
+            } else {
+                const assets::ItemRow* item = c_.items != nullptr ? c_.items->Find(l.listing->item.item) : nullptr;
+                if (text != nullptr) text->SetText("- " + (item != nullptr ? c_.Text(item->nameKey) : std::string()));
+                const long long minutes = std::max(0LL, (long long)(double(l.listing->secondsLeft) - passed) / 60);
+                if (time != nullptr) time->SetText(std::format("{} {}", minutes, c_.Text("UIIT_STT_QUEST_MINUTE")));
+            }
+        }
+    }
+    HudContext& c_;
+    std::vector<ui::Widget*> rows_;
+    std::vector<Line> shown_;
+    ui::ScrollBar* bar_ = nullptr;
+    std::array<bool, 3> folded_{};
+    std::uint64_t seen_ = ~std::uint64_t(0);
+    int scroll_ = 0, minute_ = -1;
+};
+
+// Its side icon (CIFOpenMarketAlramGuide, 198, 40 x 40) while a ticket runs: icon\\etc\\sell_icon_1 and _2 in turn (500
+// ms); after a sale's or an expiry's notice it blinks (shown, hidden, every 500 ms) until the window opens. A click opens
+// the window, or closes it.
+class AlarmGuide : public ui::Static {
+public:
+    AlarmGuide(const assets::UiLayoutNode& node, HudContext& c) : Static(node), c_(c) {}
+    bool blinking = false;
+    void Created(ui::Interface& ui) override {
+        Static::Created(ui);
+        interactive = true;
+    }
+    void Update(ui::Frame& frame) override {
+        Static::Update(frame);
+        const int half = int(c_.time * 2.0);
+        texture = half % 2 != 0 ? "icon\\etc\\sell_icon_2.ddj" : "icon\\etc\\sell_icon_1.ddj";
+        alpha = blinking && half % 2 != 0 ? 0.0f : 1.0f;
+    }
+    void Mouse(ui::Frame& frame) override {
+        if (!frame.input.Released(ui::MouseButton::Left) || frame.pointer.hovered != this) return;
+        blinking = false;
+        ToggleMarketAlarm(c_);
+    }
+
+private:
+    HudContext& c_;
 };
 
 class MarketWindow : public ui::MainFrame {
@@ -653,6 +791,41 @@ void RegisterOpenMarketWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CNIFOpenMarketRegistrationPriceMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<PriceBox>(n, *c); });
     ui.Register("CNIFOpenMarketSearchPriceMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<BuyBox>(n, *c); });
     ui.Register("CNIFOpenMarketRegistrationConfirmationMsgBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<RegisterConfirmBox>(n, *c); });
+    ui.Register("CNIFOpenMarketAlramWnd", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<AlarmWindow>(n, *c); });
+    ui.Register("CIFOpenMarketAlramGuide", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<AlarmGuide>(n, *c); });
+}
+
+void ToggleMarketAlarm(HudContext& c) {
+    ui::Interface* ui = c.hud != nullptr ? c.hud->interface() : nullptr;
+    if (ui == nullptr) return;
+    if (ui::Widget* w = ui->Window(kAlarmWindowId)) {
+        ui->Close(w);
+        return;
+    }
+    const auto node = RootNode2dt(c, kAlarmLayout, "CNIFOpenMarketAlramWnd", kAlarmWindowId);
+    if (!node) return;
+    if (ui::Widget* w = ui->Open(*node)) ui->Centre(*w, ui->screen());
+}
+
+void ShowMarketAlarmGuide(HudContext& c, bool shown) {
+    if (c.hud == nullptr) return;
+    if (!shown) {
+        c.hud->Hide(kAlarmGuideId);
+        return;
+    }
+    if (c.hud->Shown(kAlarmGuideId)) return;
+    assets::UiLayoutNode node;
+    node.type = "CIFOpenMarketAlramGuide";
+    node.id = kAlarmGuideId;
+    node.rect = {0.0f, 0.0f, 40.0f, 40.0f};
+    c.hud->ShowGuide(node);
+}
+
+void MarketAlarmNews(HudContext& c) {
+    ui::Interface* ui = c.hud != nullptr ? c.hud->interface() : nullptr;
+    if (ui == nullptr) return;
+    // The icon blinks while the window is not open (the window shows the news itself).
+    if (auto* guide = dynamic_cast<AlarmGuide*>(ui->Window(kAlarmGuideId)); guide != nullptr && ui->Window(kAlarmWindowId) == nullptr) guide->blinking = true;
 }
 
 void ShowOpenMarket(HudContext& c, bool shown) {
