@@ -1881,6 +1881,16 @@ void PlayScreen::Fight(ScreenContext& context, const game::TitleEvent& event) {
                     damageTexts_.push_back({target->position, hit->damage, (hit->flags & proto::kDamageCritical) != 0, colour, context.time});
                 }
             }
+        } else if ((hit->flags & proto::kDamageBlocked) != 0) {
+            // A blocked hit: the "blocking" mark over the struck one, rising as the numbers do (the original's kind 2).
+            const game::WorldView::Entity* target = view_.Find(hit->target);
+            const game::WorldView::Entity* self = view_.Find(view_.Self());
+            if (target != nullptr && self != nullptr) {
+                const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat(target->position);
+                if (hit->attacker == view_.Self() || hit->target == view_.Self() || std::hypot(a.x - b.x, a.z - b.z) < 200.0) {
+                    damageTexts_.push_back({target->position, 0, false, IsPlayer(*target) ? ui::Argb(0xFFFF3A3A) : ui::Argb(0xFFFFFFFF), context.time, true});
+                }
+            }
         }
         if ((hit->flags & proto::kDamageKilled) != 0) {
             EndPresentation(hit->target, context.time); // a death ends what it was showing
@@ -3916,6 +3926,12 @@ void PlayScreen::DrawDamage(ScreenContext& context, ui::Painter& paint) {
         const float w = (d.critical ? 36.0f : 24.0f) * sx, h = (d.critical ? 60.0f : 40.0f) * sy, step = (d.critical ? 33.0f : 22.0f) * sx;
         const float left = std::floor(x - (step * float(digits.size() - 1) + w) / 2.0f), top = std::floor(y - h);
         const auto tint = [&](ui::Color c) { return (c & 0x00FFFFFFu) | (std::uint32_t(std::lround(alpha * 255.0f)) << 24); };
+        if (d.blocked) {
+            const ui::Rect r{std::floor(x - 52.0f * sx), std::floor(y - 40.0f * sy), 104.0f * sx, 40.0f * sy}; // its art's 104 x 40
+            paint.Image("interface\\hitcount\\blocking_shadow.ddj", r, {0, 0}, {1, 1}, tint(0xFF000000u));
+            paint.Image("interface\\hitcount\\blocking.ddj", r, {0, 0}, {1, 1}, tint(d.colour));
+            continue;
+        }
         for (std::size_t i = 0; i < digits.size(); ++i) {
             const ui::Rect r{left + step * float(i), top, w, h};
             const std::string base = std::string("interface\\hitcount\\hitcount_") + digits[i];

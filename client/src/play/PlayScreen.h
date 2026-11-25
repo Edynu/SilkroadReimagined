@@ -827,6 +827,7 @@ private:
         bool critical = false;
         ui::Color colour = 0;
         double born = 0;
+        bool blocked = false; // the "blocking" mark alone, no number (the original's hit kind 2)
     };
     std::vector<DamageText> damageTexts_;
     // Effects (V1; play/PlayEffects.cpp): a skill's stages on its caster and target (with its arrows
