@@ -88,12 +88,14 @@ constexpr double kPickSeconds = 1.0;
 constexpr float kFadeSeconds = 0.5f;
 // Ours until the original's are known: a click this near a gate's spot means the gate, or one on
 // its crystal (an upright cylinder this wide and tall over the spot; the gate rows' click box,
-// columns 48..50, is not read yet); the character talks to it from this near (inside the server's
-// reach, GameServerConfig::gateReach, 300) and walks to this near first.
-constexpr float kGateClick = 40.0f, kGateCrystalRadius = 30.0f, kGateCrystalHeight = 120.0f, kGateReach = 200.0f, kGateWalkTo = 150.0f;
-// An NPC clicked farther than this is walked to first, nearer talked to at once (1.188).
+// columns 48..50, is not read yet). A gate's menu opens from up to 800 away (the original's; the server takes
+// a gate structure from 800); farther, a walk to a random point 20..640 from it first.
+constexpr float kGateClick = 40.0f, kGateCrystalRadius = 30.0f, kGateCrystalHeight = 120.0f, kGateReach = 800.0f;
+constexpr float kGateWalkNearest = 20.0f, kGateWalkFarthest = 640.0f;
+// An NPC clicked farther than this is walked to first (to a random 20..240 from it), nearer talked to at once (1.188).
 constexpr float kCameraFarthest = 300.0f; // the follow camera's farthest (ours; the original's 150)
-constexpr float kNpcReach = 240.0f;
+constexpr float kCameraPitchLimit = 1.0707964f; // the original's: half pi less 0.5, both ways
+constexpr float kNpcReach = 240.0f, kNpcWalkNearest = 20.0f;
 
 // Gold (TID 3/3/5, not the TID4 1 tokens and coins sharing it:'s test).
 bool IsGold(const assets::ItemRow& row) {
@@ -1464,6 +1466,11 @@ int PlayScreen::StatusGauge(std::uint32_t id, const game::WorldView::Entity& e, 
     }
 }
 
+// A random distance in [nearest, farthest] to stop short of what was clicked (the original's rand() between the two).
+float PlayScreen::WalkUpDistance(float nearest, float farthest) {
+    return std::uniform_real_distribution<float>(nearest, farthest)(walkRandom_);
+}
+
 bool PlayScreen::IsNpc(const game::WorldView::Entity& e) const {
     // By its model alone: a custom NPC has a name too (the server's, the Beta Helper; game/BetaQuests.h).
     if (!tables_ || !tables_->Usable() || e.kind != proto::EntityKind::Character) return false;
@@ -2509,12 +2516,13 @@ void PlayScreen::CameraInput(ScreenContext& context) {
     if (in.Pressed(ui::MouseButton::Right) && !blocked) turning_ = true;
     if (!in.Down(ui::MouseButton::Right)) turning_ = false;
     if (turning_) {
-        cameraYaw_ += in.mouseDelta().x * 0.006f;
-        // The quarter view holds its pitch (the original's leaves it alone in view 2).
-        if (Sight() != core::Sight::QuarterView) cameraPitch_ = std::clamp(cameraPitch_ + in.mouseDelta().y * 0.006f, -0.3f, 1.45f);
+        // 0.005 radians a pixel both ways, the pitch within the original's +-1.0708 (half pi less 0.5; positive looks
+        // down); the quarter view holds its pitch (the original's leaves it alone in view 2).
+        cameraYaw_ += in.mouseDelta().x * 0.005f;
+        if (Sight() != core::Sight::QuarterView) cameraPitch_ = std::clamp(cameraPitch_ + in.mouseDelta().y * 0.005f, -kCameraPitchLimit, kCameraPitchLimit);
     }
-    // Out to 300 (ours: half as far again as before, the user's ask 2026-11-13; the original's 150).
-    if (!blocked && in.wheel() != 0.0f) cameraDistance_ = std::clamp(cameraDistance_ * (1.0f - in.wheel() * 0.1f), 15.0f, kCameraFarthest);
+    // The wheel: 6 units a notch (the original's), from 10 out to 300 (ours: the original's farthest is 150, M-13).
+    if (!blocked && in.wheel() != 0.0f) cameraDistance_ = std::clamp(cameraDistance_ - in.wheel() * 6.0f, 10.0f, kCameraFarthest);
 }
 
 void PlayScreen::HandleInput(ScreenContext& context) {
@@ -2678,7 +2686,8 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
         if (self != nullptr && it != nullptr) {
             const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat(it->position);
             const double dx = a.x - b.x, dz = a.z - b.z, length = std::max(1.0, std::hypot(dx, dz));
-            const double walkTo = UseWalkTo(npc, kGateWalkTo);
+            // The original's: a random stop 20..240 from it, so players do not all stand on one spot.
+            const double walkTo = UsedNear(npc) ? double(UseWalkTo(npc, kNpcReach)) : double(WalkUpDistance(kNpcWalkNearest, kNpcReach));
             // Far: the ground click's walk (its stop, kept through a swing), the talk on arrival; near: at once.
             if (length > UseReach(npc, kNpcReach)) {
                 if (ClickWalk(context, proto::FromFlat({b.x + dx / length * walkTo, b.z + dz / length * walkTo}, it->position.y), false)) {
@@ -2697,7 +2706,8 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
         if (self != nullptr && GateNear(self->position, kGateReach) != gate) {
             const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat({gate->region, gate->x, gate->y, gate->z});
             const double dx = a.x - b.x, dz = a.z - b.z, length = std::max(1.0, std::hypot(dx, dz));
-            ClickWalk(context, proto::FromFlat({b.x + dx / length * kGateWalkTo, b.z + dz / length * kGateWalkTo}, gate->y), false); // as an NPC's
+            const double walkTo = WalkUpDistance(kGateWalkNearest, kGateWalkFarthest);
+            ClickWalk(context, proto::FromFlat({b.x + dx / length * walkTo, b.z + dz / length * walkTo}, gate->y), false); // as an NPC's
         }
     } else if (ground && fortressPick_ && !sky) {
         FortressPicked(target); // a fortress item's ground point (a flag, a guard, a tablet's monster), not a walk
@@ -3728,18 +3738,25 @@ void PlayScreen::GroundDecals(ScreenContext& context) {
         }
         world_->Effects().GroundDecal(std::string("effect\\select_0") + char('1' + slot) + ".ddj", kCells, corners);
     };
-    // Where a click sent the character: until it gets there (or goes elsewhere).
+    // One marker, as the original's: the latest of a ground click (at the destination, until the character gets there) and a
+    // selection (under the selected one) has it.
+    if (player_.target.entity != markedTarget_) {
+        markedTarget_ = player_.target.entity;
+        markedTargetAt_ = context.time;
+    }
+    bool destination = false;
     if (moveMarker_.born >= 0.0) {
         const game::WorldView::Entity* self = view_.Find(view_.Self());
         const bool arrived = self != nullptr && !self->moving && context.time - moveMarker_.born > 0.5;
         if (arrived) {
             moveMarker_.born = -1.0;
-        } else {
+        } else if (player_.target.entity == 0 || moveMarker_.born >= markedTargetAt_) {
             decal(moveMarker_.at, 0.0f, 0);
+            destination = true;
         }
     }
     // Under the selected one, turned with it.
-    if (player_.target.entity != 0) {
+    if (player_.target.entity != 0 && !destination) {
         if (const game::WorldView::Entity* e = view_.Find(player_.target.entity)) {
             using Kind = game::TargetStatus::Kind;
             const Kind kind = player_.target.kind;
@@ -4342,6 +4359,7 @@ void PlayScreen::PlaceWalkers(ScreenContext& context) {
         // Hidden (a stealth, an invisibility) yet shown here (itself, or seen by a detector): see-through
         // (ours: the original draws it by its body mode).
         if (Hidden(id)) opacity = std::min(opacity, 0.45f);
+        if (id == view_.Self()) opacity = std::min(opacity, ownFade_); // looking steeply up
         world_->SetStageOpacity(slot->second, opacity);
     }
     // The ones fading out: standing (or lying) where they were.
@@ -4478,16 +4496,15 @@ void PlayScreen::FollowCamera() {
         at.z += shake_.offset[2];
     }
     const core::Sight sight = Sight();
-    if (sight != lastSight_) {
-        // Into the quarter view: looking down at 45 degrees, held there.
-        if (sight == core::Sight::QuarterView) cameraPitch_ = 0.785f;
-        lastSight_ = sight;
-    }
-    // Third person: while the character walks, the camera swings behind it (half the way in a
-    // quarter of a second).
-    if (sight == core::Sight::ThirdPerson && self->moving) {
-        float turn = std::remainder(self->yaw - cameraYaw_, 6.2831853f);
-        cameraYaw_ += turn * std::min(1.0f, cameraDt_ * 2.8f);
+    lastSight_ = sight; // the quarter view keeps the pitch it had (the original's leaves it)
+    // Third person: the camera behind the character's heading at all times (the original's view 1).
+    if (sight == core::Sight::ThirdPerson) cameraYaw_ = self->yaw;
+    // Looking steeply up (under -0.9) the player's own character fades out, back in above (the original's, over 0.5 s),
+    // so it never hides the sky.
+    {
+        const float want = cameraPitch_ < -0.9f ? 0.0f : 1.0f;
+        const float step = cameraDt_ * 2.0f;
+        ownFade_ = want < ownFade_ ? std::max(want, ownFade_ - step) : std::min(want, ownFade_ + step);
     }
     if (benchView_ == 1) {
         cameraYaw_ = self->yaw - 1.5708f; // the open side of the bench's spot
@@ -4498,26 +4515,50 @@ void PlayScreen::FollowCamera() {
         cameraDistance_ = 32.0f;
         cameraPitch_ = 0.12f;
     }
-    // The world between the chest and the camera pulls it in, 5 units short of the hit (the
+    // Where it looks (the original's): 14.2 over the feet at 150, rising to the head as it comes near (10), by the
+    // line through both (on to our 300 the same way); the head is the model's height less 3.8. A rider's is its
+    // mount's: the mount's height less 13 over its feet, and a quarter of that height for the head.
+    float lookBase = at.y, head = 14.2f;
+    if (world_) {
+        if (const auto mount = riders_.find(subject); mount != riders_.end()) {
+            if (const auto m = slots_.find(mount->second); m != slots_.end()) {
+                if (const float height = world_->StageHeight(m->second); height > 1.0f) {
+                    lookBase = at.y + height - 13.0f;
+                    head = height * 0.25f;
+                }
+            }
+        } else if (const auto s = slots_.find(subject); s != slots_.end()) {
+            if (const float height = world_->StageHeight(s->second); height > 1.0f) head = height - 3.8f;
+        }
+    }
+    const float lookY = lookBase + 14.2f + (cameraDistance_ - 150.0f) * ((14.2f - head) / 140.0f);
+    // Looking up (a negative pitch) brings it in toward 40 straight up (the original's: from 150 at level; ours from the
+    // wheel's distance when that is farther).
+    float wanted = cameraDistance_;
+    if (cameraPitch_ < 0.0f) {
+        const float u = std::min(1.0f, -cameraPitch_ / kCameraPitchLimit);
+        const float from = std::max(150.0f, cameraDistance_);
+        wanted = std::min(cameraDistance_, (1.0f - std::sin(1.5707964f * u)) * (from - 40.0f) + 40.0f);
+    }
+    // The world between the point and the camera pulls it in, 5 units short of the hit (the
     // original's); it eases back out when the way clears.
-    float distance = cameraDistance_;
+    float distance = wanted;
     if (world_) {
         const float fx = std::cos(cameraPitch_) * std::sin(cameraYaw_), fy = -std::sin(cameraPitch_), fz = std::cos(cameraPitch_) * std::cos(cameraYaw_);
-        const float origin[3] = {at.x, at.y + 14.0f, at.z};
+        const float origin[3] = {at.x, lookY, at.z};
         const float back[3] = {-fx, -fy, -fz};
         game::NavHit hit;
-        if (world_->Navigation().Ray(at.region, origin, back, cameraDistance_, hit)) distance = std::clamp(hit.distance - 5.0f, 5.0f, cameraDistance_);
+        if (world_->Navigation().Ray(at.region, origin, back, wanted, hit)) distance = std::clamp(hit.distance - 5.0f, 5.0f, wanted);
         // The spring (ours): never inside an object either; in front of the box it would stand in, 5 units short, and
         // back out (cameraShown_ below) when the way clears.
-        const glm::vec3 chest(at.x + float((at.region & 0xFF) - originX_) * assets::kRegionSize, at.y + 14.0f,
+        const glm::vec3 point(at.x + float((at.region & 0xFF) - originX_) * assets::kRegionSize, lookY,
                               at.z + float((at.region >> 8) - originY_) * assets::kRegionSize);
-        const glm::vec3 eye = chest + glm::vec3(back[0], back[1], back[2]) * distance;
-        if (const float limit = world_->CameraLimit(chest, eye); limit < 1.0f) distance = std::clamp(limit * distance - 5.0f, 5.0f, distance);
+        const glm::vec3 eye = point + glm::vec3(back[0], back[1], back[2]) * distance;
+        if (const float limit = world_->CameraLimit(point, eye); limit < 1.0f) distance = std::clamp(limit * distance - 5.0f, 5.0f, distance);
     }
     cameraShown_ = distance < cameraShown_ ? distance : cameraShown_ + (distance - cameraShown_) * std::min(1.0f, cameraDt_ * 4.0f);
-    // A key at the character's chest, `distance` behind it along (pitch, yaw); positive pitch looks down.
-    const assets::CameraKey key = MakeKey(0.0f, at.region & 0xFF, at.region >> 8, at.x, at.y + 14.0f, at.z, cameraPitch_, cameraYaw_,
-                                          cameraShown_);
+    // A key at the look point, `distance` behind it along (pitch, yaw); positive pitch looks down.
+    const assets::CameraKey key = MakeKey(0.0f, at.region & 0xFF, at.region >> 8, at.x, lookY, at.z, cameraPitch_, cameraYaw_, cameraShown_);
     ApplyCameraKey(*world_, key, originX_, originY_);
 
 }

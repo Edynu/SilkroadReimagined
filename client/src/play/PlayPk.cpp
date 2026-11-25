@@ -60,8 +60,9 @@ void PlayScreen::ClickPlayer(ScreenContext& context, std::uint32_t other, bool c
     // goes to it). No walk: the first click only selects; the selected one clicked again, or a click with Alt (the help's
     // UIIT_STT_FORCEPK "=+ Mouse Left Button : Force PK"), attacks: without Alt only an enemy (PvP state 1 or 2, a job's
     // foe, a free PvP foe, a guild at war, the fortress war's enemy), with Alt anyone; never a member of one's party.
-    // Ctrl selects and attacks an enemy at once (ours, as on monsters: the original's Ctrl is the force attack on others).
-    const bool again = player_.target.entity == other || ctrl || alt;
+    // Ctrl changes nothing here: the original's Ctrl + click attacks at once only monsters, structures and guards; a player
+    // is attacked once selected, or with Alt.
+    const bool again = player_.target.entity == other || alt;
     SelectPlayer(other);
     // A booth: walked up to and visited.
     if (!ctrl && !alt && ClickBooth(context, other)) return;

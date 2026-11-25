@@ -450,6 +450,9 @@ private:
     float cameraDt_ = 0.0f;                    // this frame's seconds, for the third person's swing
     double cameraNow_ = 0.0;                   // this frame's time (the camera shake)
     float cameraShown_ = 60.0f;                // the distance after the collision, eased back out
+    float ownFade_ = 1.0f;                     // the player's own model, faded out while looking steeply up
+    std::uint32_t markedTarget_ = 0;            // the selection the ground marker last saw, and when it came
+    double markedTargetAt_ = -1.0;
     glm::dvec3 cameraFocus_{0.0};              // the point the camera looks at, in world units, eased after the character
     bool cameraFocusSet_ = false;
     bool turning_ = false;
@@ -1011,6 +1014,8 @@ private:
     int aroundClicks_ = 0, aroundMissed_ = 0;
     const char* lastClick_ = "nothing"; // what the last click on the world hit
     std::minstd_rand aroundRandom_{7};
+    std::minstd_rand walkRandom_{std::random_device{}()}; // where a click's walk stops short (WalkUpDistance)
+    float WalkUpDistance(float nearest, float farthest);
     game::proto::WorldPosition walkHome_;
     // Recording and replaying (C6d).
     game::WorldRecording recording_;

@@ -19,7 +19,7 @@ using Code = proto::StallCode;
 
 namespace {
 constexpr std::uint32_t kBoothKey = 0x40000000u; // the booths' ground-model keys (entity | this)
-constexpr float kStallWalkTo = 60.0f;            // ours: a click on a booth walks this near, then visits
+constexpr float kStallWalkNearest = 20.0f, kStallWalkFarthest = 80.0f; // a click on a booth farther than its reach walks to a random 20..80 from it (the original's)
 } // namespace
 
 void PlayScreen::OpenStall(ScreenContext& context) {
@@ -148,7 +148,8 @@ bool PlayScreen::ClickBooth(ScreenContext& context, std::uint32_t entity) {
         const proto::FlatPosition a = proto::ToFlat(self->position), b = proto::ToFlat(it->position);
         const double dx = a.x - b.x, dz = a.z - b.z, length = std::max(1.0, std::hypot(dx, dz));
         if (length > proto::kStallReach) {
-            shared_->session->MoveTo(proto::FromFlat({b.x + dx / length * kStallWalkTo, b.z + dz / length * kStallWalkTo}, it->position.y));
+            const double walkTo = WalkUpDistance(kStallWalkNearest, kStallWalkFarthest);
+            shared_->session->MoveTo(proto::FromFlat({b.x + dx / length * walkTo, b.z + dz / length * walkTo}, it->position.y));
         }
     }
     return true;
