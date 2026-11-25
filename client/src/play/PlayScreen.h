@@ -664,6 +664,15 @@ private:
     void HandlePk(ScreenContext& context, const game::proto::PkEvent& e);
     // `mount`: the ride the player sits on, the one selected (the original's pick gives a rider's mount).
     void ClickPlayer(ScreenContext& context, std::uint32_t other, bool ctrl, bool alt, std::uint32_t mount = 0);
+    // What one click at a point picks (the original's single pick over every kind): at most one set; `mount` with
+    // `player` when he rides (the mount is the one selected).
+    struct Picked {
+        std::uint32_t item = 0, npc = 0, monster = 0, player = 0, cos = 0, mount = 0;
+    };
+    Picked PickUnder(float x, float y, float width, float height) const;
+    // The cursor over another player or a COS's owner (the original's 250 ms choice): the red sword when he may be
+    // attacked (or Alt is held) and is not of the party, a booth's bag, the fortress war's and the events' sides.
+    int PlayerCursor(std::uint32_t player, bool alt) const;
     bool MurdererScrollRefused(std::uint8_t place, double time);
     void PkRefusal(game::proto::SkillUseStatus status, double time);
     ui::Color PlayerNameColour(std::uint32_t id, const game::WorldView::Entity& e) const;
@@ -710,8 +719,6 @@ private:
     const std::vector<assets::ResourceData::ParticleModifier>& CarriedEffects(ScreenContext& context, const std::string& model);
     // Another player the fortress war makes an enemy (both in its area; not of the guild or its union).
     bool FortressFoe(std::uint32_t entity, const game::WorldView::Entity& e) const;
-    // Another living player the player may fight: of a guild at war with its own, or a fortress war's enemy.
-    bool PlayerIsEnemy(std::uint32_t entity) const;
     // A fortress's structure of the player's guild or union (never hit by them).
     bool OwnStructure(std::uint32_t entity) const;
     // The test bots: a random attack skill known and off its wait (0: none).

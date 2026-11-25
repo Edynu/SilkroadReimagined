@@ -2615,26 +2615,19 @@ void PlayScreen::HandleInput(ScreenContext& context) {
     }
 }
 
-// A left click at (x, y) on the world: an item, an NPC, a monster, a gate or the ground there.
-void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl, bool alt) {
-    // A click in the world while the logout counts stops it first (the only sender of 0x7006).
-    if (logoutSeconds_ > 0 && !replay_ && shared_ && shared_->session) shared_->session->CancelLogout();
-    const float width = float(context.device.SwapchainWidth()), height = float(context.device.SwapchainHeight());
-    // A manual's zone markers first (a marker under the cursor uses the manual; elsewhere they go).
-    if (!replay_ && ClickZoneMarker(x, y, width, height)) return;
-    const ui::Vec2 up{x, y};
-    proto::WorldPosition target;
-    bool sky = false;
-    const bool ground = !replay_ && world_->Pick(up.x, up.y, width, height, target, true, &sky);
-    // What is under the cursor: the nearest along the ray of every kind (the original orders no kind before another);
-    // an item's name under the mouse first.
+// What one click at (x, y) picks: the nearest along the ray of every kind (the original's single pick over them all; it
+// orders no kind before another), an item's name under the mouse first. At most one of them set; `mount` with `player`
+// when he rides. The click (ClickWorld) and the cursor (PickCursor) both go by it.
+PlayScreen::Picked PlayScreen::PickUnder(float x, float y, float width, float height) const {
+    Picked p;
+    if (!world_ || replay_) return p;
     float itemAt = 1e9f, npcAt = 1e9f, monsterAt = 1e9f, playerAt = 1e9f, cosAt = 1e9f;
     bool npcCentre = false, monsterCentre = false, playerCentre = false, cosCentre = false;
-    std::uint32_t item = replay_ ? 0 : GroundUnder(up.x, up.y, width, height, &itemAt);
-    std::uint32_t npc = replay_ ? 0 : NpcUnder(up.x, up.y, width, height, &npcAt, &npcCentre);
-    std::uint32_t nearestMonster = replay_ ? 0 : MonsterUnder(up.x, up.y, width, height, &monsterAt, &monsterCentre);
-    std::uint32_t nearestPlayer = replay_ ? 0 : PlayerUnder(up.x, up.y, width, height, &playerAt, &playerCentre);
-    std::uint32_t nearestCos = replay_ ? 0 : CosUnder(up.x, up.y, width, height, &cosAt, &cosCentre);
+    std::uint32_t item = GroundUnder(x, y, width, height, &itemAt);
+    std::uint32_t npc = NpcUnder(x, y, width, height, &npcAt, &npcCentre);
+    std::uint32_t nearestMonster = MonsterUnder(x, y, width, height, &monsterAt, &monsterCentre);
+    std::uint32_t nearestPlayer = PlayerUnder(x, y, width, height, &playerAt, &playerCentre);
+    std::uint32_t nearestCos = CosUnder(x, y, width, height, &cosAt, &cosCentre);
     {
         // The cursor's own ray's hit beats the side rays' across the kinds too (the original casts the nine over every
         // character at once).
@@ -2671,6 +2664,31 @@ void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl,
             }
         }
     }
+    p.item = item;
+    p.npc = npc;
+    p.monster = nearestMonster;
+    p.player = nearestPlayer;
+    p.cos = nearestCos;
+    p.mount = mount;
+    return p;
+}
+
+// A left click at (x, y) on the world: an item, an NPC, a monster, a gate or the ground there.
+void PlayScreen::ClickWorld(ScreenContext& context, float x, float y, bool ctrl, bool alt) {
+    // A click in the world while the logout counts stops it first (the only sender of 0x7006).
+    if (logoutSeconds_ > 0 && !replay_ && shared_ && shared_->session) shared_->session->CancelLogout();
+    const float width = float(context.device.SwapchainWidth()), height = float(context.device.SwapchainHeight());
+    // A manual's zone markers first (a marker under the cursor uses the manual; elsewhere they go).
+    if (!replay_ && ClickZoneMarker(x, y, width, height)) return;
+    const ui::Vec2 up{x, y};
+    proto::WorldPosition target;
+    bool sky = false;
+    const bool ground = !replay_ && world_->Pick(up.x, up.y, width, height, target, true, &sky);
+    // What is under the cursor (PickUnder).
+    const Picked picked = PickUnder(up.x, up.y, width, height);
+    std::uint32_t item = picked.item, npc = picked.npc, nearestMonster = picked.monster, nearestPlayer = picked.player,
+                  nearestCos = picked.cos;
+    const std::uint32_t mount = picked.mount;
     if (nearestCos != 0) {
         // A COS: selected, its target window (no walk, as a player's click); a job foe's transport or pet clicked again
         // (or with Ctrl) attacked, as its owner would be.
@@ -3892,9 +3910,9 @@ void PlayScreen::PickCursor(ScreenContext& context) {
         const ui::Vec2 m = mouse_.x >= 0.0f ? mouse_ : context.input->mouse();
         world_->SetProbePoint(m.x, m.y);
     }
-    // Every 250 ms (the HUD's timer 1): over a window the arrow; else by what
-    // is under the mouse. Our world has players (the arrow: no fights yet) and gates; items,
-    // monsters, NPCs and stalls get theirs with them.
+    // Every 250 ms (the HUD's timer 1): over a window the arrow; else by what one click there would pick (the
+    // original's): an item the open hand (the fist while the left button is held), a gate its own, an NPC the speech
+    // bubble, a monster the sword when it may be fought, another player or a COS by PlayerCursor.
     if (context.time - cursorPicked_ >= 0.25 && context.input != nullptr) {
         cursorPicked_ = context.time;
         cursor_ = 0x95;
@@ -3906,9 +3924,11 @@ void PlayScreen::PickCursor(ScreenContext& context) {
             const float w = float(context.device.SwapchainWidth()), h = float(context.device.SwapchainHeight());
             proto::WorldPosition at;
             const bool ground = world_->Pick(m.x, m.y, w, h, at);
-            if (GroundUnder(m.x, m.y, w, h) != 0) {
-                cursor_ = 0x99; // the open hand (153)
-            } else if (const std::uint32_t npc = NpcUnder(m.x, m.y, w, h); npc != 0) {
+            const Picked picked = PickUnder(m.x, m.y, w, h);
+            const bool alt = context.input->KeyDown(ui::Key::Alt);
+            if (picked.item != 0) {
+                cursor_ = context.input->Down(ui::MouseButton::Left) ? 0x9A : 0x99; // the fist (154) / the open hand (153)
+            } else if (const std::uint32_t npc = picked.npc; npc != 0) {
                 cursor_ = 0x98; // the speech bubble (152)
                 hoveredEntity_ = npc;
                 if (const game::WorldView::Entity* e = view_.Find(npc); e != nullptr && GapGate(*e) != nullptr) {
@@ -3921,19 +3941,21 @@ void PlayScreen::PickCursor(ScreenContext& context) {
                         shared_->session->SendGame(proto::SelectGap::kId, proto::Encode(proto::SelectGap{npc}));
                     }
                 }
-            } else if (const std::uint32_t monster = MonsterUnder(m.x, m.y, w, h); monster != 0 && !OwnStructure(monster)) {
-                cursor_ = 0x97; // the sword (151)
+            } else if (const std::uint32_t monster = picked.monster; monster != 0) {
+                if (!OwnStructure(monster)) cursor_ = 0x97; // the sword (151)
                 hoveredEntity_ = monster;
-            } else if (const std::uint32_t other = PlayerUnder(m.x, m.y, w, h); other != 0 && PlayerIsEnemy(other)) {
-                cursor_ = 0x97; // the sword too: one the player may fight (its guild at war, a fortress war's enemy)
-                hoveredEntity_ = other;
+            } else if (picked.player != 0) {
+                // A rider's: the pick gives his mount; the cursor is the COS's, by its rider's relation as his owner's.
+                cursor_ = PlayerCursor(picked.player, alt);
+                hoveredEntity_ = picked.player; // his name shown
+            } else if (picked.cos != 0) {
+                // A COS: the red sword by its owner's relation, the fortress war's side by his guild (the original's).
+                const game::WorldView::Entity* c = view_.Find(picked.cos);
+                cursor_ = c != nullptr && c->amount != 0 && c->amount != view_.Self() ? PlayerCursor(c->amount, alt) : 0x95;
+                if (cursor_ == 0xA3) cursor_ = 0x95; // its owner's booth is no COS's
+                hoveredEntity_ = picked.cos;
             } else if (GateUnder(m.x, m.y, w, h, ground ? &at : nullptr) != nullptr) {
                 cursor_ = 0xA1;
-            }
-            // The one under the mouse shows its name at any distance (the original's hover flag): any player too.
-            if (hoveredEntity_ == 0 && cursor_ == 0x95) {
-                if (const std::uint32_t monster = MonsterUnder(m.x, m.y, w, h); monster != 0) hoveredEntity_ = monster;
-                else hoveredEntity_ = PlayerUnder(m.x, m.y, w, h);
             }
         }
     }

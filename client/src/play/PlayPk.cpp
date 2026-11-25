@@ -93,6 +93,28 @@ void PlayScreen::ClickPlayer(ScreenContext& context, std::uint32_t other, bool c
     if (alt && !enemy) core::LogInfo("game: Alt + click: a forced attack on {}", it->look.name);
 }
 
+int PlayScreen::PlayerCursor(std::uint32_t other, bool alt) const {
+    const game::WorldView::Entity* e = view_.Find(other);
+    if (e == nullptr || other == view_.Self()) return 0x95;
+    const bool party = player_.party.InParty() && player_.party.MemberByEntity(other) != nullptr;
+    const proto::EntityGuild* tag = guild_.EntityTag(other);
+    const std::uint8_t state = PvpStateOf(other);
+    // One the player may attack (ClickPlayer's enemies), or anyone with Alt: the red sword (160); else his booth's bag
+    // (163) while he keeps one open, else the arrow.
+    const bool enemy = (tag != nullptr && guild_.AtWarWith(tag->guild)) || FortressFoe(other, *e) || FreePvpFoe(other) || JobFoe(other) ||
+                       state == std::uint8_t(game::PvpState::Assaulter) || state == std::uint8_t(game::PvpState::Murderer);
+    int cursor = !party && !IsDead(*e) && (enemy || alt) ? 0xA0 : entityStalls_.contains(other) ? 0xA3 : 0x95;
+    // In a fortress war's area, by his guild's side: the plain sword (151) for the other side, the arrow for one's own
+    // (and the party).
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (self != nullptr && fortress_.WarArea(self->position.region) != 0 && (party || tag != nullptr)) {
+        cursor = !party && FortressFoe(other, *e) ? 0x97 : 0x95;
+    }
+    // In an event's match (Capture the Flag's teams): the sword for another team, the arrow for one's own.
+    if (flag_.InMatch(view_.Self())) cursor = FlagFoe(other) ? 0x97 : 0x95;
+    return cursor;
+}
+
 bool PlayScreen::MurdererScrollRefused(std::uint8_t place, double time) {
     if (PvpStateOf(view_.Self()) != std::uint8_t(game::PvpState::Murderer) || !tables_ || !tables_->Usable()) return false;
     const game::ItemInstance* item = player_.inventory.At(place);

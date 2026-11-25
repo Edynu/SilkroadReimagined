@@ -57,13 +57,6 @@ bool PlayScreen::OwnStructure(std::uint32_t entity) const {
            std::any_of(guild_.Union().guilds.begin(), guild_.Union().guilds.end(), [&](const auto& g) { return g.id == s->owner; });
 }
 
-bool PlayScreen::PlayerIsEnemy(std::uint32_t entity) const {
-    const game::WorldView::Entity* e = view_.Find(entity);
-    if (e == nullptr || entity == view_.Self() || IsDead(*e)) return false;
-    const proto::EntityGuild* tag = guild_.EntityTag(entity);
-    return (tag != nullptr && guild_.AtWarWith(tag->guild)) || FortressFoe(entity, *e) || JobFoe(entity) || FlagFoe(entity);
-}
-
 // A job's foe, as the server reckons it: a thief against
 // a trader or a hunter, both in their suits, not of one party (the server checks the battlefield and the 10 s lock).
 bool PlayScreen::JobFoe(std::uint32_t other) const {
