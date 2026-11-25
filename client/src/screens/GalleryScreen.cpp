@@ -1270,6 +1270,26 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 if (page_ == "quest-reward:confirm") OpenQuestRewardConfirm(hudContext_, q->id, 1, {0});
             }
         }
+        // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
+        // (one goal met: "Completed" in its colour).
+        if (page_ == "quest-list" && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+            hud_.Created()) {
+            questListShown_ = true;
+            namespace proto = game::proto;
+            sampleQuests_.Apply(proto::QuestDefinition{"quest QNO_GALLERY_HUNT\nid 90002\nlevel 5\nname \"Wolves of Jangan\"\nstart level 1-\n"
+                                                       "giver NPC_CH_SMITH\nfinish NPC_CH_SMITH\nrepeat 1\n"
+                                                       "goal kill 10 MOB_CH_WOLF text \"Hunt 10 wolves (%d)\"\n"
+                                                       "goal kill 5 MOB_CH_WOLF_L text \"Hunt 5 wolf leaders (%d)\"\n"});
+            sampleQuests_.Apply(proto::QuestDefinition{"quest QNO_GALLERY_FETCH\nid 90003\nlevel 12\nname \"The smith's ore\"\nstart level 1-\n"
+                                                       "giver NPC_CH_SMITH\nfinish NPC_CH_SMITH\n"
+                                                       "goal kill 20 MOB_CH_TIGER text \"Hunt 20 tigers (%d)\"\n"});
+            proto::QuestList list;
+            list.active = {{90002, proto::QuestStatus::Achieving, {10, 2}, 0}, {90003, proto::QuestStatus::Achieving, {7}, 0}};
+            sampleQuests_.Apply(list);
+            hudContext_.quests = &sampleQuests_;
+            core::LogInfo("gallery: quest-list: {} definitions, {} under way", sampleQuests_.Defs().size(), sampleQuests_.Active().size());
+            ToggleQuestWindow(hudContext_);
+        }
         // --page quest-talk[:N]: a finisher's talk of several pages with the player's rows under them (the White Viper's
         // return to Leebaek: _09 with the row _10, _11 with _12, _13 with "Receive reward."); N rows picked first.
         if (page_.starts_with("quest-talk") && !questTalkShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&

@@ -85,7 +85,7 @@ void Static::Draw(Frame& frame) {
     if ((node().style & 0x20) == 0) {
         if ((background >> 24) != 0) frame.paint.Fill(ScreenRect(), WithAlpha(background, float(background >> 24) / 255.0f * opacity));
         const std::string& path = texture.empty() ? node().ddj : texture;
-        if (!path.empty()) {
+        if (!path.empty() && !noArt) {
             FitToTexture(frame.paint, path);
             const Vec2 a = customUv ? uv0 : Vec2{node().uv[0], node().uv[1]}, b = customUv ? uv1 : Vec2{node().uv[2], node().uv[3]};
             frame.paint.Image(path, ScreenRect(), a, b, WithAlpha(tint, opacity));

@@ -44,6 +44,7 @@ public:
     Color tint = kWhite; // its picture's colour (a transport's stars by their count)
     // Another texture in place of the node's (a window's code sets icons, faces).
     std::string texture;
+    bool noArt = false; // neither picture (a window's code takes its art away: the quest list's goal rows)
     // Another part of the texture than the node's UV_LT..UV_RB (sprite frames, other looks).
     bool customUv = false;
     Vec2 uv0{0, 0}, uv1{1, 1};

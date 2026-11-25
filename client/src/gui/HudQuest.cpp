@@ -84,6 +84,18 @@ std::vector<ui::Widget*> Build(ui::Interface& ui, ui::Widget& root, const std::v
 
 const game::QuestDef* DefOf(const HudContext& c, std::uint32_t quest) { return c.quests != nullptr ? c.quests->Find(quest) : nullptr; }
 
+// A goal's line with its count put in ("Hunt 15 Water Ghost (3)"; its "%d"), as the quest notice's; a goal without a text
+// of its own (ours): the quest's name and "(n/m)". `met`: its count reached.
+std::string GoalLine(const HudContext& c, const game::QuestDef& q, std::size_t g, const proto::QuestState& s, bool& met) {
+    const game::QuestGoal& goal = q.goals[g];
+    const std::uint32_t need = game::QuestView::Need(goal);
+    const std::uint32_t have = g < s.progress.size() ? s.progress[g] : 0;
+    met = have >= need;
+    std::string line = goal.text.Empty() ? TextOf(c, q.name) : FormatText(TextOf(c, goal.text), {std::to_string(std::min(have, need))});
+    if (goal.text.Empty() && need > 1) line += std::format(" ({}/{})", std::min(have, need), need);
+    return line;
+}
+
 // The reward window's page: the quest's rich text inside its rect, scrolled by the wheel over it (18 a step).
 class QuestPage : public ui::RichText {
 public:
@@ -123,15 +135,17 @@ public:
             if ((*records)[i].className == "CNIFQuestSlot") rows_.push_back({made[i]});
             if ((*records)[i].id == 6 && (*records)[i].parents[0] == records->front().id) bar_ = ui::As<ui::ScrollBar>(made[i]);
         }
-        // The row's parts by their ids (questlist.2dt): 8 the check box, 16 the title, 18 the map, 19 the content,
-        // 11 the time, 75 the countdown.
+        // The row's parts by their ids (questlist.2dt): 7 the small box, 8 the check box, 16 the title, 18 the map,
+        // 19 the content, 11 a goal's state ("in progress and complete"), 75 the time left.
         for (Row& r : rows_) {
+            r.box = r.slot->Child(7);
             r.check = ui::As<ui::CheckBox>(r.slot->Child(8));
             r.title = r.slot->Child(16);
             r.map = r.slot->Child(18);
             r.content = ui::As<ui::Button>(r.slot->Child(19));
-            r.time = r.slot->Child(11);
+            r.state = r.slot->Child(11);
             r.countdown = r.slot->Child(75);
+            if (auto* t = ui::As<ui::Static>(r.title)) r.titleColor = t->textColor;
         }
     }
 
@@ -182,26 +196,77 @@ private:
     struct Row {
         ui::Widget* slot = nullptr;
         ui::CheckBox* check = nullptr;
-        ui::Widget *title = nullptr, *map = nullptr, *time = nullptr, *countdown = nullptr;
+        ui::Widget *box = nullptr, *title = nullptr, *map = nullptr, *state = nullptr, *countdown = nullptr;
         ui::Button* content = nullptr;
-        std::uint32_t quest = 0;
+        ui::Color titleColor{};    // its title's colour as made
+        std::uint32_t quest = 0;   // a quest's row (0: a goal's or none)
     };
 
+    // The rows as 1.188's list lays them (its on_2): from the quest the bar points at, each quest's row (its big box,
+    // check box, "name (done/most)", map and content buttons) and under it one row per goal (no box: its state "In
+    // progress" or "Completed" and its line, in 0xFFEFDAA4 or 0xFFFF9C68), until the rows run out.
     void Fill() {
-        std::vector<std::uint32_t> quests;
-        for (const auto& [id, s] : c_.quests->Active()) quests.push_back(id);
-        const int extra = std::max(0, int(quests.size()) - int(rows_.size()));
+        std::vector<const game::QuestDef*> quests;
+        for (const auto& [id, s] : c_.quests->Active()) {
+            if (const game::QuestDef* q = DefOf(c_, id)) quests.push_back(q);
+        }
+        const auto lines = [](const game::QuestDef& q) {
+            return 1 + int(std::count_if(q.goals.begin(), q.goals.end(), [](const game::QuestGoal& g) { return !g.hidden; }));
+        };
+        // The bar by quests: as far as the last ones fill the rows.
+        int extra = int(quests.size());
+        for (int fit = 0; extra > 0 && fit + lines(*quests[std::size_t(extra - 1)]) <= int(rows_.size()); --extra) fit += lines(*quests[std::size_t(extra - 1)]);
         if (bar_ != nullptr) bar_->SetRange(0, extra);
         scroll_ = bar_ != nullptr ? std::clamp(bar_->position(), 0, extra) : 0;
         const int level = c_.state != nullptr ? c_.state->self.level : 1;
-        for (std::size_t i = 0; i < rows_.size(); ++i) {
-            Row& r = rows_[i];
-            const std::size_t at = i + std::size_t(scroll_);
-            const game::QuestDef* q = at < quests.size() ? DefOf(c_, quests[at]) : nullptr;
-            r.slot->visible = q != nullptr;
-            r.quest = q != nullptr ? q->id : 0;
-            if (q == nullptr) continue;
+        std::size_t i = 0;
+        for (std::size_t at = std::size_t(scroll_); at < quests.size() && i < rows_.size(); ++at) {
+            const game::QuestDef* q = quests[at];
             const proto::QuestState& s = c_.quests->Active().at(q->id);
+            ShowQuestRow(rows_[i++], *q, s, level);
+            for (std::size_t g = 0; g < q->goals.size() && i < rows_.size(); ++g) {
+                if (q->goals[g].hidden) continue;
+                bool met = false;
+                const std::string line = GoalLine(c_, *q, g, s, met);
+                ShowGoalRow(rows_[i++], line, met);
+            }
+        }
+        for (; i < rows_.size(); ++i) {
+            rows_[i].slot->visible = false;
+            rows_[i].quest = 0;
+        }
+    }
+
+    void ShowGoalRow(Row& r, const std::string& line, bool met) {
+        r.slot->visible = true;
+        r.quest = 0;
+        if (auto* art = ui::As<ui::Static>(r.slot)) art->noArt = true;
+        for (ui::Widget* w : {r.box, static_cast<ui::Widget*>(r.check), r.map, static_cast<ui::Widget*>(r.content), r.countdown}) {
+            if (w != nullptr) w->visible = false;
+        }
+        const ui::Color colour = met ? kGoalDone : kGoalOn;
+        if (r.state != nullptr) {
+            r.state->visible = true;
+            r.state->SetText(c_.Text(met ? "UIIT_STT_QUEST_END" : "UIIT_STT_QUEST_ING"));
+            if (auto* st = ui::As<ui::Static>(r.state)) st->textColor = colour;
+        }
+        if (r.title != nullptr) {
+            r.title->SetText(line);
+            if (auto* st = ui::As<ui::Static>(r.title)) st->textColor = colour;
+        }
+    }
+
+    void ShowQuestRow(Row& r, const game::QuestDef& qd, const proto::QuestState& s, int level) {
+        const game::QuestDef* q = &qd;
+        r.slot->visible = true;
+        r.quest = q->id;
+        if (auto* art = ui::As<ui::Static>(r.slot)) art->noArt = false;
+        for (ui::Widget* w : {r.box, static_cast<ui::Widget*>(r.check), r.map, static_cast<ui::Widget*>(r.content)}) {
+            if (w != nullptr) w->visible = true;
+        }
+        if (r.state != nullptr) r.state->visible = false;
+        if (auto* st = ui::As<ui::Static>(r.title)) st->textColor = r.titleColor;
+        {
             const auto done = c_.quests->Finished().find(q->id);
             const int times = done != c_.quests->Finished().end() ? done->second : 0;
             if (r.title) r.title->SetText(std::format("{} ({}/{})", TextOf(c_, q->name), times, q->repeat));
@@ -213,12 +278,8 @@ private:
                                      : gap < 0 ? "interface\\quest\\qst_contentviewred_button.ddj"
                                                : "interface\\quest\\qst_contentview_button.ddj";
             }
-            // Its time: "No limit" without a timer; with one, the countdown "h:m:s".
+            // A timed quest's time left (75), "h:m:s".
             const bool timed = s.secondsLeft > 0;
-            if (r.time) {
-                r.time->visible = !timed;
-                r.time->SetText(c_.Text("UIIT_STT_QUEST_UNLIMITED"));
-            }
             if (r.countdown) {
                 r.countdown->visible = timed;
                 const std::uint32_t left = s.secondsLeft > std::uint32_t(c_.time - stateTime_) ? s.secondsLeft : 0;
@@ -569,15 +630,9 @@ private:
             // Its goals under it, one line each: "[On] goal (n/m)", "[Done] goal".
             std::size_t shown = 0;
             for (std::size_t g = 0; g < q->goals.size(); ++g) {
-                const game::QuestGoal& goal = q->goals[g];
-                if (goal.hidden) continue;
-                const std::uint32_t need = game::QuestView::Need(goal);
-                const std::uint32_t have = g < s.progress.size() ? s.progress[g] : 0;
-                const bool met = have >= need;
-                // The goal's text with its count put in ("Hunt 15 Water Ghost (3)"; its "%d"), as the quest notice's; a
-                // goal without a text of its own (ours): the quest's name and "(n/m)".
-                std::string line = goal.text.Empty() ? TextOf(c_, q->name) : FormatText(TextOf(c_, goal.text), {std::to_string(std::min(have, need))});
-                if (goal.text.Empty() && need > 1) line += std::format(" ({}/{})", std::min(have, need), need);
+                if (q->goals[g].hidden) continue;
+                bool met = false;
+                const std::string line = GoalLine(c_, *q, g, s, met);
                 if (shown >= r.goals.size() && ui_ != nullptr) {
                     assets::UiLayoutNode n;
                     n.type = "CIFStatic";

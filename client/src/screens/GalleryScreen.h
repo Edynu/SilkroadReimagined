@@ -84,6 +84,7 @@ private:
     game::ExchangeView sampleExchange_;
     game::StallView sampleStall_; // --page stall, stall-buy, stall-price
     bool questTalkShown_ = false;  // --page quest-talk
+    bool questListShown_ = false;  // --page quest-list
     bool stallShown_ = false;
     game::FlagView sampleFlag_;  // --page ctf-*: Capture the Flag's pieces on a sample match (HudFlagWorld.cpp)
     bool ctfShown_ = false;
