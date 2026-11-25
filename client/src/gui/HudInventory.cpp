@@ -647,6 +647,11 @@ void InventoryWindow::Created(ui::Interface& ui) {
     if (auto* gold = ui::As<ui::Static>(Child(10))) gold->textStyle |= ui::kTextShadow;
     // An item dropped on a place moves there; one dropped on the window's background goes nowhere.
     onDrop = [this](ui::Widget* source, ui::Widget* target) {
+        // An item of the player's own offer in the exchange dragged back: taken out of it (the original's 0x7034).
+        if (const int offered = ExchangeOfferOf(source); offered >= 0) {
+            if (context_.exchangeRequest) context_.exchangeRequest(proto::ExchangeTake::kId, proto::Encode(proto::ExchangeTake{std::uint8_t(offered)}));
+            return true;
+        }
         const int from = PlaceOf(source), to = PlaceOf(target);
         if (to < 13 || dynamic_cast<ui::Slot*>(target) == nullptr) return false;
         if (context_.hud != nullptr && context_.items != nullptr && context_.state != nullptr) {

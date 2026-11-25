@@ -90,6 +90,9 @@ const GameOptions::Row kGameRows[] = {
     {"actionShortcut", "UIIT_CTL_ACTION_LIST_ACTIVE", false, false, 1},
     {"cameraMethod1", "UIIT_CTL_CAMERA_ROTATE_METHOD1", true, true, 1},
     {"cameraMethod2", "UIIT_CTL_CAMERA_ROTATE_METHOD2", false, false, 1},
+    // Ours (M-32): a click on an item of the player's own offer in the exchange takes it back; off, the original's way, it
+    // is dragged back to the bag. Its label is ours (no text key).
+    {"exchangeClickBack", "Exchange click-back", false, false, 1},
 };
 constexpr int kGameRowCount = static_cast<int>(sizeof(kGameRows) / sizeof(kGameRows[0]));
 static_assert(kGameRowCount <= GameOptions::kMax);

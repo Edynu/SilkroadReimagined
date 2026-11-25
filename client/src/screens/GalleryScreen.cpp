@@ -788,7 +788,8 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             if (++clickStep_ == 10) clickStep_ = 2, dragsTo_[clickIndex_].reset(), clicks_[clickIndex_] = *to;
         } else if (clickStep_ < 3 && (clickStep_ > 0 || (host_.Settled() && (page_ != "fortress-map" || fortressMapShown_) &&
                                                          ((page_ != "inventory-full" && !EquipmentPage(page_)) || autoPotionShown_) &&
-                                                         ((page_ != "cos" && page_ != "cos-two" && page_ != "cos-pets") || cosShown_)))) {
+                                                         ((page_ != "cos" && page_ != "cos-two" && page_ != "cos-pets") || cosShown_) &&
+                                                         (!page_.starts_with("exchange") || exchangeFrames_ >= 10)))) {
             ui::InputEvent e;
             e.position = at;
             e.type = clickStep_ == 0 ? ui::InputEvent::Type::MouseMove : clickStep_ == 1 ? ui::InputEvent::Type::MouseDown : ui::InputEvent::Type::MouseUp;
@@ -1004,9 +1005,12 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 sampleExchange_.Apply(theirs);
                 hud_.OpenPage(hud::kPageInventory);
                 hud_.Show(hud::kExchange);
+                // What the window would send, logged (an offer dragged back to the bag: ExchangeTake).
+                hudContext_.exchangeRequest = [](proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: exchange request 0x{:04X}", id); };
             }
         }
         if (exchangePage && !exchangeShown_) context.holdCapture = true;
+        if (exchangeShown_) ++exchangeFrames_; // its windows placed before --click's first
         // --page magic-pop[:STATE] (HudMagicPop.cpp): the machine's window on a bag of two cards and a
         // coupon. STATE: select (the selection window, the default), choose (the strip of the first prize's kind, nothing
         // chosen: state 0), card (a prize chosen: 1), ready (a card registered: 2), rolling (PLAY pressed), won / lost (the

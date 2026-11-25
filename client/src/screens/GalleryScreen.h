@@ -69,6 +69,7 @@ private:
     int flashAt_ = 0; // --page item-flash: the frames since its effects started
     std::set<std::uint32_t> sampleBook_; // --page collection-flip: the sample character's collection book
     bool exchangeShown_ = false;   // --page exchange: the exchange window on a sample exchange
+    int exchangeFrames_ = 0;       // frames since (--click waits for its windows to stand where they stay)
     bool mallShown_ = false;       // --page mall[:...]: the item mall (HudMall.cpp)
     assets::MallTable mallTable_;
     MallView mall_;

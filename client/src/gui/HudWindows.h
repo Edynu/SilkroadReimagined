@@ -1338,6 +1338,8 @@ private:
 // The place a slot of the inventory or the equipment stands for: 13.. the bag, 0..12 the worn
 // ones; -1 for any other slot (the underbar's shortcuts take them).
 int InventoryPlaceOf(const ui::Widget* slot);
+// The player's own offered place a slot of the exchange window is (0..11), -1 another (HudExchange.cpp).
+int ExchangeOfferOf(const ui::Widget* slot);
 // The avatar place an avatar slot of the equipment's dress side shows; -1 otherwise.
 int AvatarPlaceOf(const ui::Widget* slot);
 

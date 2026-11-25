@@ -3,8 +3,9 @@
 // places above (100..111) and the player's below (200..211), each side's gold (18, 19) with the money
 // button (15) for the player's, the message box (304), Confirm (11) and Cancel (12).
 //
-// An item of the bag dropped on the window is offered (the original's 0x7034 op 4); a press on one of
-// the player's own places takes it back out (ours: the original drags it back). Confirm fixes the
+// An item of the bag dropped on the window is offered (the original's 0x7034 op 4); one of the player's own places
+// dragged back to the bag takes it out (the original's), or a press on it with the Game page's exchangeClickBack (ours,
+// M-32). Confirm fixes the
 // player's offer; once both confirmed it approves (with its two messages). The window
 // is shown and hidden by the game screen as the exchange opens and ends.
 
@@ -60,7 +61,7 @@ public:
             for (const bool mine : {false, true}) {
                 auto* slot = ui::As<ui::Slot>(Child((mine ? kMyFirst : kTheirFirst) + k));
                 if (slot == nullptr) continue;
-                slot->pickable = false; // a press on the player's own takes it back (OnNotice)
+                slot->pickable = mine; // the player's own dragged back to the bag (Update: a press instead with exchangeClickBack)
                 slot->tooltipLines = [this, k, mine] {
                     const game::ExchangeView* v = context_.exchange;
                     const auto& item = v != nullptr ? (mine ? v->Mine() : v->Theirs()).items[std::size_t(k)] : std::nullopt;
@@ -118,6 +119,11 @@ public:
 
     void Update(ui::Frame& frame) override {
         ui::MainFrame::Update(frame);
+        // The player's own places: dragged (the original's), or pressed with ours.
+        const bool clickBack = ClickBack();
+        for (int k = 0; k < int(proto::kExchangeSlots); ++k) {
+            if (auto* slot = ui::As<ui::Slot>(Child(kMyFirst + k))) slot->pickable = !clickBack;
+        }
         const game::ExchangeView* v = context_.exchange;
         if (v == nullptr || v->Revision() == seen_) return;
         seen_ = v->Revision();
@@ -192,12 +198,22 @@ public:
         }
         if (notice.control >= kMyFirst && notice.control < kMyFirst + int(proto::kExchangeSlots) && context_.exchange != nullptr) {
             const int k = notice.control - kMyFirst;
-            if (context_.exchange->Mine().items[std::size_t(k)] && context_.exchange->Mine().step == proto::ExchangeStep::Open) {
+            if (ClickBack() && context_.exchange->Mine().items[std::size_t(k)] && context_.exchange->Mine().step == proto::ExchangeStep::Open) {
                 request(proto::ExchangeTake::kId, proto::Encode(proto::ExchangeTake{std::uint8_t(k)}));
             }
             return true;
         }
         return ui::MainFrame::OnNotice(notice);
+    }
+
+    // Ours (the Game page's row): a press takes an offered item back.
+    bool ClickBack() const { return context_.options != nullptr && context_.options->game.Get("exchangeClickBack"); }
+
+    // The player's own offered place a slot is (0..11), -1 another.
+    int OwnPlace(const ui::Widget* slot) const {
+        if (slot == nullptr || slot->parent() != this) return -1;
+        const int k = slot->id() - kMyFirst;
+        return k >= 0 && k < int(proto::kExchangeSlots) ? k : -1;
     }
 
     // A line in the window's message box.
@@ -240,6 +256,12 @@ private:
 };
 
 } // namespace
+
+// The player's own offered place a slot of the exchange window is (0..11), -1 another.
+int ExchangeOfferOf(const ui::Widget* slot) {
+    const auto* window = slot != nullptr ? dynamic_cast<const ExchangeWindow*>(slot->parent()) : nullptr;
+    return window != nullptr ? window->OwnPlace(slot) : -1;
+}
 
 std::unique_ptr<ui::Widget> MakeExchangeWindow(const assets::UiLayoutNode& node, HudContext& context) {
     return std::make_unique<ExchangeWindow>(node, context);
