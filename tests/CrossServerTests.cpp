@@ -2015,7 +2015,7 @@ TEST_CASE("A split world: the guild recall: a master on East calls its members; 
         row.canUse = 1;
         row.requirementTypes = {-1, -1, -1, -1};
         row.params[0] = 3'600'000; // the wait, ms
-        row.params[1] = 30'000;    // the members' time to answer, ms
+        row.params[1] = 3'000;     // the members' time to answer, ms (the original's 30 s cut: the yes's gauge runs it)
         row.params[2] = 5;         // the guild's level
         items->Add(row);
         rules->items = items;
@@ -2058,17 +2058,20 @@ TEST_CASE("A split world: the guild recall: a master on East calls its members; 
     CHECK((moved.emptied.size() == 1 && moved.emptied[0] == it->slot));
     const auto forEve = Next<proto::GuildRecallAsk>(eve);
     CHECK(forEve.master == "Mast");
-    CHECK(forEve.seconds == 30u);
+    CHECK(forEve.seconds == 3u);
     const auto forWanda = Next<proto::GuildRecallAsk>(wanda);
     CHECK(forWanda.master == "Mast");
-    CHECK(forWanda.seconds == 30u);
+    CHECK(forWanda.seconds == 3u);
     CHECK(pair.b.game->GetGuilds()->RecallAsked(wanda.character));
     CHECK_FALSE(pair.a.game->GetGuilds()->RecallAsked(wanda.character)); // asked where it plays
 
-    // Wanda's yes on West: on its way to East, where the master stands.
+    // Wanda's yes on West: the recall's gauge (its 3 s), then on its way to East, where the master stands.
     wanda.c->Send(proto::GuildRecallAnswer{1});
     const auto answered = Until<proto::GuildAnswer>(wanda, [](const proto::GuildAnswer& a) { return a.action == proto::GuildAction::RecallAnswer; });
     CHECK(answered.error == 0);
+    const auto gauge = Next<proto::ReturnStarted>(wanda);
+    CHECK(gauge.kind == proto::CastingKind::GuildRecall);
+    CHECK(gauge.ms == 3000u);
     const auto there = Arrive(pair.a, wanda, Next<proto::ServerMove>(wanda));
     CHECK(there.position.region == kEast);
     CHECK(there.position.x == doctest::Approx(1000.0f));

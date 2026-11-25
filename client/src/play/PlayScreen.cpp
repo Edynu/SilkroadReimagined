@@ -260,6 +260,7 @@ void PlayScreen::Script(ScreenContext& context) {
     if (self == nullptr || leaving_ || replay_) return;
     GuildScript(context);
     CommunityTick(context.time);
+    CastingTick(context.time);
     if (!textLater_.empty() && gui_.data().Ready()) {
         auto later = std::move(textLater_);
         textLater_.clear();
@@ -1018,7 +1019,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);
         core::LogInfo("game: item use refused (code 0x{:X})", refused->code);
     } else if (const auto* started = std::get_if<proto::ReturnStarted>(&event)) {
-        player_.casting = {started->item, context.time, started->ms / 1000.0};
+        player_.casting = {started->item, context.time, started->ms / 1000.0, started->kind, started->quest};
     } else if (std::holds_alternative<proto::ReturnCancelled>(event)) {
         player_.casting = {};
         if (!replay_) player_.Post(game::GameMessage::Kind::General, gui_.data().Text("UIIT_MSG_TRANSITION_CANCEL_RESULT"), context.time);
@@ -3493,9 +3494,22 @@ void PlayScreen::HudRequests(ScreenContext& context) {
         }
         case HudRequest::Kind::CancelCasting: {
             // Asked first (ours: the original's text for it, its box not traced).
-            if (replay_ || player_.casting.item == 0) break;
+            if (replay_ || !player_.casting.Active()) break;
+            const game::PlayerState::Casting c = player_.casting;
+            // The kinds without a teleport: the gauge closes at once (the original's on its cancel button). A quest search's
+            // and a repair kit's tell the server (0x70DB, 0x7074's cancel); a ground click's item is simply not used.
+            if (c.kind == proto::CastingKind::QuestSearch || c.kind == proto::CastingKind::SkillItem || c.kind == proto::CastingKind::PlacedItem) {
+                player_.casting = {};
+                placing_.reset();
+                if (shared_ && shared_->session && c.kind != proto::CastingKind::PlacedItem) {
+                    shared_->session->CancelCasting(c.kind, c.kind == proto::CastingKind::QuestSearch ? c.quest : c.item);
+                }
+                break;
+            }
+            // A return and the guild recall: the teleport's cancel, asked first (ours: the original's text for it, its box not
+            // traced).
             hud_.Confirm("UIIT_STT_CONFIRM_BOX", {gui_.data().Text("UIIT_STT_TRANSITION_CANCEL")}, [this](bool yes) {
-                if (yes && shared_ && shared_->session && player_.casting.item != 0) shared_->session->CancelReturn();
+                if (yes && shared_ && shared_->session && player_.casting.Active()) shared_->session->CancelReturn();
             });
             break;
         }

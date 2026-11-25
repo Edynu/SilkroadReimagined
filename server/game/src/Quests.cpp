@@ -1797,6 +1797,7 @@ bool Quests::UseItem(std::uint32_t entity, const std::string& item) {
             const std::uint32_t seconds = stage >= 0 ? u.stages[std::size_t(stage)].seconds : u.seconds;
             if (seconds == 0) return EndSearch(entity, *p, id, u, stage, state);
             p->searches[id] = {&u, steady + std::chrono::seconds(seconds), stage};
+            host_.QuestSearchStarted(entity, id, seconds);
             return true;
         }
     }
@@ -1806,6 +1807,11 @@ bool Quests::UseItem(std::uint32_t entity, const std::string& item) {
 bool Quests::Searching(std::uint32_t entity, std::uint32_t quest) const {
     const PlayerQuests* p = Of(entity);
     return p != nullptr && p->searches.contains(quest);
+}
+
+void Quests::CancelSearch(std::uint32_t entity, std::uint32_t quest) {
+    const auto it = players_.find(entity);
+    if (it != players_.end() && it->second.searches.erase(quest) > 0) core::LogInfo("quests: entity {} cancels its search for quest {}", entity, quest);
 }
 
 bool Quests::EndSearch(std::uint32_t entity, PlayerQuests& p, std::uint32_t quest, const QuestDef::UseRule& u, int stage, std::uint8_t state) {

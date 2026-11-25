@@ -145,18 +145,33 @@ void DelayGaugeBoard::Created(ui::Interface& ui) {
 void DelayGaugeBoard::Update(ui::Frame&) {
     if (gauge_ == nullptr || context_.state == nullptr) return;
     const game::PlayerState::Casting& c = context_.state->casting;
-    gauge_->visible = c.item != 0;
+    gauge_->visible = c.Active();
     // Without a gauge the board is empty: every click goes through to what is under it (the user's report 2026-11-14:
     // the invisible board took clicks above the underbar); with one, it takes the mouse (its Cancel button).
-    clickThrough = c.item == 0;
-    if (c.item == 0) {
-        shownItem_ = 0;
+    clickThrough = !c.Active();
+    if (!c.Active()) {
+        shownStart_ = -1.0;
         return;
     }
-    if (c.item != shownItem_) {
-        shownItem_ = c.item;
-        const assets::ItemRow* row = context_.items != nullptr ? context_.items->Find(c.item) : nullptr;
-        if (ui::Widget* name = gauge_->Child(12)) name->SetText(row != nullptr ? context_.Text(row->nameKey) : std::string());
+    if (c.started != shownStart_) {
+        // The original's kinds (CIFDelayInfo's set-up): the collection's bar and the quest's name (SN_ + its codename) for a
+        // search; "Guild Recall" for the recall; the item's name over the return's bar for the others.
+        shownStart_ = c.started;
+        std::string line;
+        if (c.kind == game::proto::CastingKind::QuestSearch) {
+            const game::QuestDef* q = context_.quests != nullptr ? context_.quests->Find(c.quest) : nullptr;
+            line = q != nullptr ? context_.Text("SN_" + q->codename) : std::string();
+        } else if (c.kind == game::proto::CastingKind::GuildRecall) {
+            line = context_.Text("UIIT_MSG_GUILD_RECALL_MESSAGE");
+        } else {
+            const assets::ItemRow* row = context_.items != nullptr ? context_.items->Find(c.item) : nullptr;
+            line = row != nullptr ? context_.Text(row->nameKey) : std::string();
+        }
+        if (ui::Widget* name = gauge_->Child(12)) name->SetText(line);
+        if (auto* bar = ui::As<ui::Gauge>(gauge_->Child(10))) {
+            bar->texture = c.kind == game::proto::CastingKind::QuestSearch ? "interface\\ifcommon\\com_casting_gauge_collection.ddj"
+                                                                             : "interface\\ifcommon\\com_casting_gauge_return.ddj";
+        }
     }
     // No easing: the share of the time gone, full once it is over.
     const double done = c.seconds > 0 ? (context_.time - c.started) / c.seconds : 1.0;

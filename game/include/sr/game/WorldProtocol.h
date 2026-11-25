@@ -1026,16 +1026,43 @@ struct ItemRefused {
     }
 };
 
-// The return scroll is being read (the casting gauge): the scroll and its
-// time. It ends with the teleport (WorldEntered) or a cancel (ReturnCancelled).
+// The casting gauge's kinds, the original's five: each its art, its line and its time.
+enum class CastingKind : std::uint8_t {
+    Return = 0,      // a return scroll: its name, its time (the server's)
+    QuestSearch = 1, // a quest item's search: the collection's art, the quest's name, the server's seconds
+    GuildRecall = 2, // the master's recall, answered yes: "Guild Recall", the ask's seconds, then the teleport
+    PlacedItem = 3,  // an item placed by a ground click: 5 s on the client, then its use is sent (the server is not told)
+    SkillItem = 4,   // an item that works as its skill over a time (the fortress repair kits): the skill's time
+};
+
+// The casting gauge on the server's side (kinds 0..2; 3 and 4 are the client's own): its kind, the item (kind 0) or the
+// quest (kind 1), its time. Kinds 0 and 2 end with the teleport (WorldEntered) or a cancel (CancelReturn, answered
+// ReturnCancelled); kind 1 runs out and the search says its result, or the player cancels it (CancelCasting).
 struct ReturnStarted {
     static constexpr MessageId kId = 0x1076;
-    std::uint32_t item = 0; // itemdata RefObjID
+    std::uint32_t item = 0; // itemdata RefObjID (kind 0)
     std::uint32_t ms = 0;
+    CastingKind kind = CastingKind::Return;
+    std::uint32_t quest = 0; // kind 1: the quest's id
     template <typename V>
     void Visit(V& v) {
         v("item", item);
         v("ms", ms);
+        v("kind", kind);
+        v("quest", quest);
+    }
+};
+
+// The gauge's cancel for the kinds without a teleport (the original's 0x70DB for a quest search {the quest}; 0x7074's
+// cancel for an item's skill {the item}). No answer: the gauge closes on the client.
+struct CancelCasting {
+    static constexpr MessageId kId = 0x1088;
+    CastingKind kind = CastingKind::QuestSearch;
+    std::uint32_t id = 0; // kind 1 the quest, kind 4 the item (itemdata RefObjID)
+    template <typename V>
+    void Visit(V& v) {
+        v("kind", kind);
+        v("id", id);
     }
 };
 

@@ -160,6 +160,8 @@ public:
     void UseItem(std::uint8_t slot, std::uint8_t option = 0, std::uint32_t point = 0, std::uint32_t target = 0); // target: the selection
     // The return scroll's reading cancelled (ReturnCancelled answers).
     void CancelReturn();
+    // The casting gauge's cancel for a quest search (kind 1) or an item's skill (kind 4).
+    void CancelCasting(proto::CastingKind kind, std::uint32_t id);
     // At a gate: what it offers (GateMenu), and its point as the return point (C7i).
     void TalkToGate(std::uint32_t gate);
     void DesignateReturn(std::uint32_t gate);

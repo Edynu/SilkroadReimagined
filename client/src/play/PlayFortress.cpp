@@ -132,6 +132,16 @@ void PlayScreen::HandleFortress(ScreenContext& context, const proto::FortressEve
         core::LogInfo("game: fortress: request {} for {}: {} 0x{:04x}", int(a.action), a.fortress, a.ok ? "ok" : "refused", a.error);
         // A marker's use answered: the markers go.
         if (a.action == proto::FortressAction::UseItem && zoneWaiting_) ClearZoneMarkers();
+        // A repair kit taken (its type 10 in the answer): the casting gauge of kind 4 over its skill's time.
+        if (a.action == proto::FortressAction::UseItem && kitSent_ != 0) {
+            const std::uint32_t kit = std::exchange(kitSent_, 0u);
+            if (a.ok && a.amount == 10 && tables_ && tables_->Usable()) {
+                const assets::ItemRow* row = tables_->items.Find(kit);
+                const assets::SkillRow* skill = row != nullptr ? tables_->skills.Find(std::string_view(row->paramTexts[0])) : nullptr;
+                const double seconds = (skill != nullptr && skill->hasDuration ? double(skill->buffDurationMs) : double(game::kRepairKitMs)) / 1000.0;
+                player_.casting = {kit, context.time, seconds, proto::CastingKind::SkillItem, 0};
+            }
+        }
     }
     // The manager's "Jobs for Fortress War" (CIFFortressBusiness) and "About Guild" (CNIFGuildIntroWnd), the smith's or the
     // trainer's window (CIFFortressMakeItemWnd): HudFortressWork.cpp.
@@ -210,6 +220,7 @@ bool PlayScreen::UseFortressItem(std::uint8_t place) {
         if (target == 0) return refuse(game::FortressError::ItemWrongTarget);
         proto::FortressUseItem m{place, fortress, 0, self->position.region, self->position.x, self->position.y, self->position.z, target};
         session.SendGame(proto::FortressUseItem::kId, proto::Encode(m));
+        if (t[2] == 1 && t[3] == 10) kitSent_ = row->refObjId; // its answer starts its gauge
         return true;
     }
     if (manual) {
@@ -373,15 +384,39 @@ bool PlayScreen::FortressPicked(const proto::WorldPosition& at) {
             return false;
         }
     }
+    // The ground click's item: the casting gauge's 5 s (kind 3), then its use (the original's client sends it then).
+    const std::uint32_t refId = row != nullptr ? row->refObjId : 0u;
     if (kind == 6 || kind == 7) {
-        auto* session = shared_->session.get();
-        hud_.Confirm("UIIT_STT_CONFIRM_BOX", {hudContext_.Text(kind == 7 ? "UIIT_MSG_FORT_GUARD_SET_WINDOW" : "UIIT_MSG_FORT_SUMMONMON_SET_WINDOW")}, [session, m](bool yes) {
-            if (yes) session->SendGame(proto::FortressUseItem::kId, proto::Encode(m));
-        });
+        hud_.Confirm("UIIT_STT_CONFIRM_BOX", {hudContext_.Text(kind == 7 ? "UIIT_MSG_FORT_GUARD_SET_WINDOW" : "UIIT_MSG_FORT_SUMMONMON_SET_WINDOW")},
+                     [this, m, refId](bool yes) {
+                         if (yes) StartPlacing(m, refId);
+                     });
         return true;
     }
-    shared_->session->SendGame(proto::FortressUseItem::kId, proto::Encode(m));
+    StartPlacing(m, refId);
     return true;
+}
+
+// The original's kind 3: a fixed 5 s on the client (the gauge's 0x1388 ms), the use sent when they run out.
+void PlayScreen::StartPlacing(const proto::FortressUseItem& m, std::uint32_t item) {
+    placing_ = m;
+    player_.casting = {item, now_, 5.0, proto::CastingKind::PlacedItem, 0};
+}
+
+// The client's own gauges run out: a ground click's item is used; a repair kit's gauge closes. The server's kinds end with
+// their teleport (WorldEntered) or their result.
+void PlayScreen::CastingTick(double now) {
+    game::PlayerState::Casting& c = player_.casting;
+    if (!c.Active() || now < c.started + c.seconds) return;
+    if (c.kind == proto::CastingKind::PlacedItem) {
+        if (placing_ && shared_ && shared_->session) shared_->session->SendGame(proto::FortressUseItem::kId, proto::Encode(*placing_));
+        placing_.reset();
+        c = {};
+    } else if (c.kind == proto::CastingKind::SkillItem || c.kind == proto::CastingKind::QuestSearch) {
+        c = {}; // a search's result comes as its words
+    } else if (c.kind == proto::CastingKind::GuildRecall && now > c.started + c.seconds + 3.0) {
+        c = {}; // ours: the recall no longer went (the member's state changed on its gauge), no teleport came
+    }
 }
 
 void PlayScreen::FortressScript(ScreenContext& context) {

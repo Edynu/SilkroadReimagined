@@ -86,6 +86,7 @@ private:
     game::StallView sampleStall_; // --page stall, stall-buy, stall-price
     bool questTalkShown_ = false;  // --page quest-talk
     bool questListShown_ = false;  // --page quest-list
+    bool castingShown_ = false;    // --page casting:KIND
     bool alchemyShown_ = false;    // --page alchemy[:TAB]
     bool stallShown_ = false;
     game::FlagView sampleFlag_;  // --page ctf-*: Capture the Flag's pieces on a sample match (HudFlagWorld.cpp)

@@ -113,9 +113,12 @@ public:
         (void)entity;
         return true;
     }
-    virtual std::uint16_t GuildRecallGo(std::uint32_t entity, const game::proto::WorldPosition& to) {
+    // Passed, the member waits `seconds` on the recall's gauge (the ask's time, the client's casting gauge of kind 2), then
+    // goes; a cancel of the gauge or a death ends it there.
+    virtual std::uint16_t GuildRecallGo(std::uint32_t entity, const game::proto::WorldPosition& to, std::uint32_t seconds) {
         (void)entity;
         (void)to;
+        (void)seconds;
         return 0x18C1;
     }
 };

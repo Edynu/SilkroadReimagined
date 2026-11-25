@@ -138,6 +138,12 @@ public:
         (void)player;
         (void)key;
     }
+    // A quest item's search began (the original's 0x30DA {quest, seconds}): the client's casting gauge of kind 1.
+    virtual void QuestSearchStarted(std::uint32_t player, std::uint32_t quest, std::uint32_t seconds) {
+        (void)player;
+        (void)quest;
+        (void)seconds;
+    }
     // A text key spoken by a character (`speaker`: a monster, an NPC or a player), told to `player` (the original's 0x3026
     // kind 13 to those near it: inside a quest's instance, its members). By default the plain line.
     virtual void QuestSpeak(std::uint32_t player, std::uint32_t speaker, const std::string& key) {
@@ -316,6 +322,8 @@ public:
     int DevFinish(std::uint32_t entity, std::string_view codename);
     // A search under way for that quest (tests).
     bool Searching(std::uint32_t entity, std::uint32_t quest) const;
+    // The player's cancel of a search (the gauge's cancel, the original's 0x70DB {quest}): it ends unrolled, nothing said.
+    void CancelSearch(std::uint32_t entity, std::uint32_t quest);
     // The player died: its caught COS runs away (the rule's `owner-died`).
     void Died(std::uint32_t entity);
     // The player's trap caught a monster (the quest's event 0x1D): its quests' `trap` rules for that monster.

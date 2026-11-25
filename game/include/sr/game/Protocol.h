@@ -45,7 +45,8 @@ using MessageId = std::uint16_t;
 // 4: the lobby's characters' academy role (CharacterSummary.academyRank).
 // 5: a pet's experience lost by its death (CosExperience.lost).
 // 6: a quest instance's members asked first (QuestEnterAsk, QuestEnterReply).
-inline constexpr std::uint32_t kProtocolVersion = 6;
+// 7: the casting gauge's kind (ReturnStarted.kind, .quest; CancelCasting).
+inline constexpr std::uint32_t kProtocolVersion = 7;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

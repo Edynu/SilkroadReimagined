@@ -275,6 +275,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::uint32_t returnPoint = 0; // designated at a gate (0: none yet)
         // A return scroll read: when it takes the character to its return point (none: not reading).
         std::optional<Clock::time_point> returnAt;
+        // The guild recall answered yes: where returnAt takes it instead (the recall's gauge, then the master's place).
+        std::optional<proto::WorldPosition> recallTo;
         // A reverse return scroll read: where it goes when returnAt comes (its
         // option: proto::kReverseTo*, 0 an ordinary return scroll) and the map's point for option 7.
         std::uint8_t reverseOption = 0;
@@ -4783,6 +4785,12 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (Peer* peer = peers->Find(world->PeerOf(entity))) SendMessage(*peer->connection, proto::InstanceNotice{key, false, false, true});
     }
     void SummonSay(std::uint32_t entity, const std::string& key) override { QuestSay(entity, key); }
+    // The original's 0x30DA {quest, seconds}: the client's casting gauge of kind 1 (the collection's).
+    void QuestSearchStarted(std::uint32_t entity, std::uint32_t quest, std::uint32_t seconds) override {
+        if (Peer* peer = peers->Find(world->PeerOf(entity))) {
+            SendMessage(*peer->connection, proto::ReturnStarted{0, seconds * 1000, proto::CastingKind::QuestSearch, quest});
+        }
+    }
     // A character's line (the original's 0x3026 kind 13: its entity and the text key; the client names it).
     void QuestSpeak(std::uint32_t entity, std::uint32_t speaker, const std::string& key) override {
         if (Peer* peer = peers->Find(world->PeerOf(entity))) SendMessage(*peer->connection, proto::ChatLine{proto::ChatKind::Speech, speaker, {}, key});
@@ -6506,6 +6514,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         player.combat.StopFighting();
         player.pickTarget = 0;
         player.returnAt.reset();
+        player.recallTo.reset();
         player.reverseOption = 0;
         player.revivalOffer.reset();
         // Where it died, for the reverse return scroll (every death: from ProcessNormalDeath and
@@ -8765,7 +8774,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // A member's yes: refused 0x18C1 when dead, travelling, a murderer, with
     // a transport out, or busy (an exchange, a stall, alchemy: the original's motion state neither 0 nor 1); ours also in
     // an instance's layer (a teleport would not leave it). Else on its way to its master's place, on this server or the other.
-    std::uint16_t GuildRecallGo(std::uint32_t entity, const proto::WorldPosition& to) override {
+    std::uint16_t GuildRecallGo(std::uint32_t entity, const proto::WorldPosition& to, std::uint32_t seconds) override {
         const std::uint64_t peerId = world->PeerOf(entity);
         const auto it = players.find(peerId);
         if (it == players.end() || it->second.entity != entity) return game::kRecallWorld;
@@ -8777,8 +8786,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             !CanTravelTo(to.region)) {
             return game::kRecallWorld;
         }
-        core::LogInfo("{}: {} answers the guild recall: to {:#06x} {:.0f},{:.0f},{:.0f}", config.name, player.name, to.region, to.x, to.y, to.z);
-        TravelTo(peerId, player, to);
+        // The original's client runs the recall's gauge for the ask's seconds once its yes is taken (kind 2; its cancel is
+        // the teleport's, 0x705B), then the member goes: ours keeps the place on the return's clock.
+        const std::uint32_t ms = std::max<std::uint32_t>(1000, seconds * 1000);
+        core::LogInfo("{}: {} answers the guild recall: to {:#06x} {:.0f},{:.0f},{:.0f} in {} s", config.name, player.name, to.region, to.x, to.y, to.z,
+                      ms / 1000);
+        player.returnAt = Clock::now() + std::chrono::milliseconds(ms);
+        player.recallTo = to;
+        player.reverseOption = 0;
+        player.toThiefDen = false;
+        if (Peer* peer = peers->Find(peerId)) SendMessage(*peer->connection, proto::ReturnStarted{0, ms, proto::CastingKind::GuildRecall, 0});
         return 0;
     }
     void GuildSubmit(std::function<void(Database&)> task, std::function<void()> done) override {
@@ -9655,7 +9672,20 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
             if (!player.returnAt || now < *player.returnAt) continue;
             player.returnAt.reset();
+            const std::optional<proto::WorldPosition> recall = std::exchange(player.recallTo, std::nullopt);
             if (player.entity == 0 || player.dead) continue;
+            // The guild recall's gauge ran out: to the master's place, if it still may (as at its yes).
+            if (recall) {
+                const bool busy = MallBagHeld(player.entity);
+                if (player.moving || player.pvpState == std::uint8_t(game::PvpState::Murderer) || (coses && coses->TransportOut(player.entity)) || busy ||
+                    (instances && instances->LayerOf(player.entity) != 0) || !CanTravelTo(recall->region)) {
+                    core::LogInfo("{}: {}'s guild recall no longer goes", config.name, player.name);
+                    continue;
+                }
+                core::LogInfo("{}: {} goes to its master's recall", config.name, player.name);
+                TravelTo(peerId, player, *recall);
+                continue;
+            }
             // A reverse return scroll: its place read again now.
             if (const std::uint8_t option = std::exchange(player.reverseOption, std::uint8_t(0)); option != 0) {
                 std::optional<proto::WorldPosition> where;
@@ -11925,8 +11955,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 if (player.returnAt) {
                     player.returnAt.reset();
                     player.reverseOption = 0;
-                    core::LogInfo("{}: {} cancels the return", config.name, player.name);
+                    const bool recall = std::exchange(player.recallTo, std::nullopt).has_value();
+                    core::LogInfo("{}: {} cancels the {}", config.name, player.name, recall ? "guild recall" : "return");
                     SendMessage(*peer.connection, proto::ReturnCancelled{});
+                }
+                return;
+            case proto::CancelCasting::kId:
+                // The gauge's cancel of a quest search (kind 1) or of a repair kit's work (kind 4).
+                if (proto::CancelCasting c; decode(c) && player.entity != 0) {
+                    if (c.kind == proto::CastingKind::QuestSearch && quests) quests->CancelSearch(player.entity, c.id);
+                    if (c.kind == proto::CastingKind::SkillItem && fortresses) fortresses->CancelKits(player.entity);
                 }
                 return;
             case proto::DropItem::kId:

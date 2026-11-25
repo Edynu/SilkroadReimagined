@@ -295,7 +295,7 @@ TEST_CASE("Guild recall: the master's checks and codes, the item spent, its hour
         const std::vector<server::StoredItem> items(count, i); // a place each (MaxStack 1)
         REQUIRE(server::GiveItems(t.Db(), 1, name, items, 0, error) == server::GiveResult::Done);
     };
-    give("Mast", kRecall, 3);
+    give("Mast", kRecall, 4);
     give("Mast", kSoldier, 1);
     give("Memb", kRecall, 1);
     give("Lone", kRecall, 1);
@@ -373,11 +373,22 @@ TEST_CASE("Guild recall: the master's checks and codes, the item spent, its hour
     CHECK(wait.Int(0, 0) == 3600);
     CHECK(s.game.GetGuilds()->RecallAsked(memb.character));
 
-    // A yes: on its way to where the master stands.
+    const auto pollFor = [&](std::chrono::milliseconds span) {
+        const auto end = std::chrono::steady_clock::now() + span;
+        while (std::chrono::steady_clock::now() < end) s.game.Poll(5ms);
+    };
+    // A yes: the recall's gauge for the ask's seconds (the casting gauge's kind 2), then on its way to where the master
+    // stands.
     REQUIRE(s.RegionOf(memb) == kField);
     memb.client->Send(proto::GuildRecallAnswer{1});
     CHECK(RecallAnswered(memb).error == 0);
+    proto::ReturnStarted gauge;
+    REQUIRE(memb.client->Expect(gauge));
+    CHECK(gauge.kind == proto::CastingKind::GuildRecall);
+    CHECK(gauge.ms == 3000u);
     s.Pump();
+    CHECK(s.RegionOf(memb) == kField); // on its gauge still
+    pollFor(3500ms);
     CHECK(s.RegionOf(memb) == kTown);
     // A no: the ask gone, no answer; a yes after it refused.
     far.client->Send(proto::GuildRecallAnswer{0});
@@ -400,6 +411,21 @@ TEST_CASE("Guild recall: the master's checks and codes, the item spent, its hour
     while (std::chrono::steady_clock::now() < late) s.game.Poll(5ms);
     far.client->Send(proto::GuildRecallAnswer{1});
     CHECK(RecallAnswered(far).error == game::kRecallWorld);
+    CHECK(s.RegionOf(far) == kField);
+
+    // A yes whose gauge is cancelled (the teleport's cancel, as a return scroll's): told, and it stays.
+    REQUIRE(t.Db().Query("DELETE FROM _timedjob WHERE charid = $1 AND category = 2 AND jobid = 3", {mast.character}).Ok());
+    use(mast, kRecall);
+    spent(mast, kRecall);
+    REQUIRE(far.client->Expect(ask));
+    far.client->Send(proto::GuildRecallAnswer{1});
+    CHECK(RecallAnswered(far).error == 0);
+    REQUIRE(far.client->Expect(gauge));
+    CHECK(gauge.kind == proto::CastingKind::GuildRecall);
+    far.client->Send(proto::CancelReturn{});
+    proto::ReturnCancelled cancelled;
+    CHECK(far.client->Expect(cancelled));
+    pollFor(3500ms);
     CHECK(s.RegionOf(far) == kField);
 
     // A dead member is asked but its yes refused.

@@ -82,6 +82,9 @@ struct UseHost : server::QuestHost {
         said.push_back(key);
         told.push_back({entity, key});
     }
+    // The searches' gauges told (the original's 0x30DA): quest, seconds.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> gauges;
+    void QuestSearchStarted(std::uint32_t, std::uint32_t quest, std::uint32_t seconds) override { gauges.push_back({quest, seconds}); }
     bool Told(std::uint32_t entity, const std::string& key) const {
         return std::find(told.begin(), told.end(), std::pair{entity, key}) != told.end();
     }
@@ -306,6 +309,9 @@ TEST_CASE("Quest item use: a quest's rule takes its item only as the original's 
         host.freePlace = true;
         CHECK(quests.UseItem(1, "ITEM_T_SPADE"));
         CHECK(quests.Searching(1, 20100));
+        // The client's gauge told: the quest and its ten seconds.
+        REQUIRE(host.gauges.size() == 1);
+        CHECK(host.gauges.back() == std::pair<std::uint32_t, std::uint32_t>{20100, 10});
         // The wait runs: nothing yet; ten seconds on, one given (and said), the goal counts it.
         quests.Tick(std::chrono::steady_clock::now() + 2s);
         CHECK(host.bag["ITEM_T_ORE"] == 0);
@@ -314,6 +320,17 @@ TEST_CASE("Quest item use: a quest's rule takes its item only as the original's 
         CHECK(host.LastSaid() == "SN_T_GOT");
         CHECK_FALSE(quests.Searching(1, 20100));
         CHECK(quests.Record(1, 20100)->progress[0] == 1);
+    }
+    SUBCASE("the gauge's cancel (the original's 0x70DB): the search ends unrolled, nothing given or said") {
+        host.who.position = {25000, 120.0f, 0.0f, 110.0f, 0};
+        CHECK(quests.UseItem(1, "ITEM_T_SPADE"));
+        REQUIRE(quests.Searching(1, 20100));
+        const std::size_t said = host.said.size();
+        quests.CancelSearch(1, 20100);
+        CHECK_FALSE(quests.Searching(1, 20100));
+        quests.Tick(std::chrono::steady_clock::now() + 11s);
+        CHECK(host.bag["ITEM_T_ORE"] == 0);
+        CHECK(host.said.size() == said);
     }
     SUBCASE("the quest's state: a finished quest, a second time, the goals' state; one wait at a time; a lost roll") {
         // State 7 (a goal progressed) and 8 only for QNO_T_FOUND: at 1 (nothing counted yet) refused silently.

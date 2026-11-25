@@ -229,6 +229,7 @@ struct Fortresses::State {
     std::unordered_map<std::uint32_t, std::size_t> objectFort;                       // a war object's entity -> its fortress
     // A repair kit's pulses on a structure (ours: its skill's 'puls' and 'dura' from the use).
     struct KitRepair {
+        std::uint32_t user = 0; // the player who used the kit (its gauge's cancel)
         std::uint32_t structure = 0;
         std::uint32_t amount = 0; // health each pulse
         int pulsesLeft = 0;
@@ -1390,6 +1391,7 @@ struct Fortresses::State {
         const int pulseMs = kit->pulseMs > 0 ? kit->pulseMs : game::kRepairKitPulseMs;
         const int durationMs = kit->durationMs > 0 ? kit->durationMs : game::kRepairKitMs;
         KitRepair r;
+        r.user = a.entity;
         r.structure = target;
         r.amount = std::max<std::uint32_t>(1, std::uint32_t(std::uint64_t(maxHp) * std::uint64_t(kit->percent) / 100));
         r.pulseMs = pulseMs;
@@ -2323,6 +2325,13 @@ void Fortresses::Entered(const FortressActor& actor) {
 
                             Bytes(proto::FortressScore{f.spec.id, std::uint32_t(r->second.kills), std::uint32_t(r->second.deaths), std::uint8_t(r->second.rank)}));
     }
+}
+
+int Fortresses::CancelKits(std::uint32_t entity) {
+    State& s = *s_;
+    const int dropped = int(std::erase_if(s.kitRepairs, [&](const State::KitRepair& r) { return r.user == entity; }));
+    if (dropped > 0) core::LogInfo("fortress war: entity {} cancels its repair kit", entity);
+    return dropped;
 }
 
 bool Fortresses::Handle(const FortressActor& actor, proto::MessageId id, std::span<const std::byte> payload, bool devCommands) {

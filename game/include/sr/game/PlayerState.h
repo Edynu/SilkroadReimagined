@@ -202,11 +202,14 @@ public:
     std::vector<proto::BuybackRecord> buyback;
     std::vector<proto::ItemStatus> itemRefusals;
     std::vector<std::uint16_t> itemRefusalCodes; // a job suit's refusal's original code (ItemMoved::code; 0 none), with each
-    // A return scroll being read (the casting gauge): the scroll, when it began (the HUD's clock) and
-    // how long it takes; item 0: none.
+    // The casting gauge (the original's five kinds, proto::CastingKind): what it is for (the item of kinds 0, 3 and 4, the
+    // quest of kind 1), when it began (the HUD's clock) and how long it takes; none while `seconds` is 0.
     struct Casting {
         std::uint32_t item = 0;
         double started = 0, seconds = 0;
+        proto::CastingKind kind = proto::CastingKind::Return;
+        std::uint32_t quest = 0;
+        bool Active() const { return seconds > 0; }
     } casting;
     // Skills (C7f): the masteries the server lists (every one the race may train, in its order, with
     // its level; 0 not trained) and the skills known (skilldata ids, one per group: its level's);

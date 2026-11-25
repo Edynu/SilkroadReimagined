@@ -542,6 +542,9 @@ public:
     void Load(FortressState state);
     // A player entered the world: it is told the fortresses and the periods.
     void Entered(const FortressActor& actor);
+    // A player's cancel of its repair kit's work (the casting gauge's cancel, the original's 0x7074 cancel of the kit's
+    // skill): its pulses still to come are dropped. The count dropped.
+    int CancelKits(std::uint32_t entity);
     // A fortress request (FortressProtocol.h ids); false when it does not decode. `devCommands`: the
     // server takes FortressDev.
     bool Handle(const FortressActor& actor, game::proto::MessageId id, std::span<const std::byte> payload, bool devCommands);

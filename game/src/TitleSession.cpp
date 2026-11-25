@@ -111,6 +111,7 @@ void TitleSession::UseItem(std::uint8_t slot, std::uint8_t option, std::uint32_t
 void TitleSession::SetAutoPotion(const proto::AutoPotionSettings& settings) { Send(game_, settings); }
 
 void TitleSession::CancelReturn() { Send(game_, proto::CancelReturn{}); }
+void TitleSession::CancelCasting(proto::CastingKind kind, std::uint32_t id) { Send(game_, proto::CancelCasting{kind, id}); }
 
 void TitleSession::TalkToGate(std::uint32_t gate) { Send(game_, proto::GateTalk{gate}); }
 

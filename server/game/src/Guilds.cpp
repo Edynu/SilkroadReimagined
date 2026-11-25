@@ -346,6 +346,7 @@ struct Guilds::State {
         std::uint32_t guild = 0;
         proto::WorldPosition to;
         Clock::time_point until;
+        std::uint32_t seconds = 0; // the ask's time, the yes's wait on the gauge
     };
     std::unordered_map<std::int64_t, RecallAsk> recallAsks;
     // The guild's members online here, but the master and those travelling (the original's 0x7030 at each member's game
@@ -356,7 +357,7 @@ struct Guilds::State {
             if (m.character == master) continue;
             const auto it = online.find(m.character);
             if (it == online.end() || !host.GuildRecallAskable(it->second.entity)) continue;
-            recallAsks[m.character] = {g.id, to, until};
+            recallAsks[m.character] = {g.id, to, until, seconds};
             host.GuildSend(it->second.peer, proto::GuildRecallAsk::kId, proto::Encode(proto::GuildRecallAsk{masterName, seconds}));
             core::LogInfo("guilds: {} asked to come to its master {}", m.name, masterName);
         }
@@ -373,9 +374,9 @@ struct Guilds::State {
         if (!ask || Clock::now() >= ask->until || g == nullptr || g->id != ask->guild) {
             return Answer(a.peer, proto::GuildAction::RecallAnswer, GuildError(0x18C1));
         }
-        const std::uint16_t code = host.GuildRecallGo(a.entity, ask->to);
+        const std::uint16_t code = host.GuildRecallGo(a.entity, ask->to, ask->seconds);
         Answer(a.peer, proto::GuildAction::RecallAnswer, GuildError(code));
-        if (code == 0) core::LogInfo("guilds: {} answers its master's recall: on its way", a.name);
+        if (code == 0) core::LogInfo("guilds: {} answers its master's recall: on its gauge, then on its way", a.name);
     }
     // Every member online (but `except`), here and on the shard's other servers.
     template <typename T>

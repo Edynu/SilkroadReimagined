@@ -1024,10 +1024,10 @@ private:
     ui::Interface* ui_ = nullptr;
 };
 
-// CIFDelayGaugeBoard (40): the casting gauges above the underbar. For now the
-// return scroll's: a CIFDelayInfo (192 x 36, com_casting_window.ddj) at the board's bottom, the
-// scroll's name, a green bar filling left to right over its time (staying full until the
-// teleport), a cancel button.
+// CIFDelayGaugeBoard (40): the casting gauge above the underbar, the original's five kinds (proto::CastingKind): a
+// CIFDelayInfo (192 x 36, com_casting_window.ddj) at the board's bottom, its line (the item's name; a search's quest; the
+// guild recall's), its bar filling left to right over its time (the collection's art for a search, the return's for the
+// rest; full until a teleport), a cancel button.
 class DelayGaugeBoard : public ui::Widget {
 public:
     DelayGaugeBoard(const assets::UiLayoutNode& node, HudContext& context) : Widget(node), context_(context) {}
@@ -1038,7 +1038,7 @@ public:
 private:
     HudContext& context_;
     ui::Widget* gauge_ = nullptr;
-    std::uint32_t shownItem_ = 0;
+    double shownStart_ = -1.0; // the gauge whose line and art are set (its start)
 };
 
 // CEquipStateImg (ginterface 157, 68 x 96, at (W - 200, 74)): the worn pieces near breaking, a paper doll of eight

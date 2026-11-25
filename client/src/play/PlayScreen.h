@@ -839,6 +839,12 @@ private:
     // manuals) or a ground point picked by the next click (flags, guards, tablets: fortressPick_); false: not one.
     bool UseFortressItem(std::uint8_t place);
     std::optional<std::uint8_t> fortressPick_;
+    // The casting gauge's kinds the client runs itself: a ground click's fortress item held for its 5 s (kind 3, sent when
+    // they run out, dropped by the gauge's cancel); a repair kit sent, its gauge started by its answer (kind 4).
+    std::optional<game::proto::FortressUseItem> placing_;
+    std::uint32_t kitSent_ = 0;
+    void StartPlacing(const game::proto::FortressUseItem& m, std::uint32_t item);
+    void CastingTick(double now);
     bool FortressPicked(const game::proto::WorldPosition& at);
     // A manual's zone markers (the click):
     // the free barricade or war camp zones of the fortress within the manual's Range - 5, each shown by its structure's model

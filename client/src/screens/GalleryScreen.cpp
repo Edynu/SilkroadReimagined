@@ -1450,6 +1450,32 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 AvatarGrantStep(hudContext_, 14, 1, false);
             }
         }
+        // --page casting:KIND: the casting gauge of that kind (proto::CastingKind 0..4) on the sample character, 40 % run: a
+        // return scroll, a quest's search (QNO_CA_WAREHOUSE_1's), the guild recall, a fortress flag placed, a repair kit.
+        if (page_.starts_with("casting") && !castingShown_ && tables_ && tables_->Ready() && host_.data().Ready() && hud_.Created()) {
+            castingShown_ = true;
+            namespace proto = game::proto;
+            const int kind = page_.size() > 8 ? std::atoi(page_.c_str() + 8) : 0;
+            const auto item = [&](std::string_view code) {
+                const assets::ItemRow* row = tables_->items.Find(code);
+                return row != nullptr ? row->refObjId : 0u;
+            };
+            game::PlayerState::Casting c;
+            c.kind = proto::CastingKind(std::clamp(kind, 0, 4));
+            c.seconds = 10.0;
+            c.started = context.time - 4.0;
+            if (c.kind == proto::CastingKind::Return) c.item = item("ITEM_ETC_SCROLL_RETURN_01");
+            if (c.kind == proto::CastingKind::PlacedItem) c.item = item("ITEM_FORT_DEFENSIVE_FLAG");
+            if (c.kind == proto::CastingKind::SkillItem) c.item = item("ITEM_FORT_REPAIR_KIT_01");
+            if (c.kind == proto::CastingKind::QuestSearch) {
+                sampleQuests_.Apply(proto::QuestDefinition{"quest QNO_CA_WAREHOUSE_1\nid 90010\nlevel 30\nname \"\"\nstart level 1-\n"});
+                hudContext_.quests = &sampleQuests_;
+                c.quest = 90010;
+            }
+            hudContext_.items = &tables_->items; // the gauge's line names the item
+            sample_.casting = c;
+            core::LogInfo("gallery: casting: kind {} (item {})", int(c.kind), c.item);
+        }
         // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
         // (one goal met: "Completed" in its colour).
         if (page_ == "quest-list" && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
