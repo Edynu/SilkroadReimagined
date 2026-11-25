@@ -70,6 +70,21 @@ std::string GoldText(std::uint32_t gold) {
     return out;
 }
 
+// The original's help over a control (set by its window's code, 0x653DC0) while the mouse is on its place: a control that
+// takes the mouse or a decoration of this window (nothing hovered then).
+void ShowHelp(ui::Frame& frame, ui::Widget& window, std::initializer_list<std::pair<int, const char*>> helps, const HudContext& c) {
+    bool over = frame.pointer.hovered == nullptr && window.ScreenRect().Contains(frame.input.mouse());
+    for (const ui::Widget* p = frame.pointer.hovered; p != nullptr && !over; p = p->parent()) over = p == &window;
+    if (!over) return;
+    for (const auto& [id, key] : helps) {
+        ui::Widget* w = window.Child(id);
+        if (w != nullptr && w->visible && w->ScreenRect().Contains(frame.input.mouse())) {
+            frame.interface.ShowTooltip(c.Text(key), w->ScreenRect());
+            return;
+        }
+    }
+}
+
 class ApplyWindow : public ui::MainFrame {
 public:
     ApplyWindow(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
@@ -83,7 +98,10 @@ public:
         if (ui::Widget* shape = Child(514)) shape->SetText({}); // its layout's "0" is the code's to fill (not traced)
     }
 
-    void Update(ui::Frame&) override {
+    void Update(ui::Frame& frame) override {
+        // The heads' and the information's help (the original's UIIT_MSG_TP_FORT_WARAPPLY_*).
+        ShowHelp(frame, *this, {{0x1FF, "UIIT_MSG_TP_FORT_WARAPPLY_FORTRESS"}, {0x200, "UIIT_MSG_TP_FORT_WARAPPLY_GUILD"},
+                                {0x201, "UIIT_MSG_TP_FORT_WARAPPLY_APPLICATION"}, {0x1F6, "UIIT_MSG_TP_FORT_WARAPPLY_INFO"}}, c_);
         if (c_.fortress == nullptr || c_.fortress->Revision() == seen_) return;
         seen_ = c_.fortress->Revision();
         Fill();
@@ -300,7 +318,9 @@ public:
         }
     }
 
-    void Update(ui::Frame&) override {
+    void Update(ui::Frame& frame) override {
+        // The three parts' help (the original's UIIT_MSG_TP_FORT_TAX_*).
+        ShowHelp(frame, *this, {{0x13, "UIIT_MSG_TP_FORT_TAX_TARGET"}, {0x14, "UIIT_MSG_TP_FORT_TAX_CHANGE"}, {0x15, "UIIT_MSG_TP_FORT_TAX_LEVY"}}, c_);
         // (It closes with the NPC's window, Hud::Sync.)
         if (c_.fortress == nullptr || c_.fortress->Revision() == seen_) return;
         seen_ = c_.fortress->Revision();
