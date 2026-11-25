@@ -15,6 +15,7 @@
 #include "sr/assets/GameData.h"
 #include "sr/assets/Terrain.h"
 #include "sr/core/Log.h"
+#include "sr/game/SpecialItems.h"
 #include "sr/server/Database.h"
 #include "sr/server/GuildStore.h"
 #include "sr/server/ShardBus.h"
@@ -1215,7 +1216,7 @@ struct Fortresses::State {
     }
 
     // --- The fortress items -----------------------------------------------------
-    std::map<std::pair<std::int64_t, std::uint32_t>, std::int64_t> itemReady; // (character, item) -> when it may be used again (Unix ms)
+    std::map<std::pair<std::int64_t, std::uint32_t>, std::int64_t> itemReady; // (character, its COOLTIME key) -> when it may be used again (Unix ms)
     const FortressItemRow* ItemRow(std::uint32_t refObjId) const {
         for (const FortressItemRow& r : config.items) {
             if (r.refObjId == refObjId) return &r;
@@ -1246,7 +1247,9 @@ struct Fortresses::State {
         if (row->time == 2 && warOn) return refuse(FortressError::ItemInWar);
         if (row->mask != 0 && (host.FortressPositionOf(a.character) & row->mask) == 0) return refuse(FortressError::ItemPosition);
         const std::int64_t nowMs = unixNow * 1000;
-        if (const auto it = itemReady.find({a.character, row->refObjId}); it != itemReady.end() && nowMs < it->second) return refuse(FortressError::ItemNotUsable);
+        // Its COOLTIME: by its group (game::CoolTimeKey), every item of it waiting with the one used.
+        const std::uint32_t coolKey = game::CoolTimeKey(row->refObjId, row->coolGroup);
+        if (const auto it = itemReady.find({a.character, coolKey}); it != itemReady.end() && nowMs < it->second) return refuse(FortressError::ItemNotUsable);
         const std::optional<FortressGuild> g = host.FortressGuildOf(a.character);
         FortressError e = FortressError::ItemNotUsable;
         if (row->typeId == std::array<int, 4>{3, 3, 3, 8}) e = Manual(a, *f, *row, g, m.zone, *where);
@@ -1257,7 +1260,10 @@ struct Fortresses::State {
         if (row->typeId == std::array<int, 4>{3, 3, 3, 11}) e = ReadScroll(a, *f, *row, *where);
         if (e != FortressError::None) return refuse(e);
         host.FortressTakeItem(a.peer, m.slot);
-        itemReady[{a.character, row->refObjId}] = nowMs + row->reuseMs;
+        itemReady[{a.character, coolKey}] = nowMs + row->reuseMs;
+        if (row->reuseMs > 0) {
+            host.FortressSend(a.peer, proto::Cooldown::kId, Bytes(proto::Cooldown{proto::CooldownKind::Item, row->refObjId, std::uint32_t(row->reuseMs)}));
+        }
         host.FortressSend(a.peer, proto::FortressAnswer::kId,
                           Bytes(proto::FortressAnswer{proto::FortressAction::UseItem, true, 0, f->spec.id, proto::FortressSide::Attack, m.zone, row->typeId[3]}));
 

@@ -229,6 +229,10 @@ TEST_CASE("Special items: their rules on the data") {
     CHECK(cool.group == 0xC9);
     CHECK(cool.ms == 60000);
     CHECK(game::CoolTimeOf(*items->Find(kFirework)).ms == 0);
+    // Its wait's key: the group, or the item itself for group 0 (two items of group 0 never wait for each other).
+    CHECK(game::CoolTimeKey(kCoolFirework, cool.group) == 0xC9);
+    CHECK(game::CoolTimeKey(77, 0) == (game::kItemCoolTimeKey | 77));
+    CHECK(game::CoolTimeKey(77, 0) != game::CoolTimeKey(78, 0));
     // Fireworks, not the shock bomb.
     CHECK(game::IsFirework(*items->Find(kFirework)));
     CHECK_FALSE(game::IsFirework(Row(1, "ITEM_FORT_SHOCK_BOMB", {3, 3, 6, 2})));

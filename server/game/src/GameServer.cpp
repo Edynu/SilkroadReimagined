@@ -385,7 +385,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             std::int64_t until = 0;
         };
         std::vector<BonusRun> bonuses;
-        // The items' COOLTIME waits running (game::CoolTimeOf): by the item's group, until then.
+        // The items' COOLTIME waits running (game::CoolTimeOf): by game::CoolTimeKey (the group, or the item for group 0),
+        // until then.
         std::unordered_map<std::uint32_t, Clock::time_point> coolTimes;
         Clock::time_point servicesTick, servicesSaved, servicesTold;
         // Free its team (0 none, 1..5), and a change under way to `freePvpTo` until then.
@@ -9038,7 +9039,41 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // once, then after its time (Param1, ms) the character goes to its return point (its race's start
     // town until it designates one at a gate).
     // `given`: the item's use without the item (the premium's daily uses, UsePremium): nothing is taken from the bag.
+    // An item's COOLTIME (game::CoolTimeOf; the original asks it before any use of an item that has one): its wait still
+    // running, by its key (game::CoolTimeKey: its group, or the item for group 0).
+    bool CoolTimeRunning(const PlayerWorld& player, const assets::ItemRow& row, Clock::time_point now) const {
+        const game::ItemCoolTime cool = game::CoolTimeOf(row);
+        if (cool.ms == 0) return false;
+        const auto it = player.coolTimes.find(game::CoolTimeKey(row.refObjId, cool.group));
+        return it != player.coolTimes.end() && now < it->second;
+    }
+    // Its wait from a use, the user told (its item and its group's grey).
+    void StartCoolTime(Peer& peer, PlayerWorld& player, const assets::ItemRow& row, Clock::time_point now) {
+        const game::ItemCoolTime cool = game::CoolTimeOf(row);
+        if (cool.ms == 0) return;
+        player.coolTimes[game::CoolTimeKey(row.refObjId, cool.group)] = now + std::chrono::milliseconds(cool.ms);
+        SendMessage(*peer.connection, proto::Cooldown{proto::CooldownKind::Item, row.refObjId, cool.ms});
+    }
+
+    // An item used from a bag place (or `given`, a premium's daily use). One with a COOLTIME is refused 0x185B while its
+    // wait runs and starts it when used (its stack at the place gone down), whatever path takes it, as the original's
+    // dispatcher; the Dimension Holes keep their own (Instances: kept over a logout), the fortress items theirs
+    // (FortressUseItem).
     void UseItem(Peer& peer, PlayerWorld& player, const proto::UseItem& use, const assets::ItemRow* given = nullptr) {
+        const game::ItemInstance* item = given != nullptr ? nullptr : player.inventory.At(use.slot);
+        const assets::ItemRow* row = item != nullptr && config.rules->items ? config.rules->items->Find(item->refId) : nullptr;
+        const bool hole = row != nullptr && row->typeId == std::array<int, 4>{3, 3, 12, 7};
+        if (row == nullptr || hole || player.dead || game::CoolTimeOf(*row).ms == 0) return UseItemAt(peer, player, use, given);
+        const auto now = Clock::now();
+        if (CoolTimeRunning(player, *row, now)) return RefuseItem(peer, player, *row, game::kCoolTimeRefused, "its wait");
+        const std::uint32_t refId = item->refId;
+        const std::uint16_t count = item->count;
+        UseItemAt(peer, player, use, given);
+        const game::ItemInstance* after = player.inventory.At(use.slot);
+        if (after == nullptr || after->refId != refId || after->count < count) StartCoolTime(peer, player, *row, now);
+    }
+
+    void UseItemAt(Peer& peer, PlayerWorld& player, const proto::UseItem& use, const assets::ItemRow* given) {
         const game::ItemInstance* item = given != nullptr ? nullptr : player.inventory.At(use.slot);
         const assets::ItemRow* row = given != nullptr ? given : item != nullptr && config.rules->items ? config.rules->items->Find(item->refId) : nullptr;
         const auto refuse = [&](const char* why) { core::LogInfo("{}: {} uses place {}: refused ({})", config.name, player.name, use.slot, why); };
@@ -9089,23 +9124,14 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             }
             SkillCaster caster = CasterOf(player);
             // A quest's trap or net (its skill's 'trap' and 'qest': GORIA_6's, GENERAL_1's, IVY_2's;
-            // 8.2): its object set at the user's feet, its catch the quest's event. Its item's COOLTIME (60 s) first, as any
-            // item's (0x185B).
+            // 8.2): its object set at the user's feet, its catch the quest's event (its item's COOLTIME, 60 s, as any item's:
+            // UseItem).
             if (Skills::IsQuestTrap(*skill)) {
-                const auto now = Clock::now();
-                const game::ItemCoolTime cool = game::CoolTimeOf(*row);
-                if (const auto it = player.coolTimes.find(cool.group); cool.ms != 0 && it != player.coolTimes.end() && now < it->second) {
-                    return RefuseItem(peer, player, *row, game::kCoolTimeRefused, "its group's wait");
-                }
-                if (const std::uint16_t code = skillUnit->SetTrap(caster, *skill, now); code != 0) {
+                if (const std::uint16_t code = skillUnit->SetTrap(caster, *skill, Clock::now()); code != 0) {
                     SendMessage(*peer.connection, proto::ItemRefused{row->refObjId, code});
                     return refuse("the trap's place");
                 }
                 TakeOne(peer, player, use.slot);
-                if (cool.ms != 0) {
-                    player.coolTimes[cool.group] = now + std::chrono::milliseconds(cool.ms);
-                    SendMessage(*peer.connection, proto::Cooldown{proto::CooldownKind::Item, row->refObjId, cool.ms});
-                }
                 Broadcast(player.entity, proto::ItemUsed{player.entity, row->refObjId});
                 core::LogInfo("{}: {} sets {} ({})", config.name, player.name, row->codename, skill->codename);
                 return;
@@ -9434,11 +9460,6 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (!firework && !berserk && !quest && !bonus && refusal == 0) return false;
         if (item == nullptr) return true; // a premium's daily use names none of these
         const auto now = Clock::now();
-        const game::ItemCoolTime cool = game::CoolTimeOf(row);
-        if (const auto it = player.coolTimes.find(cool.group); cool.ms != 0 && it != player.coolTimes.end() && now < it->second) {
-            RefuseItem(peer, player, row, game::kCoolTimeRefused, "its group's wait");
-            return true;
-        }
         if (refusal != 0) {
             RefuseItem(peer, player, row, refusal, "the original's server refuses it");
             return true;
@@ -9476,10 +9497,6 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             player.bonuses.push_back({bonus.kind, bonus.key, row.refObjId, bonus.value, unix + bonus.seconds});
             SaveServices(player);
             TellServices(player); // its buff board entry
-        }
-        if (cool.ms != 0) {
-            player.coolTimes[cool.group] = now + std::chrono::milliseconds(cool.ms);
-            SendMessage(*peer.connection, proto::Cooldown{proto::CooldownKind::Item, row.refObjId, cool.ms});
         }
         Broadcast(player.entity, proto::ItemUsed{player.entity, row.refObjId});
         core::LogInfo("{}: {} uses {}{}", config.name, player.name, row.codename,
@@ -9584,8 +9601,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                 }
                 Peer* peer = peers->Find(peerId);
                 if (row == nullptr || !place || peer == nullptr) continue;
+                // An item with a COOLTIME (an HP and MP potion of an event's) waits it as a use by hand.
+                if (CoolTimeRunning(player, *row, now)) continue;
                 const char* why = r >= game::AutoPotion::kVehicle ? UsePetRecovery(*peer, player, *place, *row, now, CosKindOfRow(r))
                                                                    : UseRecovery(*peer, player, *place, *row, now);
+                if (why == nullptr) StartCoolTime(*peer, player, *row, now);
                 if (why != nullptr) {
                     // A kind still locked is the usual answer between two uses: not logged.
                     if (std::string_view(why) != "too soon") core::LogInfo("{}: {}'s auto potion ({}): {}", config.name, player.name, row->codename, why);

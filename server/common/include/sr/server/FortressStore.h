@@ -229,9 +229,12 @@ struct FortressItemRow {
     std::string target; // Desc1_128: the structure, monster or skill it makes
     int place = 0;      // Param2: 1 in a fortress's world, 2 outside (0: any)
     int time = 0;       // Param3: 1 during the war, 2 outside it (0: any)
-    int reuseMs = 0;    // Param4
+    int reuseMs = 0;    // Param4: its COOLTIME's wait
     int mask = 0;       // Param5: the fortress positions that may use it (0: anyone)
     int range = 0;      // Range
+    // Desc4's "COOLTIME:0x.." group: every item of it waits with the one used (0xF0 the tablets, guards and scrolls, 0xF1
+    // the flags, 0xF2 the repair kits); 0 its own wait (the manuals, the shock bomb). game::CoolTimeKey.
+    std::uint32_t coolGroup = 0;
 };
 bool LoadFortressItems(Database& db, std::vector<FortressItemRow>& out, std::string& error);
 // A guard's or a tablet monster's variant allowed at a fortress (`_RefSiegeFortressGuard`: every group at levels 1..140), and

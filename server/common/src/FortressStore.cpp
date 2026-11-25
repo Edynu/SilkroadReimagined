@@ -406,7 +406,8 @@ bool LoadFortressItems(Database& db, std::vector<FortressItemRow>& out, std::str
     out.clear();
     if (!TableExists(db, "_refobjitem")) return true;
     const QueryResult r = db.Query(
-        "SELECT o.id, o.codename128, o.typeid1, o.typeid2, o.typeid3, o.typeid4, coalesce(i.desc1_128, ''), i.param2, i.param3, i.param4, i.param5, i.range "
+        "SELECT o.id, o.codename128, o.typeid1, o.typeid2, o.typeid3, o.typeid4, coalesce(i.desc1_128, ''), i.param2, i.param3, i.param4, i.param5, i.range, "
+        "coalesce(i.desc4_128, '') "
         "FROM _refobjcommon o JOIN _refobjitem i ON i.id = o.link WHERE o.service = 1 AND o.typeid1 = 3 AND o.typeid2 = 3 AND "
         "((o.typeid3 = 3 AND o.typeid4 IN (6, 7, 8, 9, 11)) OR (o.typeid3 = 1 AND o.typeid4 = 10) OR (o.typeid3 = 6 AND o.typeid4 = 2)) ORDER BY o.id");
     if (Fail(r, error)) return false;
@@ -421,6 +422,9 @@ bool LoadFortressItems(Database& db, std::vector<FortressItemRow>& out, std::str
         row.reuseMs = std::max(0, int(r.Int(k, 9)));
         row.mask = std::max(0, int(r.Int(k, 10)));
         row.range = std::max(0, int(r.Int(k, 11)));
+        if (const std::string cool = r.Text(k, 12); cool.starts_with("COOLTIME:")) {
+            row.coolGroup = std::uint32_t(std::strtoul(cool.c_str() + 9, nullptr, 16));
+        }
         out.push_back(std::move(row));
     }
     return true;

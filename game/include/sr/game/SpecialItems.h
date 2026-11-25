@@ -27,6 +27,11 @@ struct ItemCoolTime {
 };
 ItemCoolTime CoolTimeOf(const assets::ItemRow& row);
 constexpr std::uint16_t kCoolTimeRefused = 0x185B;
+// The key a COOLTIME's wait is kept by: its group, every item of the group waiting with the one used; a group of 0 is
+// the item's own wait (the original's check keys group 0 by the item: a fortress manual, a hwan potion and a quest item
+// never wait for each other).
+constexpr std::uint32_t kItemCoolTimeKey = 0x80000000u;
+constexpr std::uint32_t CoolTimeKey(std::uint32_t refObjId, std::uint32_t group) { return group != 0 ? group : kItemCoolTimeKey | refObjId; }
 
 // A firework (3/3/6 but TID4 2, the fortress's shock bomb): asks only that the user
 // is in the world (0x186B otherwise) and succeeds: the item is taken and the use told to those around (0x305C), whose
