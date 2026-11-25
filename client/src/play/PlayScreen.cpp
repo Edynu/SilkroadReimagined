@@ -2632,6 +2632,11 @@ void PlayScreen::HandleInput(ScreenContext& context) {
         const double left = berserkUntil_ - context.time, part = double(game::kBerserkMs) / 1000.0 / 5.0;
         player_.self.berserkLit = left > 0.0 ? std::uint8_t(std::clamp(int(std::ceil(left / part)), 1, 5)) : 0;
     }
+    // The guild master's recall unanswered when its time ran out: its box closes (PlayGuild.cpp).
+    if (recallBox_ != nullptr && context.time >= recallUntil_) {
+        if (ui::Interface* ui = gui_.interface()) ui->Close(recallBox_);
+        recallBox_ = nullptr;
+    }
     // HP or MP falling under 30 % (not to 0): the alarm once at the player, with the Game page's warning row for it and
     // its sound row on (the original's CIFPlayerMiniInfo).
     if (world_ && !replay_ && context.options != nullptr) {

@@ -464,6 +464,8 @@ private:
     bool cameraFocusSet_ = false;
     bool turning_ = false;
     bool netOff_ = false; // the lost connection's box is up
+    ConfirmBox* recallBox_ = nullptr; // the guild master's recall asked, unanswered (closed at recallUntil_)
+    double recallUntil_ = 0.0;
     bool hpLow_ = false, mpLow_ = false; // under 30 % at the last frame (the warning's alarm)
     bool turnHeld_ = false;   // this turn holds the cursor (the Game page's camera method 2)
     ui::Vec2 turnFrom_;       // where the turn's button was pressed

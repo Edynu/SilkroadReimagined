@@ -222,6 +222,23 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
     }
     // The war's reward to collect: its box (yes takes it).
     if (const auto gold = guild_.TakeWarReward()) AskWarReward(hudContext_, *gold);
+    // The master's recall: "Guild master has recalled guild members. Agree to recall?" with Yes and No (the original's
+    // member box, 252 / 253), closed unanswered when its seconds run out (the server then cancels it: HandleInput);
+    // --guild-accept or --guild-decline answer it.
+    if (const auto ask = guild_.TakeRecallAsk()) {
+        core::LogInfo("game: guild: {} recalls the members ({} s)", ask->master, ask->seconds);
+        const auto answer = [this](bool yes) {
+            recallBox_ = nullptr;
+            core::LogInfo("game: guild: the recall answered {}", yes ? "yes" : "no");
+            if (!replay_ && shared_ && shared_->session) shared_->session->SendGuild(proto::GuildRecallAnswer{std::uint8_t(yes ? 1 : 0)});
+        };
+        if (guildAnswer_ != 0) {
+            answer(guildAnswer_ > 0);
+        } else if (ConfirmBox* box = hud_.Confirm("UIIT_STT_CONFIRM_BOX", {text("UIIT_MSG_GUILD_RECALL_ANSWER")}, answer)) {
+            recallBox_ = box;
+            recallUntil_ = context.time + double(std::max<std::uint32_t>(1, ask->seconds));
+        }
+    }
     // The emblems seen and not yet here, asked of the server.
     for (const proto::GuildCrestRequest& r : guild_.TakeCrestRequests()) {
         if (!replay_ && shared_ && shared_->session) shared_->session->SendGuild(r);
