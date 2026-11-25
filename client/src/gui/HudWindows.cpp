@@ -62,6 +62,7 @@ void RegisterHudWindows(ui::Interface& ui, HudContext& context) {
 #endif
     ui.Register("CIFSystemWnd", [c](const assets::UiLayoutNode& n) { return std::make_unique<SystemMenu>(n, *c); });
     ui.Register("CIFChatViewer", [c](const assets::UiLayoutNode& n) { return std::make_unique<ChatWindow>(n, *c); });
+    ui.Register("CIFChatModeViewer", [c](const assets::UiLayoutNode& n) { return MakeChatModeViewer(n, *c); });
     ui.Register("CIFWholeChat", [c](const assets::UiLayoutNode& n) { return std::make_unique<GlobalChatWindow>(n, *c); });
     ui.Register("CIFInventory", [c](const assets::UiLayoutNode& n) { return std::make_unique<InventoryWindow>(n, *c); });
     ui.Register("CIFPlayerInfo", [c](const assets::UiLayoutNode& n) { return std::make_unique<PlayerInfo>(n, *c); });

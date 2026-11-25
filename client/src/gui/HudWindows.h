@@ -882,6 +882,9 @@ private:
 // Party, Guild, Union) over the input line, in seven sizes (0: the input line only; 2 at the
 // start); the whisper list above it. The player's lines go to the game as requests; the lines the
 // state receives come in with their colours and tags.
+// The chat window's command list (CIFChatModeViewer).
+std::unique_ptr<ui::Widget> MakeChatModeViewer(const assets::UiLayoutNode& node, HudContext& context);
+
 class ChatWindow : public ui::Widget {
 public:
     ChatWindow(const assets::UiLayoutNode& node, HudContext& context) : Widget(node), context_(context) {}
@@ -930,6 +933,8 @@ public:
 private:
     void ShowStrip(bool shown);
     void ShowWhispers(bool shown);
+    void ShowModes(bool shown);
+    void PickMode(int row);
     void Restrict(int seconds);
     void TakeEntries();
     void NotePartner(const std::string& name);
@@ -944,6 +949,7 @@ private:
     ui::Edit* input_ = nullptr;
     ui::ScrollBar* bar_ = nullptr;
     ui::Widget* whispers_ = nullptr; // CIFWhisperList (51)
+    ui::Widget* modes_ = nullptr;    // CIFChatModeViewer (42): the command list of the button 41
     ui::TextBox* whisperBox_ = nullptr;
     ui::Static* penalty_ = nullptr; // "Chat Restricted: N seconds"
     int level_ = 2, tab_ = 0;

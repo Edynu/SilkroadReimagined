@@ -1,5 +1,8 @@
 // The chat: the chat window with its tabs, sizes, input line and whisper list,
-// and the global chat window.
+// and the global chat window. Beside the input, 1.188's command button (GDR_CHAT_MODE_BTN, 41) opens its list
+// (CIFChatModeViewer, 42: ifchatviewer.txt's CreateChatMode, 16-pixel rows): Friend, Guild, Block, Unblock, Block
+// Whisper, Unblock Whisper, /whisper; a row puts its command (/invite, /join, /ban, /unban, /mute, /unmute, or "$")
+// into the input line with the selected player's name, the keyboard on it.
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +28,48 @@ constexpr ui::Color kWhite = ui::Argb(0xFFFFFFFF), kWhisperCyan = ui::Argb(0xFF9
 
 // The input line's prefix for each tab.
 constexpr const char* kTabPrefix[] = {"", "#", "@", "%"};
+
+// The command list's rows (1.188's order) and the command each puts in the input line ("$" a whisper's, no space).
+constexpr std::pair<const char*, const char*> kModeRows[] = {
+    {"UIIT_STT_CHAT_FRIEND_INVITE", "UIIT_STT_CHAT_COMMAND_FRIEND_INVITE1"}, {"UIIT_STT_CHAT_GUILD_INVITE", "UIIT_STT_CHAT_COMMAND_GUILD_INVITE1"},
+    {"UIIT_STT_CHAT_BLOCK", "UIIT_STT_CHAT_COMMAND_BLOCK"},                 {"UIIT_STT_CHAT_ADMISSION", "UIIT_STT_CHAT_COMMAND_ADMISSION"},
+    {"UIIT_STT_CHAT_WHISPER_BLOCK", "UIIT_STT_CHAT_COMMAND_WHISPER_BLOCK"}, {"UIIT_STT_CHAT_WHISPER_ADMISSION", "UIIT_STT_CHAT_COMMAND_WHISPER_ADMISSION"},
+    {"UIIT_STT_CHAT_COMMAND_WHISPER1", nullptr}};
+constexpr float kModeRow = 16.0f; // a row's height; the list is rows x 16 + 8 high
+
+// CIFChatModeViewer: its section's list and background (the middle piece stretched, a 4-pixel cap above and below).
+class ChatModeViewer : public ui::Widget {
+public:
+    ChatModeViewer(const assets::UiLayoutNode& node, HudContext& c) : Widget(node), c_(c) {}
+    void Created(ui::Interface& ui) override {
+        if (const assets::UiLayout* l = ui.Layout("resinfo\\ifchatviewer.txt")) {
+            for (const auto& section : l->sections) {
+                if (section.name != "CreateChatMode") continue;
+                for (auto it = section.nodes.rbegin(); it != section.nodes.rend(); ++it) Add(ui.Make(*it));
+            }
+        }
+        const float h = float(std::size(kModeRows)) * kModeRow + 8.0f;
+        rect.w = 136.0f;
+        rect.h = h;
+        for (int id : {11, 12}) {
+            if (Widget* mid = Child(id)) mid->rect = {0.0f, 0.0f, rect.w, h};
+        }
+        if (Widget* up = Child(10)) up->rect = {0.0f, -4.0f, rect.w, 4.0f};
+        if (Widget* down = Child(13)) down->rect = {0.0f, h, rect.w, 4.0f};
+        if (auto* list = ui::As<ui::TextBox>(Child(20))) {
+            list->rect.w = rect.w;
+            list->rect.h = h;
+            list->lineHeight = kModeRow;
+            list->hoverTracking = true;
+            list->hoverBar = ui::Argb(0x66FFFFFF);
+            for (const auto& [row, command] : kModeRows) list->AddParagraph(c_.Text(row), ui::kWhite);
+        }
+        visible = false;
+    }
+
+private:
+    HudContext& c_;
+};
 
 std::size_t Characters(std::string_view s) {
     std::size_t n = 0;
@@ -167,6 +212,7 @@ void ChatWindow::Created(ui::Interface& ui) {
         lamps_[std::size_t(i)] = Child(20 + i);
     }
     input_ = ui::As<ui::Edit>(Child(11));
+    modes_ = Child(42);
     bar_ = ui::As<ui::ScrollBar>(Child(24));
     penalty_ = ui::As<ui::Static>(Child(52));
     if (penalty_ != nullptr) {
@@ -228,6 +274,8 @@ void ChatWindow::SetLevel(int level) {
         rect.h = 21.0f;
         if (input_ != nullptr) input_->rect.y = 0.0f;
         if (Widget* size = Child(15)) size->rect.y = 0.0f;
+        if (Widget* modes = Child(41)) modes->rect.y = 0.0f;
+        ShowModes(false);
         if (penalty_ != nullptr) penalty_->rect.y = 2.0f;
         for (int id : {5, 6, 7, 12, 14, 24}) {
             if (Widget* w = Child(id)) w->visible = false;
@@ -264,6 +312,8 @@ void ChatWindow::SetLevel(int level) {
     }
     if (Widget* size = Child(15)) size->rect.y = bottom + 5.0f;
     if (input_ != nullptr) input_->rect.y = bottom + 5.0f;
+    if (Widget* modes = Child(41)) modes->rect.y = bottom + 5.0f;
+    ShowModes(false);
     if (penalty_ != nullptr) penalty_->rect.y = bottom + 7.0f;
     for (int id : {12, 14}) {
         if (Widget* w = Child(id)) w->visible = true;
@@ -314,6 +364,37 @@ void ChatWindow::SelectTab(int tab) {
             input_->SetValue(kTabPrefix[tab_]);
         }
     }
+}
+
+std::unique_ptr<ui::Widget> MakeChatModeViewer(const assets::UiLayoutNode& node, HudContext& context) {
+    return std::make_unique<ChatModeViewer>(node, context);
+}
+
+void ChatWindow::ShowModes(bool shown) {
+    if (modes_ == nullptr) return;
+    modes_->visible = shown;
+    if (!shown) return;
+    // Its bottom 4 above the window's bottom piece (7: 5 above the input line), 4 in from its left.
+    const Widget* bottom = Child(7);
+    const float x = bottom != nullptr ? bottom->rect.x : 18.0f;
+    const float y = input_ != nullptr ? input_->rect.y - 5.0f : 0.0f;
+    modes_->rect.x = x + 4.0f;
+    modes_->rect.y = y - 4.0f - modes_->rect.h;
+    modes_->BringToFront(); // over the chat's lines
+}
+
+void ChatWindow::PickMode(int row) {
+    if (row < 0 || std::size_t(row) >= std::size(kModeRows) || input_ == nullptr) return;
+    // The command and a space ("$" alone for a whisper), then the selected player's name (not one's own).
+    const char* command = kModeRows[std::size_t(row)].second;
+    std::string text = command != nullptr ? context_.Text(command) + " " : std::string("$");
+    if (context_.state != nullptr) {
+        const game::TargetStatus& t = context_.state->target;
+        if (t.entity != 0 && t.kind == game::TargetStatus::Kind::Player && t.entity != context_.state->self.entity) text += t.name;
+    }
+    input_->SetValue(text);
+    ShowModes(false);
+    FocusInput();
 }
 
 void ChatWindow::FocusInput() {
@@ -554,6 +635,7 @@ bool ChatWindow::OnNotice(const ui::Notice& notice) {
         case 12: ShowStrip(stripHidden_); return true;
         case 14: ShowWhispers(!whispersOpen_); return true;
         case 15: SetLevel(level_ == 6 ? 0 : level_ + 1); return true;
+        case 41: ShowModes(modes_ != nullptr && !modes_->visible); return true;
         case 100:
         case 101:
         case 102:
@@ -562,6 +644,10 @@ bool ChatWindow::OnNotice(const ui::Notice& notice) {
         }
     }
     if (notice.kind == K::RowPicked) {
+        if (modes_ != nullptr && notice.source->parent() == modes_) {
+            PickMode(notice.value);
+            return true;
+        }
         if (notice.source == whisperBox_ && notice.value >= 0 && std::size_t(notice.value) < partners_.size()) {
             Address(partners_[std::size_t(notice.value)], true); // the list stays open
             return true;
