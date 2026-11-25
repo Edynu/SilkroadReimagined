@@ -427,6 +427,73 @@ SkillRemovalBox* RemovalBox(HudContext& c, bool open) {
     return dynamic_cast<SkillRemovalBox*>(ui->Open(node));
 }
 
+// The premium package's uses (1.188's CIFCompositeItemWnd, interface 36, resinfo\ifcompositeitemwnd.txt), opened by a right
+// click on its icon on the buff board: a sys_button.ddj button for each of its entries, 150 x 25 at 31, 58 and every 34
+// below, "%s(%d)" (its item's name, its uses left today; none left: disabled), then Cancel; the frame and the window as
+// tall as their buttons (the frame 15 + 34 a button, the window 70 + 36). A button uses that entry (as the chat's
+// premium commands) and the window closes.
+class CompositeItemWindow : public ui::MainFrame {
+public:
+    CompositeItemWindow(const assets::UiLayoutNode& node, HudContext& c) : MainFrame(node), c_(c) {}
+
+    void Created(ui::Interface& ui) override {
+        ui::MainFrame::Created(ui);
+        ui_ = &ui;
+    }
+
+    void Fill() {
+        if (ui_ == nullptr || c_.state == nullptr) return;
+        for (ui::Widget* b : buttons_) b->visible = false;
+        entries_.clear();
+        for (const proto::PremiumUses& u : c_.state->timedServices.premium) entries_.push_back(u);
+        const std::size_t n = entries_.size() + 1; // and Cancel
+        for (std::size_t i = 0; i < n; ++i) {
+            if (i >= buttons_.size()) {
+                assets::UiLayoutNode node;
+                node.type = "CIFButton";
+                node.id = kFirst + int(i);
+                node.ddj = "interface\\system\\sys_button.ddj";
+                node.hAlign = 1;
+                node.vAlign = 1;
+                node.rect = {31.0f, 58.0f + 34.0f * float(i), 150.0f, 25.0f};
+                buttons_.push_back(Add(ui_->Make(node)));
+            }
+            ui::Widget* b = buttons_[i];
+            b->visible = true;
+            b->rect.y = 58.0f + 34.0f * float(i);
+            if (i == entries_.size()) {
+                b->SetText(c_.Text("UIIT_CTL_CANCEL"));
+                b->enabled = true;
+                continue;
+            }
+            const proto::PremiumUses& u = entries_[i];
+            const assets::ItemRow* row = c_.items != nullptr ? c_.items->Find(u.item) : nullptr;
+            b->SetText(std::format("{}({})", row != nullptr ? c_.Text(row->nameKey) : std::to_string(u.item), int(u.left)));
+            b->enabled = u.left > 0;
+        }
+        if (ui::Widget* frame = Child(6)) frame->rect.h = 15.0f + 34.0f * float(n);
+        if (ui::Widget* tile = Child(5)) tile->rect.h = 34.0f * float(n) - 8.0f; // ours: the tile under the buttons
+        rect.h = 70.0f + 36.0f * float(n);
+    }
+
+    bool OnNotice(const ui::Notice& n) override {
+        if (n.kind == ui::Notice::Kind::Clicked && n.source != nullptr && n.source->parent() == this && n.control >= kFirst) {
+            const std::size_t i = std::size_t(n.control - kFirst);
+            if (i < entries_.size() && c_.premiumUse) c_.premiumUse(entries_[i].item);
+            if (c_.hud != nullptr) c_.hud->Hide(hud::kCompositeItem);
+            return true;
+        }
+        return ui::MainFrame::OnNotice(n);
+    }
+
+private:
+    static constexpr int kFirst = 10;
+    HudContext& c_;
+    ui::Interface* ui_ = nullptr;
+    std::vector<ui::Widget*> buttons_;
+    std::vector<proto::PremiumUses> entries_;
+};
+
 } // namespace
 
 bool InWithdrawalWindow(const ui::Widget* w) {
@@ -479,7 +546,14 @@ bool ChooseSkin(HudContext& c, bool male, int figure, int height, int volume, bo
     return true;
 }
 
+void ShowCompositeItems(HudContext& c) {
+    // Made from its section of ginterface.txt (CompositeItem) on demand, as 1.188 makes it, then filled.
+    if (c.hud == nullptr) return;
+    if (auto* w = dynamic_cast<CompositeItemWindow*>(c.hud->Show(hud::kCompositeItem))) w->Fill();
+}
+
 void RegisterServiceWindows(ui::Interface& ui, HudContext& context) {
+    ui.Register("CIFCompositeItemWnd", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<CompositeItemWindow>(n, *c); });
     ui.Register("CIFChangePlayerModel", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<SkinWindow>(n, *c); });
     ui.Register("CIFSkillWithdrawal", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<WithdrawalWindow>(n, *c); });
     ui.Register("CIFSkillRemovalBox", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<SkillRemovalBox>(n, *c); });

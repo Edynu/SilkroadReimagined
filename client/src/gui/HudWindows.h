@@ -230,6 +230,8 @@ struct HudContext {
     std::function<const std::vector<assets::Ui2dtRecord>*(const std::string& path)> layout2dt;
     // The game guide's topics and events (null until the interface's data is in).
     std::function<const assets::GameGuideData*()> gameGuide;
+    // The premium package's entry (its item) used, as its chat command (the composite window's buttons).
+    std::function<void(std::uint32_t item)> premiumUse;
     const game::WorldView* world = nullptr; // the minimap's dots (null: none)
     Hud* hud = nullptr;
     double time = 0; // the clock the state's times are on (seconds)
@@ -479,6 +481,8 @@ bool MagicPopRolling(HudContext& context);
 
 // The item mall's services (HudServices.cpp).
 void RegisterServiceWindows(ui::Interface& ui, HudContext& context);
+// The premium package's uses window (interface 36), filled from the player's premium uses and shown.
+void ShowCompositeItems(HudContext& context);
 // An item used whose use is a window, a pick or a question first (the skin change scroll, the restoration potion, the
 // gender switch tool, the repair hammer, a magic cube): true when handled here.
 bool UseServiceItem(HudContext& context, int place);

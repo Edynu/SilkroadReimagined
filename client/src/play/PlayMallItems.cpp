@@ -74,20 +74,29 @@ bool PlayScreen::PremiumCommand(const std::string& line) {
     if (is("UIIT_STT_PREMIUM_COMMAND_RESURRECTION_100%")) item = "ITEM_MALL_RESURRECTION_100P_SCROLL";
     (void)word;
     if (item == nullptr) return false;
+    const assets::ItemRow* row = tables_->items.Find(std::string_view(item));
+    if (row != nullptr) UsePremium(row->refObjId);
+    core::LogInfo("game: premium command {}", line);
+    return true;
+}
+
+void PlayScreen::UsePremium(std::uint32_t item) {
+    if (!tables_ || !tables_->Usable()) return;
+    const UiData& d = gui_.data();
     const auto post = [&](const char* key) { player_.Post(game::GameMessage::Kind::General, d.Text(key), player_.now); };
     // The client's own checks: the premium running (0x18CC), /Resurrection only for the dead (0x1887).
     const bool premium = std::any_of(player_.timedServices.services.begin(), player_.timedServices.services.end(),
                                      [](const proto::TimedService& s) { return s.category == game::kTimedPremium; });
     if (!premium) {
         post(MallItemErrorKey(0x18CC));
-        return true;
+        return;
     }
-    const assets::ItemRow* row = tables_->items.Find(std::string_view(item));
-    if (row == nullptr || replay_ || !shared_ || !shared_->session) return true;
+    const assets::ItemRow* row = tables_->items.Find(item);
+    if (row == nullptr || replay_ || !shared_ || !shared_->session) return;
     const bool dead = player_.self.maxHp > 0 && player_.self.hp == 0;
     if (row->typeId == std::array<int, 4>{3, 3, 13, 6} && !dead) {
         post(MallItemErrorKey(0x1887));
-        return true;
+        return;
     }
     const std::uint32_t id = row->refObjId;
     if (row->typeId == std::array<int, 4>{3, 3, 3, 3}) {
@@ -102,11 +111,9 @@ bool PlayScreen::PremiumCommand(const std::string& line) {
             }
             shared_->session->SendGuild(proto::PremiumUse{id, std::uint8_t(result == 1 ? proto::kReverseToRecall : proto::kReverseToDeath), 0});
         });
-        return true;
+        return;
     }
     shared_->session->SendGuild(proto::PremiumUse{id, 0, 0});
-    core::LogInfo("game: premium command {}", line);
-    return true;
 }
 
 void PlayScreen::HandleMallItems(ScreenContext& context, const proto::MallEvent& event) {

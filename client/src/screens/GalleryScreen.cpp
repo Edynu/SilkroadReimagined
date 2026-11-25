@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <ctime>
 #include <sstream>
+#include <tuple>
 
 #include "sr/core/Log.h"
 #include "sr/core/Text.h"
@@ -1191,6 +1192,19 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             ShowQuestGuide(hudContext_, {{1, "SN_QNO_CH_SMITH_1", "SN_NN_QNO_CH_SMITH_1", "SN_NC_QNO_CH_SMITH_1"},
                                          {2, "SN_QNO_CH_POTION_1", "SN_NN_QNO_CH_POTION_1", "SN_NC_QNO_CH_POTION_1"}});
             if (page_ == "quest-guide:window") hud_.Show(45);
+        }
+        // --page composite-item: the premium package's uses window (its right click on the buff board) on sample uses.
+        if (page_ == "composite-item" && !compositeShown_ && interface_ != nullptr && hud_.Created() && tables_ && tables_->Ready() && tables_->Usable()) {
+            compositeShown_ = true;
+            hudContext_.items = &tables_->items;
+            sample_.timedServices.premium.clear();
+            for (const auto& [code, left, perDay] : {std::tuple{"ITEM_MALL_RETURN_SCROLL_HIGH_SPEED", 3, 5}, std::tuple{"ITEM_MALL_REVERSE_RETURN_SCROLL", 0, 3},
+                                                     std::tuple{"ITEM_MALL_RESURRECTION_100P_SCROLL", 2, 2}}) {
+                if (const assets::ItemRow* row = tables_->items.Find(std::string_view(code))) {
+                    sample_.timedServices.premium.push_back({row->refObjId, std::uint8_t(left), std::uint8_t(perDay)});
+                }
+            }
+            ShowCompositeItems(hudContext_);
         }
         // --page game-guide: the Help key's guide (its start page and its menu; --click picks a heading and a topic).
         if (page_ == "game-guide" && !guideShown_ && interface_ != nullptr && host_.data().Ready()) {

@@ -866,6 +866,8 @@ private:
     // one of them), the premium's chat commands, the services' answers.
     bool UseMallItem(std::uint8_t place);
     bool PremiumCommand(const std::string& line);
+    // The premium package's entry (its item) used: the chat's commands and the composite window's buttons.
+    void UsePremium(std::uint32_t item);
     void HandleMallItems(ScreenContext& context, const game::proto::MallEvent& event);
     // The item mall (PlayMall.cpp): its catalogue and the window's view, the answers, the steps, the preview.
     void SetupMall(ScreenContext& context);

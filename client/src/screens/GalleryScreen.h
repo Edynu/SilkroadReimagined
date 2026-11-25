@@ -66,6 +66,7 @@ private:
     game::QuestView sampleQuests_; // --page quest-reward: a beta quest's definition
     bool rewardShown_ = false;
     bool guideShown_ = false; // --page game-guide
+    bool compositeShown_ = false; // --page composite-item
     game::CommunityView sampleCommunity_; // the Community pages' sample friends, blocks and letters
     game::GuildView sampleGuild_; // the guild window's sample guild and union
     game::FortressView sampleFortress_; // the fortress official's window on sample data

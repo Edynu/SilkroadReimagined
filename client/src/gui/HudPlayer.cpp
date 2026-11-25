@@ -6,6 +6,7 @@
 
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
+#include "sr/game/TimedServices.h"
 #include "gui/PortraitTexture.h"
 
 namespace sr::client {
@@ -438,9 +439,14 @@ void BuffBoard::Mouse(ui::Frame& frame) {
     if (e.kind == game::ActiveEffect::Kind::Skill && !e.debuff && context_.hud != nullptr) {
         context_.hud->Request({HudRequest::Kind::CancelBuff, hovered_});
     }
-    // A time service's entry: its pause asked (the premium list's confirm box); a bonus scroll's: its end asked.
+    // A time service's entry: its pause asked (the premium list's confirm box); a bonus scroll's: its end asked; the
+    // premium package's: its uses' window (1.188's composite item window, the board's kind 5).
     if (e.kind == game::ActiveEffect::Kind::TimedJob && (e.token & 0xFFFF0000u) == game::PlayerState::kTimedServiceToken && context_.hud != nullptr) {
-        context_.hud->Request({HudRequest::Kind::CancelBuff, hovered_});
+        if (std::uint8_t(e.token & 0xFF) == game::kTimedPremium) {
+            ShowCompositeItems(context_);
+        } else {
+            context_.hud->Request({HudRequest::Kind::CancelBuff, hovered_});
+        }
     }
     // The academy's accumulation an hour after it began (or its day over): its pass asked (the same handler,
     // board kind 7, 3,600,000 ms; UIIT_CTL_TC_PASS_BUFF's box, then the original's 0x7483; the server checks the hour).
