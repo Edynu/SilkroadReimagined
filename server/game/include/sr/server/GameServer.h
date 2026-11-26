@@ -201,6 +201,10 @@ struct GameServerConfig {
     // The beta quests (game/BetaQuests.h; ours, a test shard's): a Beta Helper beside So-Ok in each town and its ten
     // quests of Seal of Sun weapons. A shard setting (beta-quests), off by default.
     bool betaQuests = false;
+    // The guild's mercenaries (game/GuildMercenary.h; ours: 1.188's data refuses their scrolls, so its players never had
+    // one): on, a scroll summons its guild's soldiers and the guild's NPC sells their abilities. A shard setting
+    // (guild-mercenaries), off by default: off, all of it is refused as the original's.
+    bool guildMercenaries = false;
     // A hostility record's seconds (20; tests shorten them).
     int hostileSeconds = 20;
     // The wall clock in Unix seconds (the PK keeper's 48 h, DailyPK's reset at local midnight); null: the system's.

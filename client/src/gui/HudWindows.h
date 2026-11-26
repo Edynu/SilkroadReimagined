@@ -411,6 +411,11 @@ struct GuildNpcRowInfo {
     bool red = false; // what the guild's level does not allow yet
 };
 std::vector<GuildNpcRowInfo> GuildNpcRows(const HudContext& context);
+// The guild NPC's mercenary rows (a shard that runs them, GuildInfo::mercenaries): "Grant additional ability to mercenary"
+// opens the NPC window's soldier page (NpcWindow::ShowSoldiers); its rows are kGuildRowSoldierAbility + the ability's bit
+// (0: release them all), done by GuildNpcChoice.
+inline constexpr int kGuildRowSoldier = 11;
+inline constexpr int kGuildRowSoldierAbility = 0x100;
 // A league keeper's rows (HudJobs.cpp): by the NPC's league (proto::kNpcJob*), each a
 // JobNpcRow; and that row done (a confirmation, the alias window, a request with the NPC).
 enum class JobNpcRow : std::uint8_t { Join, Leave, AliasCreate, AliasModify, ActivityRank, DonationRank, ContributionRank, Outcome, Previous, TradeBoard,
@@ -1072,6 +1077,9 @@ public:
     void ShowGate(std::uint32_t gate, std::uint32_t services, std::vector<std::uint32_t> opened = {});
     // An NPC's: its name, its greeting (npcchat.txt by codename), what it offers (proto::kNpc*).
     void ShowNpc(std::uint32_t entity, const std::string& codename, const std::string& nameKey, std::uint32_t services);
+    // The guild's mercenaries' page (the 1.188 client's: the abilities held in a line, then the four abilities' rows and
+    // the release of them all, each numbered).
+    void ShowSoldiers();
     std::uint32_t gate() const { return gate_; }
     // The choice numbered `number` (1..), as a click on it; false when there is none (scripts).
     bool Choose(int number);

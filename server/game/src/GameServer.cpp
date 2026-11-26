@@ -81,6 +81,7 @@
 #include "sr/game/Mall.h"
 #include "sr/game/TimedServices.h"
 #include "sr/game/SpecialItems.h"
+#include "sr/game/GuildMercenary.h"
 #include "sr/game/GuildRecall.h"
 #include "sr/server/Trades.h"
 #include "sr/server/Bandits.h"
@@ -8774,6 +8775,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // A member's yes: refused 0x18C1 when dead, travelling, a murderer, with
     // a transport out, or busy (an exchange, a stall, alchemy: the original's motion state neither 0 nor 1); ours also in
     // an instance's layer (a teleport would not leave it). Else on its way to its master's place, on this server or the other.
+    bool GuildMercenaries() const override { return config.guildMercenaries; }
+    // A guild's abilities changed: the soldiers out of its members here raised again.
+    void GuildMercenaryChanged(std::uint32_t guild, std::uint8_t abilities) override {
+        if (!coses || !guilds) return;
+        for (auto& [peerId, player] : players) {
+            if (player.entity == 0) continue;
+            const auto facts = guilds->FactsOf(player.selected);
+            if (facts && facts->id == guild) coses->SoldierAbilities(player.entity, abilities);
+        }
+    }
     std::uint16_t GuildRecallGo(std::uint32_t entity, const proto::WorldPosition& to, std::uint32_t seconds) override {
         const std::uint64_t peerId = world->PeerOf(entity);
         const auto it = players.find(peerId);
@@ -9271,6 +9282,11 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const bool thiefDen = row->typeId == std::array<int, 4>{3, 3, 3, 1} && row->paramTexts[2] == "THIEFDEN";
         // Fireworks, the berserk potion, the bonus scrolls, the quests' and events' items, the uses the original
         // refuses.
+        // A guild's mercenary scroll, on a shard that runs them (else the original's refusal below, 2).
+        if (item != nullptr && config.guildMercenaries && game::IsMercenaryScroll(*row)) {
+            UseMercenaryScroll(peer, player, use.slot, *row);
+            return;
+        }
         // The guild recall: its master's, its members asked on both game servers.
         if (item != nullptr && game::IsGuildRecall(*row)) {
             UseGuildRecall(peer, player, use.slot, *row);
@@ -9440,6 +9456,50 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     // the original's timed job 2 / 3); then the item spent and every member online on either game server asked to come
     // (Guilds::Recall) to where the master stands.
     std::set<std::int64_t> recallsChecking; // a use whose wait is being looked up (a second one is refused meanwhile)
+    // A mercenary scroll (game/GuildMercenary.h; the shard's switch): the original's SummonMercenary in its order where ours
+    // keeps the state (a teleport under way, a job suit, free PvP, the scroll's soldiers known and a guild of level 3, its
+    // master, its count by level, none out, its wait, the race, a row for the level), then the wait (_TimedJob 2 / 4,
+    // 1,200 s) taken, the scroll spent and the soldiers out beside their master for the scroll's minutes.
+    void UseMercenaryScroll(Peer& peer, PlayerWorld& player, std::uint8_t slot, const assets::ItemRow& row) {
+        if (player.returnAt) return RefuseItem(peer, player, row, game::kMercTravelling, "travelling");
+        if (player.jobState == std::uint8_t(game::Job::Thief)) return RefuseItem(peer, player, row, game::kMercThief, "a thief");
+        if (player.jobState != game::kNoJob) return RefuseItem(peer, player, row, game::kMercJob, "a job suit");
+        if (player.freePvp != 0 || player.freePvpAt) return RefuseItem(peer, player, row, game::kMercFreePvp, "free PvP");
+        const assets::ObjectRow* group = config.characters ? config.characters->Find(std::string_view(game::PetCodename(row))) : nullptr;
+        const auto facts = guilds ? guilds->FactsOf(player.selected) : std::nullopt;
+        if (group == nullptr || !facts || facts->level < game::kMercSummonGuildLevel) return RefuseItem(peer, player, row, game::kMercCannot, "no guild of level 3");
+        if (!facts->master) return RefuseItem(peer, player, row, game::kMercSummonNotMaster, "not its guild's master");
+        const int count = game::MercenaryCount(facts->level, facts->unionLeader);
+        if (count <= 0) return RefuseItem(peer, player, row, game::kMercCannot, "none for its guild's level");
+        if (coses && coses->SoldiersOut(player.entity) > 0) return RefuseItem(peer, player, row, game::kMercOut, "soldiers out already");
+        if (group->country != player.wearer.country) return RefuseItem(peer, player, row, game::kMercRace, "another race's soldiers");
+        const std::optional<std::string> codename = game::MercenaryCodename(row, player.level);
+        const assets::ObjectRow* shape = codename ? config.characters->Find(std::string_view(*codename)) : nullptr;
+        if (shape == nullptr) return RefuseItem(peer, player, row, game::kMercNoRow, "no soldier for its level");
+        if (!recallsChecking.insert(player.selected).second) return RefuseItem(peer, player, row, game::kMercWaiting, "a use under way");
+        const auto taken = std::make_shared<bool>(false);
+        GuildSubmit([taken, character = player.selected](Database& db) {
+            *taken = TakeTimedWait(db, character, game::kMercWaitCategory, game::kMercWaitJob, game::kMercWaitSeconds);
+        },
+                    [this, taken, peerId = peer.id, character = player.selected, slot, refId = row.refObjId, model = shape->refObjId, count,
+                     abilities = facts->mercenaryAttr, minutes = game::MercenaryMinutes(row)] {
+                        recallsChecking.erase(character);
+                        Peer* peer = peers->Find(peerId);
+                        const auto it = players.find(peerId);
+                        if (peer == nullptr || it == players.end() || it->second.selected != character || it->second.entity == 0) return;
+                        PlayerWorld& player = it->second;
+                        const assets::ItemRow* row = config.rules->items ? config.rules->items->Find(refId) : nullptr;
+                        const assets::ObjectRow* shape = config.characters ? config.characters->Find(model) : nullptr;
+                        if (row == nullptr || shape == nullptr) return;
+                        if (!*taken) return RefuseItem(*peer, player, *row, game::kMercWaiting, "its wait runs");
+                        const game::ItemInstance* item = player.inventory.At(slot);
+                        if (item == nullptr || item->refId != refId) return RefuseItem(*peer, player, *row, 2, "the item went meanwhile");
+                        TakeOne(*peer, player, slot);
+                        Broadcast(player.entity, proto::ItemUsed{player.entity, refId});
+                        if (coses) coses->SummonSoldiers(player.entity, *shape, count, minutes, abilities, Clock::now());
+                    });
+    }
+
     void UseGuildRecall(Peer& peer, PlayerWorld& player, std::uint8_t slot, const assets::ItemRow& row) {
         const game::GuildRecallItem recall = game::GuildRecallOf(row);
         const auto facts = guilds ? guilds->FactsOf(player.selected) : std::nullopt;

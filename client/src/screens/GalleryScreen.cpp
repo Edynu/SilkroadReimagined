@@ -1450,6 +1450,24 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 AvatarGrantStep(hudContext_, 14, 1, false);
             }
         }
+        // --page guild-keeper: a keeper of guilds' rows on a shard with mercenaries (the master's "Grant additional ability to
+        // mercenary"); --page guild-soldier[:BITS]: its soldier page, the guild holding the abilities BITS (game::kMerc*).
+        if ((page_ == "guild-keeper" || page_.starts_with("guild-soldier")) && !soldierShown_ && tables_ && tables_->Ready() && host_.data().Ready() &&
+            hud_.Created()) {
+            soldierShown_ = true;
+            namespace proto = game::proto;
+            proto::GuildInfo g = sampleGuild_.Guild();
+            g.mercenaries = true;
+            g.mercenaryAttr = page_.size() > 14 ? std::uint8_t(std::atoi(page_.c_str() + 14)) : 0;
+            sampleGuild_.Apply(proto::GuildEvent{g});
+            const std::string npcCode = "NPC_CH_GENARAL_SP";
+            const assets::ObjectRow* row = tables_->Usable() ? tables_->characters.Find(npcCode) : nullptr;
+            if (auto* npc = dynamic_cast<NpcWindow*>(hud_.Show(hud::kNpc))) {
+                npc->ShowNpc(952, npcCode, row != nullptr ? row->nameKey : std::string("SN_NPC_CH_GENARAL_SP"), proto::kNpcGuild);
+                if (page_ != "guild-keeper") npc->ShowSoldiers();
+            }
+            core::LogInfo("gallery: {}: abilities {:#04x}", page_, int(g.mercenaryAttr));
+        }
         // --page casting:KIND: the casting gauge of that kind (proto::CastingKind 0..4) on the sample character, 40 % run: a
         // return scroll, a quest's search (QNO_CA_WAREHOUSE_1's), the guild recall, a fortress flag placed, a repair kit.
         if (page_.starts_with("casting") && !castingShown_ && tables_ && tables_->Ready() && host_.data().Ready() && hud_.Created()) {

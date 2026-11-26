@@ -12,6 +12,7 @@
 #include "gui/HudWindows.h"
 #include "sr/assets/UiLayout2dt.h"
 #include "sr/game/Guild.h"
+#include "sr/game/GuildMercenary.h"
 
 namespace sr::client {
 
@@ -1162,6 +1163,11 @@ std::vector<GuildNpcRowInfo> GuildNpcRows(const HudContext& c) {
     }
     add("UIIT_CTL_GUILD_WAREHOUSE", kRowStorage, c.guild->Guild().level < 2); // red below level 2
     add("UIIT_STT_GUILD_GP_HISTORY", kRowGpHistory);
+    // The mercenaries' abilities (a shard that runs them; the master's: ours, the original's row 0x29, its NPC not traced),
+    // red below level 4.
+    if (c.guild->Guild().mercenaries && c.guild->Self() != nullptr && c.guild->Self()->memberClass == game::kGuildMaster) {
+        add("UIIT_CTL_GUILD_SOLDIER", kGuildRowSoldier, c.guild->Guild().level < game::kMercAbilityGuildLevel);
+    }
     return rows;
 }
 
@@ -1227,7 +1233,20 @@ void GuildNpcChoice(ui::Interface& ui, HudContext& c, int choice, std::uint32_t 
     case kRowVote: send(proto::GuildElectionOpen{npc}); return;
     case kRowWarReward: send(proto::GuildWarRewardQuery{npc}); return;
     case kRowGpHistory: send(proto::GuildGpHistoryOpen{npc}); return;
-    default: return;
+    default: break;
+    }
+    // A mercenary ability's row (the 1.188 client's checks before 0x7259): the release of none held, an ability held
+    // already, a third one: each its line; else the request with the NPC.
+    if (choice >= kGuildRowSoldierAbility && choice < kGuildRowSoldierAbility + 0x100) {
+        const auto ability = std::uint8_t(choice - kGuildRowSoldierAbility);
+        const std::uint8_t held = c.guild->Guild().mercenaryAttr;
+        const auto say = [&](const char* key) {
+            if (c.state != nullptr) c.state->Post(game::GameMessage::Kind::General, c.text(key), c.time);
+        };
+        if (ability == 0 && held == 0) return say("UIIT_MSG_GUILD_SOLDIER_ABILITY_INITIALIZE_ERROR");
+        if ((held & ability) != 0) return say("UIIT_MSG_GUILD_SOLDIER_ABILITY_SELECT_ERROR");
+        if (ability != 0 && game::MercenaryAbilityCount(held) >= game::kMercMostAbilities) return say("UIIT_MSG_GUILD_SOLDIER_ABILITY_OVER");
+        send(proto::GuildMercenaryAbility{npc, ability});
     }
 }
 

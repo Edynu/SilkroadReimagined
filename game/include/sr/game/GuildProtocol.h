@@ -294,6 +294,20 @@ struct GuildGpHistoryOpen {
     }
 };
 
+// An ability for the guild's mercenaries bought at the guild's NPC (the original's 0x7259 {npc, the ability}; 0 releases
+// them all; game/GuildMercenary.h): answered GuildAnswer{MercenaryAbility}, its members told GuildInfo again. Only on a
+// shard with mercenaries (GuildInfo::mercenaries), else refused 3.
+struct GuildMercenaryAbility {
+    static constexpr MessageId kId = 0x111D;
+    std::uint32_t npc = 0;
+    std::uint8_t ability = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("npc", npc);
+        v("ability", ability);
+    }
+};
+
 // A member's answer to its master's recall (GuildRecallAsk; the original's 0x7031):
 // 1 come, 0 stay. A yes is answered GuildAnswer{RecallAnswer}: 0 on its way, else 0x18C1.
 struct GuildRecallAnswer {
@@ -389,6 +403,7 @@ enum class GuildAction : std::uint8_t {
     Position = 30,
     GpHistory = 31,
     RecallAnswer = 32, // a member's yes to its master's recall (0x18C1: refused)
+    MercenaryAbility = 33, // an ability bought for the guild's mercenaries (GuildMercenaryAbility)
 };
 
 // A request's outcome: `error` 0 done, else the original's code (game/Guild.h GuildError); `value`
@@ -466,6 +481,8 @@ struct GuildInfo {
     std::uint32_t unionId = 0;
     std::vector<GuildMemberRecord> members;
     std::uint32_t crest = 0; // the emblem's revision (0: none)
+    std::uint8_t mercenaryAttr = 0; // the mercenaries' abilities bought (game::kMerc* bits)
+    bool mercenaries = false;       // the shard runs the guild's mercenaries (its switch guild-mercenaries: the NPC's rows)
     template <typename V>
     void Visit(V& v) {
         v("id", id);
@@ -477,6 +494,8 @@ struct GuildInfo {
         v("unionId", unionId);
         v("members", members, 64);
         v("crest", crest);
+        v("mercenaryAttr", mercenaryAttr);
+        v("mercenaries", mercenaries);
     }
 };
 

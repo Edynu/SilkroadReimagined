@@ -61,6 +61,14 @@ public:
     virtual bool IsNpc(std::uint32_t entity) const = 0;
     // An NPC that keeps guilds (the original's NPC function option 15).
     virtual bool IsGuildNpc(std::uint32_t entity) const = 0;
+    // The shard runs the guild's mercenaries (its switch guild-mercenaries; game/GuildMercenary.h): the abilities sold.
+    virtual bool GuildMercenaries() const { return false; }
+    // A guild's mercenaries' abilities changed (bought here, or another server's purchase loaded): the soldiers out of its
+    // members on this server raised again.
+    virtual void GuildMercenaryChanged(std::uint32_t guild, std::uint8_t abilities) {
+        (void)guild;
+        (void)abilities;
+    }
     // A name the name rules take (letters, the abuse filter).
     virtual bool GuildNameAllowed(std::string_view name) const = 0;
     virtual bool TakeGold(std::uint64_t peer, std::uint64_t amount) = 0;
@@ -207,6 +215,8 @@ public:
         std::string masterName; // its master's name (the fortress list's second string)
         std::uint32_t crest = 0; // its emblem's revision (0: none)
         std::uint32_t points = 0; // its guild points
+        std::uint8_t mercenaryAttr = 0; // its mercenaries' abilities (game::kMerc* bits)
+        bool unionLeader = false;       // it leads its union (the mercenaries' larger count)
     };
     std::optional<Facts> FactsOf(std::int64_t character) const;
     // A payment of `character`'s (Payment.h) with `points` of the guild's points: the points taken now (false: too few,

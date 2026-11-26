@@ -22,6 +22,7 @@ add_library(sr_game STATIC
     src/Exchange.cpp
     src/Stall.cpp
     src/Cos.cpp
+    src/GuildMercenary.cpp
     src/Fortress.cpp
     src/Jobs.cpp
     src/Pk.cpp

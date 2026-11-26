@@ -41,7 +41,7 @@ bool LoadGuildsWhere(Database& db, GuildData& out, std::string& error, const std
     // Each query takes both arrays when filtered (the ones it does not use too: their types are given).
     const std::string both = some ? " AND $2::int[] IS NOT NULL" : "";
     const QueryResult guilds = db.Query("SELECT id, name, lvl, gatheredsp, coalesce(mastercommenttitle, ''), coalesce(mastercomment, ''), "
-                                        "coalesce(alliance, 0), lastcrestrev, curcrestrev, coalesce(booty, 0) FROM _guild WHERE id <> 0" + guildWhere + both +
+                                        "coalesce(alliance, 0), lastcrestrev, curcrestrev, coalesce(booty, 0), coalesce(mercenaryattr, 0) FROM _guild WHERE id <> 0" + guildWhere + both +
                                             " ORDER BY id",
                                         ids);
     const QueryResult members = db.Query(
@@ -77,6 +77,7 @@ bool LoadGuildsWhere(Database& db, GuildData& out, std::string& error, const std
         g.lastCrest = std::uint32_t(std::max<std::int64_t>(0, guilds.Int(i, 7)));
         g.crest = std::uint32_t(std::max<std::int64_t>(0, guilds.Int(i, 8)));
         g.booty = std::uint32_t(std::max<std::int64_t>(0, guilds.Int(i, 9)));
+        g.mercenaryAttr = std::uint8_t(guilds.Int(i, 10) & 0xFF);
         index[g.id] = out.guilds.size();
         out.guilds.push_back(std::move(g));
     }

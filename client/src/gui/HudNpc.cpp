@@ -7,6 +7,7 @@
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/game/AlchemyProtocol.h"
+#include "sr/game/GuildMercenary.h"
 #include "sr/game/OpenMarketProtocol.h"
 #include "sr/game/EventProtocol.h"
 #include "sr/game/JobProtocol.h"
@@ -615,6 +616,43 @@ void NpcWindow::ShowHire() {
     AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
 }
 
+void NpcWindow::ShowSoldiers() {
+    Begin(npcNameKey_.empty() ? std::string() : context_.Text(npcNameKey_), "");
+    // The abilities held: none, one or two, by their names (UIIT_MSG_GUILD_SOLDIER_ABILITY_ZERO / _ONE / _TWO).
+    static constexpr std::pair<std::uint8_t, const char*> kNames[] = {{game::kMercDefence, "UIIT_MSG_GUILD_SOLDIER_ABILITY_DEFENSE"},
+                                                                      {game::kMercAttack, "UIIT_MSG_GUILD_SOLDIER_ABILITY_ATTACK"},
+                                                                      {game::kMercHit, "UIIT_MSG_GUILD_SOLDIER_ABILITY_HIT"},
+                                                                      {game::kMercHealth, "UIIT_MSG_GUILD_SOLDIER_ABILITY_HEALTH"},
+                                                                      {game::kMercResistance, "UIIT_MSG_GUILD_SOLDIER_ABILITY_TOLERANCE"}};
+    const std::uint8_t held = context_.guild != nullptr ? context_.guild->Guild().mercenaryAttr : 0;
+    std::vector<std::string> names;
+    for (const auto& [bit, key] : kNames) {
+        if ((held & bit) != 0) names.push_back(context_.Text(key));
+    }
+    std::string line;
+    if (names.empty()) {
+        line = context_.Text("UIIT_MSG_GUILD_SOLDIER_ABILITY_ZERO");
+    } else if (names.size() == 1) {
+        line = FormatText(context_.Text("UIIT_MSG_GUILD_SOLDIER_ABILITY_ONE"), {names[0]});
+    } else {
+        line = FormatText(context_.Text("UIIT_MSG_GUILD_SOLDIER_ABILITY_TWO"), {names[0], names[1]});
+    }
+    for (std::size_t at = 0; (at = line.find("\\n", at)) != std::string::npos;) line.replace(at, 2, "\n");
+    if (box_ != nullptr) {
+        box_->AddParagraph(line, ui::kWhite);
+        box_->AddParagraph({}, ui::kWhite);
+    }
+    // The rows (numbered by the window, as the original's "%d. %s"): defence, attack, hit, health, then the release of them
+    // all (the client never offers resistance).
+    static constexpr std::pair<std::uint8_t, const char*> kRows[] = {{game::kMercDefence, "UIIT_CTL_GUILD_SOLDIER_ABILITY_DEFENSE"},
+                                                                     {game::kMercAttack, "UIIT_CTL_GUILD_SOLDIER_ABILITY_ATTACK"},
+                                                                     {game::kMercHit, "UIIT_CTL_GUILD_SOLDIER_ABILITY_HIT"},
+                                                                     {game::kMercHealth, "UIIT_CTL_GUILD_SOLDIER_ABILITY_HEALTH"},
+                                                                     {0, "UIIT_CTL_GUILD_SOLDIER_ABILITY_INITIALIZE"}};
+    for (const auto& [bit, key] : kRows) AddChoice(context_.Text(key), {Choice::Kind::Guild, std::uint32_t(kGuildRowSoldierAbility + bit)});
+    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+}
+
 void NpcWindow::ShowDungeon() {
     // The Cave of Discipline's page (1.188's rows UIIT_STT_FORTRESS_DUNGEON_*; the state as the last 0x1D answer told it).
     Begin(context_.Text("UIIT_STT_FORTRESS_DUNGEON"), "");
@@ -861,6 +899,18 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
         if (context_.hud != nullptr) context_.hud->Request({HudRequest::Kind::OpenStorage, int(npc_)});
         break;
     case Choice::Kind::Guild:
+        // The mercenaries' row: its page (from guild level 4; below, the level's refusal, as the 1.188 client says it).
+        if (int(choice.destination) == kGuildRowSoldier) {
+            if (context_.guild != nullptr && context_.guild->Guild().level < game::kMercAbilityGuildLevel) {
+                if (context_.state != nullptr) {
+                    context_.state->Post(game::GameMessage::Kind::General, GuildErrorText(context_, game::kMercGuildLevel, 0), context_.time);
+                }
+                close();
+                break;
+            }
+            ShowSoldiers();
+            break;
+        }
         close();
         if (ui_ != nullptr) GuildNpcChoice(*ui_, context_, int(choice.destination), npc_);
         break;

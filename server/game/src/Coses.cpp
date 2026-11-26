@@ -6,6 +6,7 @@
 #include "sr/assets/GameData.h"
 #include "sr/core/Log.h"
 #include "sr/game/Buffs.h"
+#include "sr/game/GuildMercenary.h"
 #include "sr/game/Inventory.h"
 #include "sr/game/Items.h"
 #include "sr/game/NavMesh.h"
@@ -71,6 +72,8 @@ std::int64_t UnixNow() {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 bool IsPet(game::CosKind kind) { return kind == game::CosKind::AttackPet || kind == game::CosKind::GrabPet; }
+// The COS that fight: an attack pet, a guild's soldier.
+bool Fights(game::CosKind kind) { return kind == game::CosKind::AttackPet || kind == game::CosKind::Soldier; }
 } // namespace
 
 std::int64_t CosHost::CosNow() const { return UnixNow(); }
@@ -454,7 +457,7 @@ void Coses::Fighters(std::vector<Monsters::Player>& out) const {
         // The attack pets, fought as players are; the transports by the bandits only. A COS
         // answers for its owner's job, its owner the other a bandit goes between.
         const bool transport = c.kind == game::CosKind::Transport;
-        if ((c.kind != game::CosKind::AttackPet && !transport) || c.hp == 0) continue;
+        if ((!Fights(c.kind) && !transport) || c.hp == 0) continue;
         const auto at = host_.CosWorld().Where(entity);
         if (!at) continue;
         Monsters::Player p;
@@ -471,7 +474,7 @@ void Coses::Fighters(std::vector<Monsters::Player>& out) const {
 }
 
 void Coses::Engage(Cos& c, std::uint32_t monster) {
-    if (c.kind != game::CosKind::AttackPet || c.hp == 0 || c.skill == nullptr || monster == 0 || monster == c.target) return;
+    if (!Fights(c.kind) || c.hp == 0 || c.skill == nullptr || monster == 0 || monster == c.target) return;
     if (!host_.CosFoe(monster)) return;
     c.target = monster;
     c.picking = 0;
@@ -479,6 +482,7 @@ void Coses::Engage(Cos& c, std::uint32_t monster) {
 
 void Coses::OwnerFights(std::uint32_t owner, std::uint32_t monster) {
     if (Cos* c = AttackPetOf(owner); c != nullptr && c->aggressive && c->target == 0) Engage(*c, monster);
+    EngageSoldiers(owner, monster);
 }
 
 // Defensive, it fights only on its owner's Attack (the 1.188 client orders it onto its owner's targets only in stance
@@ -486,6 +490,104 @@ void Coses::OwnerFights(std::uint32_t owner, std::uint32_t monster) {
 // report 2026-11-14): its defending its owner and fighting back are an offensive pet's (ours).
 void Coses::OwnerHurt(std::uint32_t owner, std::uint32_t monster) {
     if (Cos* c = AttackPetOf(owner); c != nullptr && c->aggressive && c->target == 0) Engage(*c, monster);
+    EngageSoldiers(owner, monster);
+}
+
+// A guild's soldiers take their master's foe, each one not in a fight already (the original's mercenary AI: its owner's
+// hostile targets).
+void Coses::EngageSoldiers(std::uint32_t owner, std::uint32_t monster) {
+    const auto it = owned_.find(owner);
+    if (it == owned_.end()) return;
+    for (const std::uint32_t id : it->second) {
+        if (Cos& c = coses_.at(id); c.kind == game::CosKind::Soldier && c.target == 0) Engage(c, monster);
+    }
+}
+
+void Coses::ArmSoldier(Cos& c, const assets::ObjectRow& shape) {
+    game::CombatStats base = game::MonsterCombatStats(shape, 0);
+    base.level = std::max(1, int(shape.level));
+    base.maxHp = std::max<std::uint32_t>(1, shape.maxHp);
+    c.baseStats = base;
+    c.stats = game::WithMercenaryAbilities(base, c.abilities);
+    c.skill = nullptr;
+    if (const assets::SkillTable* skills = host_.CosSkills()) {
+        for (const std::uint32_t id : shape.skills) {
+            const assets::SkillRow* s = id != 0 ? skills->Find(id) : nullptr;
+            if (s != nullptr && s->attack) {
+                c.skill = s;
+                break;
+            }
+        }
+    }
+}
+
+std::vector<std::uint32_t> Coses::SummonSoldiers(std::uint32_t owner, const assets::ObjectRow& shape, int count, int minutes, std::uint8_t abilities,
+                                                 Clock::time_point now) {
+    std::vector<std::uint32_t> out;
+    const auto o = host_.CosOwner(owner);
+    for (int i = 0; i < count; ++i) {
+        const std::uint32_t entity = Place(owner, shape);
+        if (entity == 0) break;
+        Cos& c = coses_[entity];
+        c.entity = entity;
+        c.owner = owner;
+        c.model = shape.refObjId;
+        c.kind = game::CosKind::Soldier;
+        c.walkSpeed = shape.walkSpeed;
+        c.runSpeed = shape.runSpeed;
+        c.aggressive = true; // its owner's foes and its own attackers (the original's mercenary takes any hostile target)
+        c.abilities = abilities;
+        c.until = now + std::chrono::minutes(std::max(1, minutes));
+        ArmSoldier(c, shape);
+        c.maxHp = c.stats.maxHp;
+        c.hp = c.maxHp;
+        owned_[owner].push_back(entity);
+        host_.CosWorld().SetHp(entity, c.hp);
+        Send(owner, SummonedOf(c));
+        out.push_back(entity);
+    }
+    if (o) {
+        core::LogInfo("cos: {} summons {} of {} guild soldiers {} for {} minutes (abilities {:#04x})", o->name, out.size(), count, shape.codename,
+                      minutes, int(abilities));
+    }
+    return out;
+}
+
+int Coses::SoldiersOut(std::uint32_t owner) const {
+    const auto it = owned_.find(owner);
+    if (it == owned_.end()) return 0;
+    return int(std::count_if(it->second.begin(), it->second.end(), [&](std::uint32_t id) { return coses_.at(id).kind == game::CosKind::Soldier; }));
+}
+
+int Coses::ReleaseSoldiers(std::uint32_t owner) {
+    std::vector<std::uint32_t> soldiers;
+    if (const auto it = owned_.find(owner); it != owned_.end()) {
+        for (const std::uint32_t id : it->second) {
+            if (coses_.at(id).kind == game::CosKind::Soldier) soldiers.push_back(id);
+        }
+    }
+    for (const std::uint32_t id : soldiers) Dismiss(id, false, false, true);
+    if (!soldiers.empty()) core::LogInfo("cos: entity {} releases its {} guild soldiers", owner, soldiers.size());
+    return int(soldiers.size());
+}
+
+void Coses::SoldierAbilities(std::uint32_t owner, std::uint8_t abilities) {
+    const auto it = owned_.find(owner);
+    const assets::CharacterTable* characters = host_.CosCharacters();
+    if (it == owned_.end() || characters == nullptr) return;
+    for (const std::uint32_t id : it->second) {
+        Cos& c = coses_.at(id);
+        if (c.kind != game::CosKind::Soldier || c.abilities == abilities) continue;
+        const assets::ObjectRow* shape = characters->Find(c.model);
+        if (shape == nullptr) continue;
+        const double share = c.maxHp > 0 ? double(c.hp) / double(c.maxHp) : 1.0;
+        c.abilities = abilities;
+        ArmSoldier(c, *shape);
+        c.maxHp = c.stats.maxHp;
+        c.hp = std::clamp<std::uint32_t>(std::uint32_t(share * double(c.maxHp) + 0.5), c.hp == 0 ? 0u : 1u, c.maxHp);
+        host_.CosWorld().SetHp(id, c.hp);
+        Send(owner, SummonedOf(c));
+    }
 }
 
 namespace {
@@ -977,6 +1079,11 @@ bool Coses::Handle(std::uint32_t owner, proto::MessageId id, std::span<const std
         if (!proto::Decode(payload, m)) return false;
         const auto it = coses_.find(m.entity);
         if (it == coses_.end() || it->second.owner != owner) return true; // not its own: nothing happens
+        // A guild's soldier: all of them released (the original's 0x725A, which its client sends for a mercenary's unsummon).
+        if (it->second.kind == game::CosKind::Soldier) {
+            ReleaseSoldiers(owner);
+            return true;
+        }
         // A pet put away (the original's 0x7116): refused in battle (0x440D), dead (0x4411), in a free-PvP change
         // (0x4420), from 100 or more away (4). A ride or transport terminated (0x70C6): no such check.
         if (IsPet(it->second.kind)) {
@@ -1691,7 +1798,7 @@ void Coses::Tick(Clock::time_point now) {
     // Attack pets in a fight act every update (by their entities: a kill's news may take one away).
     std::vector<std::uint32_t> fighting;
     for (const auto& [entity, c] : coses_) {
-        if (c.kind == game::CosKind::AttackPet && (c.target != 0 || !c.pending.empty())) fighting.push_back(entity);
+        if (Fights(c.kind) && (c.target != 0 || !c.pending.empty())) fighting.push_back(entity);
     }
     for (const std::uint32_t entity : fighting) {
         if (const auto it = coses_.find(entity); it != coses_.end()) Fight(it->second, now);
@@ -1740,8 +1847,13 @@ void Coses::Tick(Clock::time_point now) {
     for (auto& [entity, c] : coses_) {
         if (!c.jobs.empty()) EndJobs(c, unix);
     }
-    std::vector<std::uint32_t> lost, unsummoned, expired;
+    std::vector<std::uint32_t> lost, unsummoned, expired, served;
     for (auto& [entity, c] : coses_) {
+        // A guild's soldier whose minutes are up.
+        if (c.kind == game::CosKind::Soldier && now >= c.until) {
+            served.push_back(entity);
+            continue;
+        }
         // A grab pet whose rental ran out: back into its item, dead.
         if (c.row.id != 0 && c.row.rentUntil != 0 && UnixNow() >= c.row.rentUntil) {
             expired.push_back(entity);
@@ -1767,6 +1879,7 @@ void Coses::Tick(Clock::time_point now) {
         Dismiss(entity, false, true);
     }
     for (std::uint32_t entity : unsummoned) Dismiss(entity);
+    for (std::uint32_t entity : served) Dismiss(entity);
     for (std::uint32_t entity : lost) Dismiss(entity);
     // Kept transports read at their owners' entry: made once the owner stands where the ground is in; the newest row,
     // the older ones (kept and never brought back) gone with their goods.

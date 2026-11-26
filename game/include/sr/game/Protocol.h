@@ -46,7 +46,8 @@ using MessageId = std::uint16_t;
 // 5: a pet's experience lost by its death (CosExperience.lost).
 // 6: a quest instance's members asked first (QuestEnterAsk, QuestEnterReply).
 // 7: the casting gauge's kind (ReturnStarted.kind, .quest; CancelCasting).
-inline constexpr std::uint32_t kProtocolVersion = 7;
+// 8: the guild's mercenaries (GuildInfo.mercenaryAttr, .mercenaries; GuildMercenaryAbility).
+inline constexpr std::uint32_t kProtocolVersion = 8;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

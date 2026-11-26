@@ -373,6 +373,18 @@ public:
     void OwnerHurt(std::uint32_t owner, std::uint32_t monster);
     // Its owner's attack pet's level (0: none out).
     int AttackPetLevel(std::uint32_t owner) const;
+
+    // --- The guild's mercenaries (game/GuildMercenary.h; the shard's switch guild-mercenaries) ---
+    // `count` soldiers of `shape` out beside `owner` for `minutes`, each fighting as an offensive attack pet does (its
+    // owner's foes, its own attackers; monsters only: ours), its numbers raised by the guild's `abilities`. Their entities.
+    std::vector<std::uint32_t> SummonSoldiers(std::uint32_t owner, const assets::ObjectRow& shape, int count, int minutes, std::uint8_t abilities,
+                                              Clock::time_point now);
+    // How many of `owner`'s soldiers are out.
+    int SoldiersOut(std::uint32_t owner) const;
+    // Every soldier of `owner` sent away (the original's 0x725A, its unsummon on any of them: no checks). The count.
+    int ReleaseSoldiers(std::uint32_t owner);
+    // The guild's abilities changed: `owner`'s soldiers' numbers again from their rows (their health kept as a share).
+    void SoldierAbilities(std::uint32_t owner, std::uint8_t abilities);
     // Experience for `owner`'s attack pet (the original's award, called as its owner gets a
     // kill's: the game server works it out for the pet's level): its levels and rows (game::GrowPet), its owner told.
     void GainExperience(std::uint32_t owner, std::uint64_t experience);
@@ -453,7 +465,14 @@ private:
         std::int64_t cart = 0, character = 0;
         // Who hurt it and by how much, in order of the first hit (its killers' credit, CosKilled).
         std::vector<std::pair<std::uint32_t, std::uint64_t>> damageBy;
+        // A guild's soldier: when its minutes are up, its guild's abilities on its numbers.
+        Clock::time_point until{};
+        std::uint8_t abilities = 0;
     };
+    // A soldier's numbers and attack from its row and its guild's abilities (no hunger, no pet row).
+    void ArmSoldier(Cos& c, const assets::ObjectRow& shape);
+    // `owner`'s soldiers not in a fight take `monster`.
+    void EngageSoldiers(std::uint32_t owner, std::uint32_t monster);
     // Its states changed: its stand and its speed from them, those who see it told.
     void StatesChanged(Cos& c, Clock::time_point now);
     // The states' ticks due (a burn's, a poison's: its health) and their ends, each update.

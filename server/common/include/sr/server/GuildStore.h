@@ -47,6 +47,7 @@ struct GuildRow {
     std::uint32_t alliance = 0;
     std::uint32_t lastCrest = 0, crest = 0; // LastCrestRev, CurCrestRev (0: no emblem)
     std::uint32_t booty = 0;                // war rewards to collect (_Guild.Booty)
+    std::uint8_t mercenaryAttr = 0;         // the mercenaries' abilities bought (_Guild.MercenaryAttr, game::kMerc* bits)
     std::vector<GuildMemberRow> members;
 };
 

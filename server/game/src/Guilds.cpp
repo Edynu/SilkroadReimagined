@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "sr/core/Log.h"
+#include "sr/game/GuildMercenary.h"
 #include "sr/game/Protocol.h"
 #include "sr/server/Database.h"
 
@@ -111,6 +112,7 @@ struct Guilds::State {
         std::uint32_t alliance = 0;
         std::uint32_t lastCrest = 0, crest = 0; // the emblem's revisions (crest 0: none)
         std::uint32_t booty = 0;                // war rewards to collect
+        std::uint8_t mercenaryAttr = 0;         // the mercenaries' abilities bought (game::kMerc* bits)
         std::vector<Member> members;
         Member* Find(std::int64_t character) {
             for (Member& m : members) {
@@ -458,6 +460,8 @@ struct Guilds::State {
         info.unionId = g.alliance;
         for (const Member& m : g.members) info.members.push_back(Record(m));
         info.crest = g.crest;
+        info.mercenaryAttr = g.mercenaryAttr;
+        info.mercenaries = host.GuildMercenaries();
         return info;
     }
     proto::UnionInfo UnionOf(std::uint32_t alliance) const {
@@ -913,6 +917,57 @@ struct Guilds::State {
                           if (it->second.alliance != 0) TellUnion(it->second.alliance);
                       }
                       Answer(peer, proto::GuildAction::LevelUp, GuildError::Ok);
+                  });
+    }
+
+    // An ability for the guild's mercenaries (the original's 0x7259: the game server's checks, then the shard manager's job
+    // with the points; game/GuildMercenary.h): at a guild NPC in reach (3), on a shard that runs them (3). Set now (the
+    // writes asked after see it), written with the gold and the points in one transaction, given back if it does not stand;
+    // its members told again (GuildInfo), here and on the shard's other servers, and its soldiers out raised again.
+    void MercenaryAbility(const GuildActor& a, const proto::GuildMercenaryAbility& r) {
+        const auto answer = [&](std::uint16_t code) {
+            host.GuildSend(a.peer, proto::GuildAnswer::kId, proto::Encode(proto::GuildAnswer{proto::GuildAction::MercenaryAbility, code, 0}));
+        };
+        if (!host.GuildMercenaries()) return answer(std::uint16_t(GuildError::Failed));
+        const double reach = host.GuildDistance(a.entity, r.npc);
+        if (!host.IsGuildNpc(r.npc) || reach < 0 || reach > game::kGuildNpcReach) return answer(std::uint16_t(GuildError::Failed));
+        Guild* g = GuildOfCharacter(a.character);
+        const Member* me = g != nullptr ? g->Find(a.character) : nullptr;
+        const std::uint16_t code = game::MercenaryPurchaseCheck(g != nullptr, g != nullptr ? g->level : 0, me != nullptr && me->memberClass == game::kGuildMaster,
+                                                                a.gold, g != nullptr ? g->points : 0, g != nullptr ? g->mercenaryAttr : 0, r.ability);
+        if (code != 0) return answer(code);
+        const game::MercenaryPrice price = game::MercenaryPriceOf(r.ability);
+        const std::uint8_t before = g->mercenaryAttr;
+        const std::uint8_t bits = r.ability == 0 ? std::uint8_t(0) : std::uint8_t(before | r.ability);
+        g->points -= price.points;
+        g->mercenaryAttr = bits;
+        auto ran = std::make_shared<bool>(false);
+        WritePaid(a.character, price.gold,
+                  [ran, id = g->id, level = g->level, left = g->points, bits](Database& tx) -> std::optional<std::uint64_t> {
+                      *ran = true;
+                      if (!SaveGuildPoints(tx, id, level, left, 0, 0)) return std::nullopt;
+                      if (!tx.Query("UPDATE _guild SET mercenaryattr = $2 WHERE id = $1", {std::int64_t(id), int(bits)}).Ok()) return std::nullopt;
+                      return 0;
+                  },
+                  [this, ran, peer = a.peer, name = a.name, id = g->id, points = price.points, before, bits](bool ok, std::uint64_t) {
+                      const auto it = guilds.find(id);
+                      if (!ok) {
+                          if (it != guilds.end()) {
+                              it->second.points += points;
+                              it->second.mercenaryAttr = before;
+                              SavePoints(it->second, 0, 0);
+                          }
+                          host.GuildSend(peer, proto::GuildAnswer::kId,
+                                         proto::Encode(proto::GuildAnswer{proto::GuildAction::MercenaryAbility,
+                                                                          std::uint16_t(*ran ? GuildError::Failed : GuildError::NoGold), 0}));
+                          return;
+                      }
+                      if (it != guilds.end()) {
+                          ToGuild(it->second, Info(it->second));
+                          host.GuildMercenaryChanged(id, bits);
+                      }
+                      core::LogInfo("guilds: {} buys its guild's mercenaries' ability {:#04x} (now {:#04x})", name, int(bits == 0 ? 0 : bits & ~before), int(bits));
+                      host.GuildSend(peer, proto::GuildAnswer::kId, proto::Encode(proto::GuildAnswer{proto::GuildAction::MercenaryAbility, 0, 0}));
                   });
     }
 
@@ -1630,8 +1685,10 @@ struct Guilds::State {
             crests.erase({proto::kCrestUnion, id});
         }
         std::set<std::int64_t> concerned; // the members before and after, to tell those online here
+        std::map<std::uint32_t, std::uint8_t> mercenariesBefore; // the abilities before (another server's purchase)
         for (std::uint32_t id : ids) {
             if (const auto old = guilds.find(id); old != guilds.end()) {
+                mercenariesBefore[id] = old->second.mercenaryAttr;
                 for (const Member& m : old->second.members) {
                     concerned.insert(m.character);
                     if (const auto it = memberOf.find(m.character); it != memberOf.end() && it->second == id) memberOf.erase(it);
@@ -1645,6 +1702,9 @@ struct Guilds::State {
             Guild g = FromRow(row);
             for (const Member& m : g.members) concerned.insert(m.character);
             names[Lower(g.name)] = g.id;
+            if (const auto before = mercenariesBefore.find(g.id); before != mercenariesBefore.end() && before->second != g.mercenaryAttr) {
+                host.GuildMercenaryChanged(g.id, g.mercenaryAttr);
+            }
             guilds[g.id] = std::move(g);
         }
         for (CrestRow& c : data.crests) {
@@ -1676,6 +1736,7 @@ struct Guilds::State {
         g.lastCrest = row.lastCrest;
         g.crest = row.crest;
         g.booty = row.booty;
+        g.mercenaryAttr = row.mercenaryAttr;
         for (GuildMemberRow& m : row.members) {
             Member member;
             member.character = m.character;
@@ -1957,6 +2018,7 @@ bool Guilds::Handle(const GuildActor& actor, proto::MessageId id, std::span<cons
     };
     switch (id) {
     case proto::GuildCreate::kId: return with(proto::GuildCreate{}, [&](const auto& m) { s.Create(actor, m); });
+    case proto::GuildMercenaryAbility::kId: return with(proto::GuildMercenaryAbility{}, [&](const auto& m) { s.MercenaryAbility(actor, m); });
     case proto::GuildInvite::kId: return with(proto::GuildInvite{}, [&](const auto& m) { s.Invite(actor, m); });
     case proto::GuildProposalAnswer::kId: return with(proto::GuildProposalAnswer{}, [&](const auto& m) { s.AnswerProposal(actor, m); });
     case proto::GuildLeave::kId: return with(proto::GuildLeave{}, [&](const auto& m) { s.Leave(actor, m); });
@@ -2153,7 +2215,11 @@ void Guilds::SpendPoints(std::int64_t character, std::uint32_t points, std::uint
 std::optional<Guilds::Facts> Guilds::FactsOfGuild(std::uint32_t guild) const {
     const auto g = s_->guilds.find(guild);
     if (guild == 0 || g == s_->guilds.end()) return std::nullopt;
-    Facts f{g->first, g->second.name, g->second.level, g->second.members.size(), g->second.alliance, false, {}, g->second.crest, g->second.points};
+    Facts f{g->first, g->second.name, g->second.level, g->second.members.size(), g->second.alliance, false, {}, g->second.crest, g->second.points,
+            g->second.mercenaryAttr};
+    if (const auto a = g->second.alliance != 0 ? s_->alliances.find(g->second.alliance) : s_->alliances.end(); a != s_->alliances.end()) {
+        f.unionLeader = a->second.guilds[0] == g->first;
+    }
     for (const auto& m : g->second.members) {
         if (m.memberClass == game::kGuildMaster) f.masterName = m.name;
     }

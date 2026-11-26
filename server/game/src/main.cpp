@@ -1100,6 +1100,7 @@ int main(int argc, char** argv) {
         config.temples.cyclePeriod = std::max(60, period);
     }
     config.pkProhibited = c.GetBool("pk-prohibited", false);
+    config.guildMercenaries = c.GetBool("guild-mercenaries", false);
     // What monsters drop: the database's original tables, or a file.
     if (rules->items) {
         auto drops = std::make_shared<server::DropTable>();
