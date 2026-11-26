@@ -65,8 +65,14 @@ public:
 
     // After the objects below the water level: the water. `water` the bindless index of this
     // moment's frame of the animation, `ice` the ice texture's.
+    // The original's reflective water (its reflection row): the mirrored scene's target and the bump map
+    // (skybox\waterbump3.ddj) its samples are bent by; the screen's size. texture 0: the plain water.
+    struct WaterReflection {
+        std::uint32_t texture = 0, bump = 0;
+        float width = 0, height = 0;
+    };
     void DrawWater(rhi::CommandList& cmd, const glm::mat4& viewProj, std::uint64_t frame, const GeometryPool& pool,
-                   std::uint32_t water, std::uint32_t ice, bool modern = false) const;
+                   std::uint32_t water, std::uint32_t ice, bool modern = false, const WaterReflection* reflection = nullptr) const;
 
     std::uint32_t VisibleBlocks() const { return static_cast<std::uint32_t>(blocks_.size()); }
     std::uint32_t VisibleWater() const { return static_cast<std::uint32_t>(water_.size()); }

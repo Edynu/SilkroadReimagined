@@ -246,14 +246,23 @@ void TerrainPass::Draw(rhi::CommandList& cmd, const glm::mat4& viewProj, const G
 }
 
 void TerrainPass::DrawWater(rhi::CommandList& cmd, const glm::mat4& viewProj, std::uint64_t frame, const GeometryPool& pool,
-                            std::uint32_t water, std::uint32_t ice, bool modern) const {
+                            std::uint32_t water, std::uint32_t ice, bool modern, const WaterReflection* reflection) const {
     if (water_.empty()) return;
     SR_ZONE("render: water");
+    // The header the water shaders read (kWaterHeader): the pool, the water's frame and the ice, then the reflection.
     struct WaterConstants {
         std::uint64_t pool = 0;
         std::uint32_t water = 0, ice = 0;
+        std::uint32_t reflection = 0, bump = 0;
+        float width = 0, height = 0;
     } constants{pool.Address(), water, ice};
-    static_assert(sizeof(WaterConstants) == 16);
+    if (reflection != nullptr) {
+        constants.reflection = reflection->texture;
+        constants.bump = reflection->bump;
+        constants.width = reflection->width;
+        constants.height = reflection->height;
+    }
+    static_assert(sizeof(WaterConstants) == 32);
     const std::size_t bytes = sizeof(constants) + water_.size() * sizeof(WaterBlock);
     const rhi::TransientAllocation alloc = device_->AllocateTransient(bytes, 16);
     if (alloc.cpu == nullptr) return;

@@ -258,9 +258,10 @@ float4 PSShadow(ShadowOutput input) : SV_Target {
     return float4(0.0, 0.0, 0.0, a);
 }
 
-// ---- Water ("Water"): a quad per visible block with water, at its height. The data:
-// u64 pool, u32 water frame, u32 ice (16 bytes); the blocks (32 bytes: u64 region offset, u32
-// block, u32 type, float3 region offset, float height).
+// ---- Water ("Water"): a quad per visible block with water, at its height. The data: u64 pool, u32 water frame, u32
+// ice, u32 the reflection's target (0: the plain water), u32 its bump map, float2 the screen's size (32 bytes); the
+// blocks (32 bytes: u64 region offset, u32 block, u32 type, float3 region offset, float height).
+static const uint kWaterHeader = 32;
 struct WaterOutput {
     float4 position : SV_Position;
     float2 local : TEXCOORD0; // in height samples across the block (0..16)
@@ -272,7 +273,7 @@ WaterOutput VSWater(uint vertexId : SV_VertexID) {
     const uint visible = vertexId / 6;
     static const float2 kCorners[6] = {float2(0, 0), float2(0, 1), float2(1, 1), float2(0, 0), float2(1, 1), float2(1, 0)};
     const float2 c = kCorners[vertexId % 6];
-    const uint64_t record = pc.data + 16 + uint64_t(visible) * 32;
+    const uint64_t record = pc.data + kWaterHeader + uint64_t(visible) * 32;
     const uint block = vk::RawBufferLoad<uint>(record + 8, 4);
     const float3 offset = vk::RawBufferLoad<float3>(record + 16, 4);
     const float height = vk::RawBufferLoad<float>(record + 28, 4);
@@ -292,7 +293,7 @@ float WaterLevel(uint64_t samples, uint2 at, float surface) {
 }
 
 float4 PSWater(WaterOutput input) : SV_Target {
-    const uint64_t record = pc.data + 16 + uint64_t(input.visible) * 32;
+    const uint64_t record = pc.data + kWaterHeader + uint64_t(input.visible) * 32;
     const uint block = vk::RawBufferLoad<uint>(record + 8, 4);
     const uint type = vk::RawBufferLoad<uint>(record + 12, 4);
     const float surface = vk::RawBufferLoad<float>(record + 28, 4);
@@ -314,6 +315,32 @@ float4 PSWater(WaterOutput input) : SV_Target {
     // alpha = level / 15).
     const float level = lerp(lerp(WaterLevel(samples, t, surface), WaterLevel(samples, t + uint2(1, 0), surface), f.x),
                              lerp(WaterLevel(samples, t + uint2(0, 1), surface), WaterLevel(samples, t + uint2(1, 1), surface), f.x), f.y);
+    const uint reflection = vk::RawBufferLoad<uint>(pc.data + 16, 4);
+    if (reflection != 0) {
+        // The original's reflective water: the mirrored scene where this pixel lies on the screen (its x mirrored, as it
+        // was drawn), bent by the bump map's slopes (its texels' neighbours' differences, the original's V8U8, times its
+        // 0.04 matrix; ours unrotated), times the water colour, at a constant alpha of 140.
+        const uint bump = vk::RawBufferLoad<uint>(pc.data + 20, 4);
+        const float2 screen = vk::RawBufferLoad<float2>(pc.data + 24, 4);
+        float2 slope = 0.0;
+        if (bump != 0) {
+            const Texture2D map = gTextures[NonUniformResourceIndex(bump)];
+            uint bw, bh;
+            map.GetDimensions(bw, bh);
+            const float2 texelSize = 1.0 / float2(bw, bh);
+            const float l = map.SampleLevel(gSamplers[0], uv - float2(texelSize.x, 0), 0).r;
+            const float r = map.SampleLevel(gSamplers[0], uv + float2(texelSize.x, 0), 0).r;
+            const float u = map.SampleLevel(gSamplers[0], uv - float2(0, texelSize.y), 0).r;
+            const float d = map.SampleLevel(gSamplers[0], uv + float2(0, texelSize.y), 0).r;
+            slope = float2(l - r, u - d) * 2.0; // a byte's difference over 128
+        }
+        float2 at = input.position.xy / max(screen, 1.0);
+        at.x = 1.0 - at.x;
+        at += slope * 0.04;
+        const float3 seen = gTextures[NonUniformResourceIndex(reflection)].SampleLevel(gSamplers[1], saturate(at), 0).rgb;
+        const float3 mirrored = seen * FrameValue(pc.frame, kFrameWater).rgb;
+        return float4(FrameFog(pc.frame, mirrored, input.viewDepth), 140.0 / 255.0);
+    }
     const uint frame = vk::RawBufferLoad<uint>(pc.data + 8, 4);
     const float3 texel = gTextures[NonUniformResourceIndex(frame)].SampleGrad(gSamplers[0], uv, dx, dy).rgb;
     const float3 color = texel * FrameValue(pc.frame, kFrameWater).rgb;
@@ -378,7 +405,7 @@ struct WaterModernOutput {
 
 WaterModernOutput VSWaterModern(uint vertexId : SV_VertexID) {
     const WaterOutput w = VSWater(vertexId);
-    const uint64_t record = pc.data + 16 + uint64_t(w.visible) * 32;
+    const uint64_t record = pc.data + kWaterHeader + uint64_t(w.visible) * 32;
     const uint block = vk::RawBufferLoad<uint>(record + 8, 4);
     const float3 offset = vk::RawBufferLoad<float3>(record + 16, 4);
     const float height = vk::RawBufferLoad<float>(record + 28, 4);
@@ -442,7 +469,7 @@ float4 ModernIce(WaterModernOutput input, float depth) {
 }
 
 float4 PSWaterModern(WaterModernOutput input) : SV_Target {
-    const uint64_t record = pc.data + 16 + uint64_t(input.visible) * 32;
+    const uint64_t record = pc.data + kWaterHeader + uint64_t(input.visible) * 32;
     const uint block = vk::RawBufferLoad<uint>(record + 8, 4);
     const uint type = vk::RawBufferLoad<uint>(record + 12, 4);
     const float surface = vk::RawBufferLoad<float>(record + 28, 4);
@@ -533,7 +560,7 @@ float4 PSWaterModern(WaterModernOutput input) : SV_Target {
 // The modern ice blocks (drawn on their own, after the water blocks), its thickness from the
 // heights; far away the same ice without what lies under it and the mirror (ModernIce).
 float4 PSIceModern(WaterModernOutput input) : SV_Target {
-    const uint64_t record = pc.data + 16 + uint64_t(input.visible) * 32;
+    const uint64_t record = pc.data + kWaterHeader + uint64_t(input.visible) * 32;
     const uint block = vk::RawBufferLoad<uint>(record + 8, 4);
     const float surface = vk::RawBufferLoad<float>(record + 28, 4);
     const uint64_t region = vk::RawBufferLoad<uint64_t>(pc.data, 8) + vk::RawBufferLoad<uint64_t>(record, 8);

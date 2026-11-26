@@ -105,6 +105,16 @@ private:
     gfx::WorldPass overlayPass_;
     gfx::WorldPass::Lists overlayLists_;
     rhi::TextureHandle overlayColor_, overlayDepth_;
+    // The original's water reflection (its row 4 on, the Original look's water): the scene drawn mirrored about the water
+    // level into a 512 x 512 target (only its depth cleared, as the original's), its culling of its own;
+    // skybox\waterbump3.ddj bends where the water samples it.
+    gfx::WorldPass reflectionPass_;
+    gfx::WorldPass::Lists reflectionLists_;
+    rhi::TextureHandle reflection_, reflectionDepth_;
+    gfx::AssetId bumpTexture_;
+    glm::mat4 reflectViewProj_{1.0f}, reflectSkyViewProj_{1.0f};
+    bool reflecting_ = false;
+    void DrawReflection(rhi::CommandList& cmd, const SceneView& view);
     rhi::PipelineHandle blitOver_;
     gfx::RenderGraph::Resource overlayResult_ = 0;
     bool overlayRendered_ = false;

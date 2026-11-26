@@ -29,7 +29,8 @@ struct BlitPush {
     std::uint32_t samplerIndex = 0;
 };
 
-glm::mat4 ViewProj(const OrbitCamera& c, float aspect, glm::vec3& eye, glm::mat4& sky) {
+glm::mat4 ViewProj(const OrbitCamera& c, float aspect, glm::vec3& eye, glm::mat4& sky, glm::mat4* viewOut = nullptr, glm::mat4* projOut = nullptr,
+                   glm::mat4* skyProjOut = nullptr) {
     const glm::vec3 target(c.targetX, c.targetY, c.targetZ);
     const glm::vec3 dir(std::cos(c.pitch) * std::sin(c.yaw), std::sin(c.pitch), std::cos(c.pitch) * std::cos(c.yaw));
     eye = c.fly ? target : target + dir * c.distance;
@@ -45,7 +46,40 @@ glm::mat4 ViewProj(const OrbitCamera& c, float aspect, glm::vec3& eye, glm::mat4
     glm::mat4 skyProj = glm::perspective(c.fovY, aspect, 10.0f, 5000000.0f);
     skyProj[1][1] *= -1.0f;
     sky = skyProj * glm::mat4(glm::mat3(view));
+    if (viewOut != nullptr) *viewOut = view;
+    if (projOut != nullptr) *projOut = proj;
+    if (skyProjOut != nullptr) *skyProjOut = skyProj;
     return proj * view;
+}
+
+// The reflection's camera: the view mirrored about the water level (y = level), its near plane turned onto the water's
+// plane (an oblique projection: what lies under the water is clipped, the original's user clip plane), and x mirrored
+// once more so the triangles keep their winding (the water samples it at 1 - u).
+void ReflectionViewProj(const glm::mat4& view, glm::mat4 proj, const glm::mat4& skyProj, float level, bool underWater, glm::mat4& viewProj,
+                        glm::mat4& sky) {
+    glm::mat4 mirror(1.0f);
+    mirror[1][1] = -1.0f;
+    mirror[3][1] = 2.0f * level;
+    const glm::mat4 viewR = view * mirror;
+    // The plane in the mirrored camera's space: the side the original keeps (above the water; below it from under it).
+    const glm::vec4 plane = underWater ? glm::vec4(0.0f, -1.0f, 0.0f, level) : glm::vec4(0.0f, 1.0f, 0.0f, -level);
+    const glm::vec4 c = glm::transpose(glm::inverse(viewR)) * plane;
+    // Lengyel's oblique near plane, for a depth of 0..1: the projection's third row becomes the plane, scaled so the far
+    // corner of the frustum keeps its depth.
+    const glm::vec4 q = glm::inverse(proj) * glm::vec4(c.x > 0.0f ? 1.0f : (c.x < 0.0f ? -1.0f : 0.0f), c.y > 0.0f ? 1.0f : (c.y < 0.0f ? -1.0f : 0.0f),
+                                                       1.0f, 1.0f);
+    const float d = glm::dot(c, q);
+    if (std::abs(d) > 1e-6f) {
+        const glm::vec4 row = c * (1.0f / d);
+        proj[0][2] = row.x;
+        proj[1][2] = row.y;
+        proj[2][2] = row.z;
+        proj[3][2] = row.w;
+    }
+    glm::mat4 flipX(1.0f);
+    flipX[0][0] = -1.0f;
+    viewProj = flipX * proj * viewR;
+    sky = flipX * skyProj * glm::mat4(glm::mat3(viewR));
 }
 
 constexpr std::uint32_t kInstances = 65536;
@@ -80,6 +114,10 @@ bool SceneRenderer::Init(rhi::Device& device, gfx::AssetStore& assets, std::uint
     overlayLimits.maxSkinJobs = 1u << 8;
     overlayLimits.arenaVertices = 1u << 18;
     if (!overlayPass_.Init(device, rhi::Format::RGBA8Unorm, rhi::Format::D32Float, overlayLimits, error)) return false;
+    gfx::WorldPass::Limits reflectionLimits = worldLimits;
+    reflectionLimits.maxDraws = 1u << 15;
+    if (!reflectionPass_.Init(device, kSceneColor, rhi::Format::D32Float, reflectionLimits, error)) return false;
+    bumpTexture_ = assets.RequestTexture("skybox\\waterbump3.ddj");
     gfx::WorldPass::Limits shadowLimits;
     shadowLimits.maxDraws = 1u << 16;
     shadowLimits.arenaVertices = skinVertices / 2;
@@ -199,6 +237,11 @@ void SceneRenderer::Shutdown() {
     device_->DestroyTexture(post_);
     device_->DestroyTexture(picture_);
     device_->DestroyTexture(waterCopy_);
+    device_->DestroyTexture(reflection_);
+    device_->DestroyTexture(reflectionDepth_);
+    reflectionPass_.Shutdown();
+    assets_->Release(bumpTexture_);
+    bumpTexture_ = {};
     resolved_.clear();
     device_ = nullptr;
 }
@@ -358,7 +401,8 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
     EnsureTargets(width, height); // made once per size, imported into the graph
     Resolve(view);
     ResolveWorld();
-    viewProj_ = ViewProj(camera, static_cast<float>(width_) / static_cast<float>(height_), eye_, skyViewProj_);
+    glm::mat4 cameraView(1.0f), cameraProj(1.0f), cameraSkyProj(1.0f);
+    viewProj_ = ViewProj(camera, static_cast<float>(width_) / static_cast<float>(height_), eye_, skyViewProj_, &cameraView, &cameraProj, &cameraSkyProj);
     ResolveTerrain(view);
     // Levels of detail (ours): the terrain halves its detail past these distances and small objects
     // leave once a few pixels across, both further out with the detail row and the view distance.
@@ -494,8 +538,50 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
                       },
                       [this, &view](rhi::CommandList& cmd, const gfx::RenderGraph&) { DrawOverlay(cmd, view); });
     }
+    // The original's water reflection (its row 4; the Original look's water only, outdoors, with water in sight): the
+    // scene mirrored about the water level into its own 512 x 512 target before the scene.
+    const float waterLevel = terrainPass_.WaterLevel();
+    reflecting_ = video_.water == 0 && video_.current()[4] != 0 && view.sky.active && terrainPass_.VisibleWater() != 0 && waterLevel > -1e30f;
+    gfx::RenderGraph::Resource reflectionTarget = 0;
+    if (reflecting_) {
+        if (!reflection_) {
+            rhi::TextureDesc desc;
+            desc.width = desc.height = 512;
+            desc.format = kSceneColor;
+            desc.usage = rhi::TextureUsage::RenderTarget;
+            desc.debugName = "water reflection";
+            reflection_ = device_->CreateTexture(desc);
+            desc.format = rhi::Format::D32Float;
+            desc.usage = rhi::TextureUsage::DepthStencil;
+            desc.debugName = "water reflection depth";
+            reflectionDepth_ = device_->CreateTexture(desc);
+        }
+        ReflectionViewProj(cameraView, cameraProj, cameraSkyProj, waterLevel, eye_.y < waterLevel, reflectViewProj_, reflectSkyViewProj_);
+        reflectionPass_.SetWaterBlended(false);
+        reflectionLists_ = reflectionPass_.AddCulling(graph, worldInstances, meshes, world_, assets_->Meshes(), reflectViewProj_, skinning, waterLevel);
+        if (skinning) {
+            reflectionPass_.AddSkinning(graph, reflectionLists_, worldInstances, meshes, geometry, palettes, view.worldPalettes, assets_->Geometry(),
+                                        world_, assets_->Meshes());
+        }
+        reflectionTarget = graph.ImportTexture(reflection_, "water reflection");
+        graph.AddPass("scene: water reflection", gfx::PassKind::Graphics,
+                      [&](gfx::RenderGraph::Builder& b) {
+                          b.Read(worldInstances, gfx::Use::VertexRead)
+                              .Read(meshes, gfx::Use::VertexRead)
+                              .Read(reflectionLists_.commands, gfx::Use::IndirectRead)
+                              .Read(reflectionLists_.counts, gfx::Use::IndirectRead)
+                              .Read(reflectionLists_.draws, gfx::Use::VertexRead)
+                              .Read(reflectionLists_.arena, gfx::Use::VertexRead)
+                              .Read(geometry, gfx::Use::VertexRead)
+                              .Read(geometry, gfx::Use::FragmentRead)
+                              .Read(geometry, gfx::Use::IndexRead)
+                              .Write(reflectionTarget, gfx::Use::ColorWrite);
+                      },
+                      [this, &view](rhi::CommandList& cmd, const gfx::RenderGraph&) { DrawReflection(cmd, view); });
+    }
     graph.AddPass("scene", gfx::PassKind::Graphics,
                   [&](gfx::RenderGraph::Builder& b) {
+                      if (reflectionTarget != 0) b.Read(reflectionTarget, gfx::Use::Sampled);
                       b.Read(instances, gfx::Use::VertexRead)
                           .Read(worldInstances, gfx::Use::VertexRead)
                           .Read(meshes, gfx::Use::VertexRead)
@@ -831,8 +917,16 @@ void SceneRenderer::Draw(rhi::CommandList& cmd, const SceneView& view, const Orb
             const auto index = static_cast<std::size_t>(std::fmod(std::max(view.seconds, 0.0) * 10.0, 30.0));
             const auto water = assets_->Texture(waterFrames_[std::min<std::size_t>(index, waterFrames_.size() - 1)]);
             const auto ice = assets_->Texture(iceTexture_);
+            gfx::TerrainPass::WaterReflection reflection;
+            if (reflecting_) {
+                const auto bump = assets_->Texture(bumpTexture_);
+                reflection.texture = device_->BindlessIndex(reflection_);
+                reflection.bump = bump ? bump->bindless : 0u;
+                reflection.width = float(width_);
+                reflection.height = float(height_);
+            }
             terrainPass_.DrawWater(cmd, viewProj_, frame, assets_->Geometry(), water ? water->bindless : 0, ice ? ice->bindless : 0,
-                                   video_.water != 0);
+                                   video_.water != 0, &reflection);
         }
         worldPass_.Draw(cmd, viewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::AfterWater);
     }
@@ -1039,6 +1133,35 @@ std::uint64_t SceneRenderer::FrameConstants(const SceneView& view, bool shadows,
     if (tileBytes > 0) std::memcpy(static_cast<std::byte*>(alloc.cpu) + tileOffset, tileMasks_.data(), tileBytes);
     if (tints > 0) std::memcpy(static_cast<std::byte*>(alloc.cpu) + tintOffset, view.tints.data(), tints * sizeof(glm::vec4));
     return alloc.gpuAddress;
+}
+
+// The original's reflection render: its depth cleared, its colour kept (as the original's: where nothing draws, the last
+// frame's shows), the sky, the terrain and the world from the mirrored camera.
+void SceneRenderer::DrawReflection(rhi::CommandList& cmd, const SceneView& view) {
+    SR_ZONE("render: water reflection");
+    const std::uint64_t frame = FrameConstants(view, false);
+    rhi::RenderPassDesc pass;
+    pass.color = reflection_;
+    pass.depth = reflectionDepth_;
+    pass.loadColor = true;
+    cmd.BeginRenderPass(pass);
+    if (view.sky.active) {
+        const auto bindless = [&](gfx::AssetId id) -> std::uint32_t {
+            const auto texture = assets_->Texture(id);
+            return texture ? texture->bindless : 0;
+        };
+        gfx::SkyPass::Textures textures;
+        textures.clouds = bindless(cloudTexture_);
+        textures.sun = bindless(sunTexture_);
+        textures.moon = bindless(moonTextures_[static_cast<std::size_t>(std::clamp(view.sky.moonPhase, 0, 28))]);
+        skyPass_.Draw(cmd, reflectSkyViewProj_, view.sky, textures, view.seconds, 512, 512);
+    }
+    if (frame != 0) {
+        terrainPass_.Draw(cmd, reflectViewProj_, assets_->Geometry(), frame);
+        reflectionPass_.Draw(cmd, reflectViewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::BeforeWater);
+        reflectionPass_.Draw(cmd, reflectViewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::AfterWater);
+    }
+    cmd.EndPass();
 }
 
 void SceneRenderer::DrawOverlay(rhi::CommandList& cmd, const SceneView& view) {
