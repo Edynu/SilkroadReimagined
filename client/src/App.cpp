@@ -122,6 +122,14 @@ int Run(const core::Config& config) {
             options.video.*row.field = std::clamp(std::atoi(std::string(pair.substr(eq + 1)).c_str()), 0, row.max);
             known = true;
         }
+        // The original's rows by their slot (slotN=V, 0..15) on the active record, e.g. slot1=0 (no shadows), slot9=0 (low textures).
+        if (!known && eq != std::string_view::npos && pair.starts_with("slot")) {
+            const int slot = std::atoi(std::string(pair.substr(4, eq - 4)).c_str());
+            if (slot >= 0 && slot < core::VideoOptions::kSlots) {
+                options.video.records[std::size_t(options.video.active)][std::size_t(slot)] = std::atoi(std::string(pair.substr(eq + 1)).c_str());
+                known = true;
+            }
+        }
         if (!known) core::LogWarning("--video {}: not one of the video rows", pair);
     }
     int frameLimit = config.GetInt("frame-limit", options.video.frameLimit); // 0: display rate, -1: none

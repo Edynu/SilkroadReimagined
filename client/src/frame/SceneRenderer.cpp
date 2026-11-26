@@ -790,8 +790,9 @@ void SceneRenderer::Draw(rhi::CommandList& cmd, const SceneView& view, const Orb
         skyPass_.Draw(cmd, skyViewProj_, view.sky, textures, view.seconds, width_, height_);
     }
     if (frame != 0) terrainPass_.Draw(cmd, viewProj_, assets_->Geometry(), frame);
-    // The original's circle shadows, unless the sun's cascaded shadows are drawn.
-    if (!view.shadows.empty() && frame != 0 && shadows_.count == 0) {
+    // The original's circle shadows (its shadow detail row: 0 none; 1 the circles; 2 its projected shadows, ours the circles
+    // still), unless the sun's cascaded shadows are drawn.
+    if (!view.shadows.empty() && frame != 0 && shadows_.count == 0 && video_.current()[1] != 0) {
         if (const auto texture = assets_->Texture(shadowTexture_)) {
             terrainPass_.DrawShadows(cmd, viewProj_, frame, assets_->Geometry(), view.shadows, texture->bindless);
         }

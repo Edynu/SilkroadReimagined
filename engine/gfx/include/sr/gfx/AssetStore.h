@@ -10,6 +10,7 @@
 // render thread, once a frame after Device::BeginFrame. Resident data does not change until the
 // asset is evicted, which only Update() does, and only for unreferenced assets.
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -214,6 +215,9 @@ public:
     // the records written since the last frame (outside render passes, before they are read).
     const MeshTable& Meshes() const { return meshes_; }
     void UploadMeshes(rhi::CommandList& cmd) { meshes_.Upload(cmd); }
+    // The world's textures load without their `skip` largest mips (the original's texture detail: 2 - its row's value, so
+    // high none, low two; the interface and the lightmaps whole). Textures loaded from then on.
+    void SetMipSkip(int skip) { mipSkip_.store(std::clamp(skip, 0, 2), std::memory_order_relaxed); }
 
     struct Stats {
         std::size_t live = 0, unreferenced = 0;
@@ -285,6 +289,7 @@ private:
     core::JobCounter jobsDone_;
     std::atomic<std::uint64_t> residentBytes_{0}, textureBytes_{0};
     std::atomic<std::uint64_t> decodedBytes_{0};
+    std::atomic<int> mipSkip_{0};
     std::atomic<bool> geometryShort_{false}; // a job found the pool full: evict before retrying
     std::shared_ptr<const assets::AssetIndex> tileIndex_; // set before regions are requested
     std::uint64_t evicted_ = 0;

@@ -321,7 +321,16 @@ void AssetStore::LoadTexture(AssetId id, Record& r) {
     if (!decoded) return Fail(r, error);
     // The world's textures get their whole mip chain, as the original's loader makes them (the
     // interface is drawn 1:1).
-    if (!r.path.starts_with("interface\\")) assets::CompleteMips(texture);
+    if (!r.path.starts_with("interface\\")) {
+        assets::CompleteMips(texture);
+        // The texture detail's mips skipped (never the last one; not the lightmaps).
+        const int skip = lightmap ? 0 : std::min(mipSkip_.load(std::memory_order_relaxed), int(texture.mips.size()) - 1);
+        if (skip > 0) {
+            texture.mips.erase(texture.mips.begin(), texture.mips.begin() + skip);
+            texture.width = texture.mips.front().width;
+            texture.height = texture.mips.front().height;
+        }
+    }
     const rhi::Format format = ToRhi(texture.format);
     std::uint64_t bytes = 0;
     for (const assets::TextureData::Mip& mip : texture.mips) {

@@ -49,7 +49,11 @@ public:
     gfx::RenderGraph::Resource AddPasses(gfx::RenderGraph& graph, const SceneView& view, const OrbitCamera& camera,
                                          std::uint32_t width, std::uint32_t height);
     // The player's video options (the snapshot's), before AddPasses.
-    void SetVideo(const core::VideoOptions& video) { video_ = video; }
+    // The video options; the texture detail row (slot 9: 0 low .. 2 high) skips 2 - it of the textures' largest mips.
+    void SetVideo(const core::VideoOptions& video) {
+        video_ = video;
+        if (assets_ != nullptr) assets_->SetMipSkip(2 - std::clamp(video.current()[9], 0, 2));
+    }
     // Inside the swapchain pass.
     void Composite(rhi::CommandList& cmd);
     // The overlay's colour (0 when it has nothing), and its composite (blended, inside the swapchain
