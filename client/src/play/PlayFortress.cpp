@@ -400,6 +400,7 @@ bool PlayScreen::FortressPicked(const proto::WorldPosition& at) {
 // The original's kind 3: a fixed 5 s on the client (the gauge's 0x1388 ms), the use sent when they run out.
 void PlayScreen::StartPlacing(const proto::FortressUseItem& m, std::uint32_t item) {
     placing_ = m;
+    placingHp_ = player_.self.hp;
     player_.casting = {item, now_, 5.0, proto::CastingKind::PlacedItem, 0};
 }
 
@@ -407,6 +408,15 @@ void PlayScreen::StartPlacing(const proto::FortressUseItem& m, std::uint32_t ite
 // their teleport (WorldEntered) or their result.
 void PlayScreen::CastingTick(double now) {
     game::PlayerState::Casting& c = player_.casting;
+    // The original's: the player's health dropping during a ground click's 5 s ends them, the item not used
+    // (UIIT_STT_FORT_ITEMUSE_INTERRUPT, its health update's check).
+    if (c.Active() && c.kind == proto::CastingKind::PlacedItem && player_.self.hp < placingHp_) {
+        c = {};
+        placing_.reset();
+        player_.Post(game::GameMessage::Kind::General, hudContext_.Text("UIIT_STT_FORT_ITEMUSE_INTERRUPT"), now);
+        return;
+    }
+    if (c.Active() && c.kind == proto::CastingKind::PlacedItem) placingHp_ = std::max(placingHp_, player_.self.hp); // healed meanwhile
     if (!c.Active() || now < c.started + c.seconds) return;
     if (c.kind == proto::CastingKind::PlacedItem) {
         if (placing_ && shared_ && shared_->session) shared_->session->SendGame(proto::FortressUseItem::kId, proto::Encode(*placing_));

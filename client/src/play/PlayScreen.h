@@ -843,6 +843,7 @@ private:
     // they run out, dropped by the gauge's cancel); a repair kit sent, its gauge started by its answer (kind 4).
     std::optional<game::proto::FortressUseItem> placing_;
     std::uint32_t kitSent_ = 0;
+    std::uint32_t placingHp_ = 0; // the player's health when the ground click's 5 s began (a hit interrupts them)
     void StartPlacing(const game::proto::FortressUseItem& m, std::uint32_t item);
     void CastingTick(double now);
     bool FortressPicked(const game::proto::WorldPosition& at);
