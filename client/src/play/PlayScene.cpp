@@ -435,7 +435,20 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
                 unshown(c.verb);
             }
         } else if (c.verb == "S_DecoSkillTarget") {
-            unshown(c.verb);
+            // <name> <from> <to> <skilleffect.txt name> <flag>: that name's stages played from one actor at another (the
+            // berserk quests' scenes: ESKILL_HWAN2_FRONTSHOT / DOWNSHOT, their _RED: a shot flying straight between them).
+            // Ours: the stages as a cast's at once (no swing), the flag not read.
+            const std::size_t from = QuestSceneSlot(arg(1)), to = QuestSceneSlot(arg(2));
+            const auto* stages = tables_ && tables_->Usable() ? tables_->skillAnimations.Stages(arg(3)) : nullptr;
+            const QuestSceneRun::Placed* a = QuestScenePlaced(arg(1));
+            const QuestSceneRun::Placed* b = QuestScenePlaced(arg(2));
+            if (stages != nullptr && world_ && from != StageEffects::kNone && to != StageEffects::kNone && a != nullptr && b != nullptr) {
+                StageEffects::Cast cast;
+                cast.distance = std::hypot(a->x - b->x, a->z - b->z);
+                stageEffects_.Skill(*world_, *stages, from, to, context.time, StageEffects::Swing{}, false, nullptr, cast);
+            } else if (stages == nullptr) {
+                unshown(c.verb + " " + arg(3));
+            }
         }
         // S_ViewSightRanger, S_CameraSetState: nothing of ours to change.
     }
