@@ -3,8 +3,8 @@
 // a click selecting one; the panel beside it (its name, state, step, defence, durability) and the Build, Repair and
 // Upgrade buttons, each asking first. A level-1 guard tower's upgrade asks its element first (CIFCheckConfirmWnd,
 // ginterface.txt 101). The map is the world map's view (HudMapView.h; CIFFortressMapFrame is a CIFWorldMap): the
-// fortress's map of worldmap_mapinfo.txt with its labels, dragged with the left button to look around. Ours: the hover
-// tooltip and the structures' features (DefaultSkill_1) are not shown.
+// fortress's map of worldmap_mapinfo.txt with its labels, dragged with the left button to look around; a structure's
+// tooltip on hover. Ours: the structures' features (DefaultSkill_1) are not shown.
 
 #include <algorithm>
 #include <cmath>
@@ -124,6 +124,7 @@ public:
         bool pressed = false;
         view_.Drag(frame, owner, view, &pressed);
         if (pressed) pressedAt_ = frame.pointer.position;
+        if (frame.pointer.hovered == &owner) Tooltip(frame, view);
         if (!frame.input.Released(ui::MouseButton::Left) || frame.pointer.hovered != &owner) return;
         const ui::Vec2 mouse = frame.pointer.position;
         if (std::fabs(mouse.x - pressedAt_.x) >= 4.0f || std::fabs(mouse.y - pressedAt_.y) >= 4.0f) return; // a drag
@@ -139,6 +140,49 @@ public:
     }
 
 private:
+    // The structure under the mouse in a tooltip, the 1.188 client's lines in its order: the name ((MAX) without a next
+    // level), "Current status : ...", "Upgraded : N step", "Durability : hp/most", "Defense power : N"; with a next level
+    // "Next level condition", "Required level N", "Upgrade cost N Gold", "Upgrading GP N GP" and, while it waits, "Allowed
+    // after H hours and M minutes". Ours: no features line (the structures' DefaultSkill_1 is not read), no installation
+    // guild (a camp's guild is not sent).
+    void Tooltip(ui::Frame& frame, const ui::Rect& view) {
+        const ui::Vec2 mouse = frame.pointer.position;
+        for (const proto::FortressStructureRecord& r : c_.fortress->StructureList().structures) {
+            const auto p = Place(r);
+            if (!p) continue;
+            const ui::Vec2 s = view_.ToScreen(*p, view);
+            if (std::fabs(mouse.x - s.x) > 12.0f || std::fabs(mouse.y - s.y) > 12.0f) continue;
+            const assets::ObjectRow* row = Row(r);
+            if (row == nullptr) return;
+            std::vector<ui::TooltipLine> lines;
+            const auto line = [&](std::string text) { lines.push_back({std::move(text)}); };
+            const bool next = HasNext(r);
+            line(c_.Text(row->nameKey) + (next ? std::string() : " " + c_.Text("UIIT_STT_FORT_BATTLEAIDE_UPGRADE_MAX")));
+            std::string state;
+            if (r.hp > 0 && r.hp >= r.maxHp) {
+                state = c_.Text("UIIT_STT_FORT_BATTLEAIDE_STRUCTSTATUS_01");
+            } else {
+                state = c_.Text(r.hp == 0 || (r.state & 1) != 0 ? "UIIT_STT_FORT_BATTLEAIDE_STRUCTSTATUS_03" : "UIIT_STT_FORT_BATTLEAIDE_STRUCTSTATUS_02");
+            }
+            line(c_.Text("UIIT_MSG_GUILD_CONDITION") + " : " + state);
+            if (r.kind != std::uint8_t(game::StructureKind::Headquarters)) {
+                line(c_.Text("UIIT_STT_FORT_BATTLEAIDE_UPGRADE") + " : " + FormatText(c_.Text("UIIT_STT_RANK"), {std::to_string(row->level)}));
+            }
+            line(c_.Text("PARAM_DUR") + " : " + std::to_string(r.hp) + "/" + std::to_string(r.maxHp));
+            line(c_.Text("UIIT_STT_FORT_BATTLEAIDE_DEFENSE") + " : " + std::to_string(int(row->phyDefence)));
+            if (next && r.kind != std::uint8_t(game::StructureKind::Headquarters)) {
+                line(c_.Text("PARAM_CONDITION_OF_NEXT_LEVEL"));
+                if (r.upgradeLevel != 0) line(c_.Text("PARAM_REQ_LV") + " " + std::to_string(r.upgradeLevel));
+                line(c_.Text("UIIT_STT_FORT_BATTLEAIDE_UPGRADE_GOLD") + " " + std::to_string(r.upgradeGold) + " " + c_.Text("UIIT_STT_GOLD"));
+                line(c_.Text("UIIT_STT_FORT_BATTLEAIDE_UPGRADE_GP") + " " + std::to_string(r.upgradePoints) + " " + c_.Text("UIIT_STT_GUILD_POINT_GP"));
+                if (r.waitMinutes != 0) {
+                    line(FormatText(c_.Text("UIIT_STT_FORT_BATTLEAIDE_UPGRADE_TIME"), {std::to_string(r.waitMinutes / 60), std::to_string(r.waitMinutes % 60)}));
+                }
+            }
+            frame.interface.ShowTooltip(std::move(lines), {std::floor(s.x - 12.0f), std::floor(s.y - 12.0f), 24.0f, 24.0f}, {});
+            return;
+        }
+    }
     // Where a place is on the map (the world map's conversion).
     std::optional<ui::Vec2> Place(const proto::FortressStructureRecord& r) const { return view_.Pixel(r.region, r.x, r.z); }
     // The fortress's map shown, centred on the player when it stands on it (the world map's way), else on the
