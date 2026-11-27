@@ -573,9 +573,11 @@ bool UseServiceItem(HudContext& c, int place) {
         // "When the hammer is clicked, the repair window will appear. Press the ok button and all items will be repaired."
         // (the box kind 0x0C, no price; inferred).
         const std::uint8_t at = std::uint8_t(place);
-        c.hud->Confirm("UIIT_CTL_REPAIR_ALL", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM")}, [ctx, at](bool yes) {
-            if (yes) Send(*ctx, proto::UseItem{at});
-        });
+        if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM")}, [ctx, at](bool yes) {
+                if (yes) Send(*ctx, proto::UseItem{at});
+            })) {
+            box->Header("UIIT_CTL_REPAIR_ALL");
+        }
         return true;
     }
     if (game::IsMagicCube(*row)) {
@@ -641,10 +643,14 @@ std::uint64_t RepairAllPrice(const HudContext& c) {
 void AskRepairAll(HudContext& c, std::uint32_t npc) {
     if (c.hud == nullptr) return;
     HudContext* ctx = &c;
-    c.hud->Confirm("UIIT_CTL_REPAIR_ALL", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM"), std::format("{} : {}", c.Text("UIIT_STT_GOLD"), RepairAllPrice(c))},
-                   [ctx, npc](bool yes) {
-                       if (yes) Send(*ctx, proto::Repair{npc, 2, 0});
-                   });
+    // The original's box 0x0C: "Repair All" on the name strip, the question, the price (ours: a line; the original's in a
+    // black box beside "Gold").
+    if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM"), std::format("{} : {}", c.Text("UIIT_STT_GOLD"), RepairAllPrice(c))},
+                                         [ctx, npc](bool yes) {
+                                             if (yes) Send(*ctx, proto::Repair{npc, 2, 0});
+                                         })) {
+        box->Header("UIIT_CTL_REPAIR_ALL");
+    }
 }
 
 bool CubeDrop(HudContext& c, int from, int to) {

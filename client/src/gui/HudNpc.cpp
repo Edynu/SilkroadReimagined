@@ -1308,6 +1308,24 @@ bool ConfirmBox::OnNotice(const ui::Notice& notice) {
     return true;
 }
 
+void ConfirmBox::Header(const std::string& key) {
+    if (ui_ == nullptr) return;
+    constexpr float kStrip = 30.0f; // the strip and the gap under it
+    for (const auto& child : children()) {
+        if (child->rect.y >= 40.0f) child->rect.y += kStrip;
+    }
+    rect.h += kStrip;
+    assets::UiLayoutNode strip;
+    strip.type = "CIFStatic";
+    strip.name = "GDR_MSGBOX_NAME";
+    strip.ddj = "interface\messagebox\msgbox_skillname.ddj";
+    strip.text = key;
+    strip.hAlign = 1;
+    strip.vAlign = 1;
+    strip.rect = {std::floor((rect.w - 212.0f) / 2.0f), 44.0f, 212.0f, 26.0f};
+    Add(ui_->Make(strip));
+}
+
 void ConfirmBox::OkOnly(const std::string& label) {
     ui::Widget* yes = Child(252);
     if (ui::Widget* no = Child(253)) no->visible = false;

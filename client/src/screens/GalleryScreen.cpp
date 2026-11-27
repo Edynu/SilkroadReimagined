@@ -741,6 +741,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 hud_.Practice(q, [] {});
             }
             if (page_ == "rebirth") hud_.Rebirth(20, [](int) {});
+            if (page_ == "repair-all") AskRepairAll(hudContext_, 0); // the smith's Repair All box (its name strip)
             // the emblem item's boxes: crest-box[:union] the question, crest-done[:union] the success.
             if (page_.starts_with("crest-box") || page_.starts_with("crest-done")) {
                 OpenCrestBox(hudContext_, !page_.ends_with(":union"), page_.starts_with("crest-done"), nullptr);

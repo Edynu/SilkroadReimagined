@@ -1193,6 +1193,10 @@ public:
     void Answer(bool yes); // as a click on Yes or No
     // One button only, in the middle, labelled `label` (the original's boxes that only tell: the lost connection's).
     void OkOnly(const std::string& label);
+    // The name strip over the text (interface\messagebox\msgbox_skillname.ddj, 212 x 26, centred, its text `key`): the
+    // original's boxes of a repair (the smith's Repair All, kind 0x0C; the battle aide's structures, 0x27..0x29). The
+    // box grows by it.
+    void Header(const std::string& key);
 
 private:
     ui::Interface* ui_ = nullptr;
