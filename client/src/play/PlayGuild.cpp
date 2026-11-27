@@ -232,7 +232,8 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
     // The war's reward to collect: its box (yes takes it).
     if (const auto gold = guild_.TakeWarReward()) AskWarReward(hudContext_, *gold);
     // The master's recall: "Guild master has recalled guild members. Agree to recall?" with Yes and No (the original's
-    // member box, 252 / 253), closed unanswered when its seconds run out (the server then cancels it: HandleInput);
+    // member box CIFGuildSummonReq: ifmessagebox.txt's MsgBoxSimple titled "Agreement window", 252 / 253), closed
+    // unanswered after its own 3 minutes (the original's timer; a yes after the server's seconds is refused 0x18C1);
     // --guild-accept or --guild-decline answer it.
     if (const auto ask = guild_.TakeRecallAsk()) {
         core::LogInfo("game: guild: {} recalls the members ({} s)", ask->master, ask->seconds);
@@ -243,9 +244,9 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
         };
         if (guildAnswer_ != 0) {
             answer(guildAnswer_ > 0);
-        } else if (ConfirmBox* box = hud_.Confirm("UIIT_STT_CONFIRM_BOX", {text("UIIT_MSG_GUILD_RECALL_ANSWER")}, answer)) {
+        } else if (ConfirmBox* box = hud_.Confirm("UIIT_STT_AGREEMENT_BOX", {text("UIIT_MSG_GUILD_RECALL_ANSWER")}, answer)) {
             recallBox_ = box;
-            recallUntil_ = context.time + double(std::max<std::uint32_t>(1, ask->seconds));
+            recallUntil_ = context.time + 180.0;
         }
     }
     // The emblems seen and not yet here, asked of the server.
