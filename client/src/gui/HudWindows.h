@@ -470,7 +470,7 @@ const char* TradeCodeKey(std::uint16_t code, bool* banner);
 void OpenTradeBoard(HudContext& context);
 // The test options' way: the board's trade centre `centre` picked and refreshed; the deal window's OK (count -1: as typed).
 bool RefreshTradeBoard(HudContext& context, int centre);
-bool ConfirmTradeDeal(HudContext& context, int count);
+bool ConfirmTradeDeal(HudContext& context, int count, bool confirm = true);
 void RegisterTradeWindows(ui::Interface& ui, HudContext& context);
 // Magic POP (HudMagicPop.cpp): the machine's window (CIFGhaCha, 140) opened for the machine
 // `npc`; whether the bag holds a coupon (Gori's row); the answers; the announce; a coupon's tooltip line; the script's

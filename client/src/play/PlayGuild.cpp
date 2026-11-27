@@ -628,7 +628,10 @@ void PlayScreen::GuildScript(ScreenContext& context) {
             else chosen = (npc->ChooseJob(JobNpcRow::AliasCreate) || npc->ChooseJob(JobNpcRow::AliasModify)) && TypeJobAlias(hudContext_, arg);
         }
         if (!chosen) core::LogWarning("game: --guild {}: no such row on the NPC's window", step);
-    } else if (verb == "cart-buy" || verb == "cart-sell" || verb == "cart-sell-all" || verb == "trade-board") {
+    } else if (verb == "deal-ok") {
+        // The open deal window's OK (after cart-deal).
+        if (!ConfirmTradeDeal(hudContext_, -1)) core::LogWarning("game: --guild {}: no deal window", step);
+    } else if (verb == "cart-buy" || verb == "cart-deal" || verb == "cart-sell" || verb == "cart-sell-all" || verb == "trade-board") {
         // The trade (HudTrade.cpp): cart-buy:SLOT,COUNT a good of the open specialty shop's first
         // tab into the transport through the deal window; cart-sell:PLACE[,COUNT] a good of the transport's bag;
         // cart-sell-all; trade-board:N the price board, its trade centre N picked and refreshed.
@@ -655,7 +658,8 @@ void PlayScreen::GuildScript(ScreenContext& context) {
             if (shop != nullptr && !shop->groups.empty() && !shop->groups.front().tabs.empty()) {
                 const assets::ShopTab& tab = shop->groups.front().tabs.front();
                 for (const assets::ShopGood& good : tab.goods) {
-                    if (good.slot == first && BuyIntoCart(hudContext_, good, tab.index)) done = ConfirmTradeDeal(hudContext_, second);
+                    // cart-deal: the deal window left open with the count typed (its scale shown), not confirmed.
+                    if (good.slot == first && BuyIntoCart(hudContext_, good, tab.index)) done = ConfirmTradeDeal(hudContext_, second, verb != "cart-deal");
                 }
             }
         }

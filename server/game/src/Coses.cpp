@@ -216,6 +216,7 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
     owned_[owner].push_back(entity);
     Send(owner, proto::CosSummoned{entity, c.model, std::uint8_t(kind), c.hp, c.maxHp, c.item});
     if (kind == game::CosKind::Transport && c.bagSize > 0) SendBag(c);
+    if (kind == game::CosKind::Transport) host_.CosTransportBack(owner); // its trade scale's rule told (the deal window's)
     core::LogInfo("cos: {} summons {} ({})", o->name, row->codename, entity);
     // Boarded at once, a ride and a transport alike (the user's account of the original, 2026-11-14); a transport is
     // left and boarded again through its Ride command.

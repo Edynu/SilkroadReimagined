@@ -94,7 +94,16 @@ public:
             stars = game::TradeStarsBy(s.scale, game::TradeValueByUnit(std::uint64_t(std::max<std::int64_t>(0, after)), s.unit, s.capacity));
             if (s.threeStarCap != 0) stars = std::min(stars, 3);
         }
-        Put(Child(34), stars >= 1 && stars <= 5 ? c_.Text("UIIT_STT_TRADE_TRADESCALE" + std::to_string(stars)) : std::string());
+        // The combo's list as 1.188 fills it (five names, three under the cap), the scale's own picked.
+        if (auto* combo = ui::As<ui::ComboBox>(Child(34))) {
+            const int names = s.threeStarCap != 0 ? 3 : 5;
+            if (int(combo->items.size()) != names) {
+                combo->items.clear();
+                for (int n = 1; n <= names; ++n) combo->items.push_back(c_.Text("UIIT_STT_TRADE_TRADESCALE" + std::to_string(n)));
+            }
+            const int pick = stars >= 1 ? std::min(stars, names) - 1 : -1;
+            if (combo->selected != pick) combo->Select(pick);
+        }
     }
 
     bool OnNotice(const ui::Notice& n) override {
@@ -305,12 +314,12 @@ bool RefreshTradeBoard(HudContext& c, int centre) {
     return true;
 }
 
-bool ConfirmTradeDeal(HudContext& c, int count) {
+bool ConfirmTradeDeal(HudContext& c, int count, bool confirm) {
     if (c.hud == nullptr || !c.hud->Shown(kDealWindow)) return false;
     auto* w = dynamic_cast<DealWindow*>(c.hud->Show(kDealWindow));
     if (w == nullptr) return false;
     if (count >= 0) Put(w->Child(30), std::to_string(count));
-    w->Confirm();
+    if (confirm) w->Confirm();
     return true;
 }
 
