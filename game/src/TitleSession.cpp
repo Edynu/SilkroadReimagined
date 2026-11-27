@@ -266,6 +266,8 @@ void TitleSession::Handle(Link& link, const net::Message& m) {
         return;
     }
     link.answered = true;
+    // The skill lab's answer (a developer's spawn, its exam frame's): nothing for the client.
+    if (m.id == proto::DevSpawned::kId) return;
     if (IsWorldMessage(m.id)) {
         TitleEvent event;
         if (!DecodeWorldEvent(m.id, m.payload, event)) {

@@ -259,7 +259,9 @@ void GameAudio::Guarded(std::string_view skill, glm::vec3 at) {
     if (!Ready() || skill.empty()) return;
     const audio::EffectSoundRow* row = tables_->effects.Pick({"PLAYER", "SND_DDMG", skill}, random_);
     if (row == nullptr) row = tables_->effects.Pick({{}, "SND_DDMG", skill}, random_);
-    if (row != nullptr) sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
+    if (row == nullptr) return;
+    core::LogInfo("audio: {}'s guard hit: {}", skill, row->path);
+    sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
 }
 
 const std::string& GameAudio::VoiceObject(std::string_view codename) {

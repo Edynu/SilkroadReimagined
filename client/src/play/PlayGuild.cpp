@@ -480,6 +480,26 @@ void PlayScreen::GuildScript(ScreenContext& context) {
             gateTo_ = to;
             gateTries_ = 20;
         }
+    } else if (verb == "dev-learn") {
+        // dev-learn:MASTERY,LEVEL: a developer's mastery and its board (the skill lab's DevLearn; SroGame --dev-commands).
+        unsigned mastery = 0, level = 0;
+        if (std::sscanf(arg.c_str(), "%u,%u", &mastery, &level) == 2) {
+            session.SendGame(proto::DevLearn::kId, proto::Encode(proto::DevLearn{mastery, std::uint8_t(level), 0}));
+        }
+    } else if (verb == "dev-spawn") {
+        // dev-spawn:MONSTER,DX,DZ[,HP]: a developer's monster beside the player that fights back (the lab's DevSpawn, normal).
+        char monster[128] = {};
+        float dx = 0, dz = 0;
+        unsigned hp = 0;
+        if (std::sscanf(arg.c_str(), "%127[^,],%f,%f,%u", monster, &dx, &dz, &hp) >= 3) {
+            proto::DevSpawn m;
+            m.monster = monster;
+            m.dx = dx;
+            m.dz = dz;
+            m.behaviour = proto::LabBehaviour::Normal;
+            m.hp = hp;
+            session.SendGame(proto::DevSpawn::kId, proto::Encode(m));
+        }
     } else if (verb == "use") {
         // use:CODENAME: the bag's first item of that codename used (a hole, a scroll).
         bool used = false;

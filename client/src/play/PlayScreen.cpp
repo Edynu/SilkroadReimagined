@@ -1959,7 +1959,10 @@ void PlayScreen::Sounds(ScreenContext& context, const game::TitleEvent& event) {
             hitSounds_.push_back({hit->attacker, hit->target, critical, context.time + 0.1}); // P12: 100 ms after
             // A guard's share or a reflection: its skill's own hit sound (SND_DDMG).
             if ((hit->flags & proto::kDamageReturn) != 0 && hit->imbue != 0) {
-                if (const assets::SkillRow* guard = tables_->skills.Find(hit->imbue)) audio->Guarded(guard->codename, p);
+                if (const assets::SkillRow* guard = tables_->skills.Find(hit->imbue)) {
+                    // Its rows by the skill's base name (effectsound's: SKILL_EU_WARLOCK_SOULA_RETURN_A, no level).
+                    audio->Guarded(!guard->baseName.empty() && guard->baseName != "xxx" ? guard->baseName : guard->codename, p);
+                }
             }
             // One's own critical shakes the camera 50 for 500 ms in steps of 20; in berserk (the original's character
             // mode 1) every hit of one's own does, a critical 200 in steps of 25.
