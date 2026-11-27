@@ -2858,3 +2858,18 @@ TEST_CASE("Game server: a pet out at logout comes back at the next entry, its st
     CHECK(back.aggressive);
     s.game.Stop();
 }
+
+TEST_CASE("Game server: a pet's charm (/charm): its greeting gesture to those around, as the original's command 0x0B") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    CosServer s(t);
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    auto a = s.Make("Charmer", 1000, {PetStored(kFlute)});
+    a.client->Send(proto::UseItem{PlaceOf(a.bag, kFlute)});
+    const auto wolf = Next<proto::CosSummoned>(a);
+    a.client->Send(proto::CosCommand{wolf.entity, proto::CosOrder::Charm, 0});
+    const auto emote = Next<proto::EntityEmote>(a);
+    CHECK(emote.entity == wolf.entity);
+    CHECK(emote.gesture == 0);
+    s.game.Stop();
+}

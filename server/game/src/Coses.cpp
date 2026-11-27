@@ -1118,6 +1118,9 @@ bool Coses::Handle(std::uint32_t owner, proto::MessageId id, std::span<const std
             c.row.option = c.aggressive ? 1 : 0; // kept in its row (PetOption, the original's command mode)
             host_.CosSave(c.row);
             Send(owner, proto::CosStance{c.entity, c.aggressive});
+        } else if (m.order == proto::CosOrder::Charm && c.target == 0 && c.hp > 0) {
+            // Its greeting gesture (the original's AI gives it in its idle and following states, not in a fight).
+            host_.CosBroadcast(c.entity, proto::EntityEmote::kId, proto::Encode(proto::EntityEmote{c.entity, 0}));
         }
         return true;
     }

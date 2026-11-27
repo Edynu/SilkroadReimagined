@@ -86,6 +86,8 @@ void PlayScreen::ChatCommand(ScreenContext& context, const std::string& key, con
             order(pet, proto::CosOrder::Follow);
         } else if (is("UIIT_KEY_COS_AGGRESSIVE") || is("UIIT_KEY_COS_DEFENSIVE")) {
             order(attackPet, proto::CosOrder::Stance);
+        } else if (is("UIIT_KEY_COS_CHARM")) {
+            order(pet, proto::CosOrder::Charm); // its greeting gesture
         } else if (is("UIIT_KEY_COS_RIDING")) {
             CosRide(true);
         } else if (is("UIIT_KEY_COS_DISMOUNT")) {

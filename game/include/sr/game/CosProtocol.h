@@ -237,7 +237,9 @@ struct CosDismiss {
 // A pet's command (the command bar's, the 1.188 client's numbers; the original's 0x70C5): 2 Attack (an
 // attack pet on `target`, a monster: the original's subcommand 2, event 0x19), 3 Follow (back
 // to its owner, its attack given up), 6 the stance (aggressive / defensive in turn: CosStance).
-enum class CosOrder : std::uint8_t { Attack = 2, Follow = 3, Stance = 6 };
+// Charm (the chat's /charm): a pet not fighting shows its greeting gesture to those around (the original's 0x0B, its AI's
+// gesture 0, EntityEmote).
+enum class CosOrder : std::uint8_t { Attack = 2, Follow = 3, Stance = 6, Charm = 0x0B };
 struct CosCommand {
     static constexpr MessageId kId = 0x1312;
     std::uint32_t entity = 0;
