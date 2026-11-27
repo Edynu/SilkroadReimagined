@@ -573,7 +573,7 @@ bool UseServiceItem(HudContext& c, int place) {
         // "When the hammer is clicked, the repair window will appear. Press the ok button and all items will be repaired."
         // (the box kind 0x0C, no price; inferred).
         const std::uint8_t at = std::uint8_t(place);
-        if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM")}, [ctx, at](bool yes) {
+        if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_AGREEMENT_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM")}, [ctx, at](bool yes) {
                 if (yes) Send(*ctx, proto::UseItem{at});
             })) {
             box->Header("UIIT_CTL_REPAIR_ALL");
@@ -645,7 +645,7 @@ void AskRepairAll(HudContext& c, std::uint32_t npc) {
     HudContext* ctx = &c;
     // The original's box 0x0C: "Repair All" on the name strip, the question, the price (ours: a line; the original's in a
     // black box beside "Gold").
-    if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM"), std::format("{} : {}", c.Text("UIIT_STT_GOLD"), RepairAllPrice(c))},
+    if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_AGREEMENT_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM"), std::format("{} : {}", c.Text("UIIT_STT_GOLD"), RepairAllPrice(c))},
                                          [ctx, npc](bool yes) {
                                              if (yes) Send(*ctx, proto::Repair{npc, 2, 0});
                                          })) {

@@ -285,7 +285,7 @@ private:
         if (button == kRepair) {
             const std::vector<std::string> lines = Lines(FormatText(c_.Text("UIIT_MSG_FORT_BATTLEAIDE_REPAIR_WINDOW"), {name, std::to_string(r->repairCost)}));
             // The original's box 0x27: "Repair of structures" on the name strip.
-            if (ConfirmBox* box = c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", lines, [ctx, npc, fortress, zone](bool yes) {
+            if (ConfirmBox* box = c_.hud->Confirm("UIIT_STT_AGREEMENT_BOX", lines, [ctx, npc, fortress, zone](bool yes) {
                     if (yes && ctx->fortressRequest) ctx->fortressRequest(proto::FortressRepair::kId, proto::Encode(proto::FortressRepair{npc, fortress, zone}));
                 })) {
                 box->Header("UIIT_STT_FORT_BATTLEAIDE_REPAIR_TITLE");
@@ -297,7 +297,7 @@ private:
         // The original's boxes 0x28 (build) and 0x29 (upgrade): the structures' name (SN_FORTRESS_BATTLEAIDE_STRUCTURE) on
         // the name strip.
         const auto ask = [ctx, npc, fortress, zone, lines](std::uint8_t branch) {
-            if (ConfirmBox* box = ctx->hud->Confirm("UIIT_STT_CONFIRM_BOX", lines, [ctx, npc, fortress, zone, branch](bool yes) {
+            if (ConfirmBox* box = ctx->hud->Confirm("UIIT_STT_AGREEMENT_BOX", lines, [ctx, npc, fortress, zone, branch](bool yes) {
                     if (yes && ctx->fortressRequest) ctx->fortressRequest(proto::FortressUpgrade::kId, proto::Encode(proto::FortressUpgrade{npc, fortress, zone, branch}));
                 })) {
                 box->Header("SN_FORTRESS_BATTLEAIDE_STRUCTURE");
