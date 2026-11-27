@@ -1155,16 +1155,19 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 OpenMarketScript(hudContext_, "om-buy", "0");
             }
         }
-        // --page stall-network-buy: the stall network's window on a page of one row, its Purchase pressed (the box).
-        if (page_ == "stall-network-buy" && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
+        // --page stall-network-buy: the stall network's window on a page of one row, its Purchase pressed (the box);
+        // --page stall-network-pages: on page 5 of 9 (the page numbers' group with both arrows).
+        if ((page_ == "stall-network-buy" || page_ == "stall-network-pages") && !stallShown_ && interface_ != nullptr && tables_ && tables_->Ready() && hud_.Created()) {
             stallShown_ = true;
             namespace proto = game::proto;
             if (tables_->Usable()) {
                 hudContext_.items = &tables_->items;
                 hudContext_.stall = &sampleStall_;
                 proto::NetworkPage page;
-                page.pages = 1;
-                page.total = 1;
+                const bool many = page_ == "stall-network-pages";
+                page.pages = many ? 9 : 1;
+                page.page = many ? 4 : 0;
+                page.total = many ? 90 : 1;
                 proto::NetworkRow row;
                 row.listing = 7ull << 8 | 1;
                 row.owner = "Zeta";
@@ -1175,7 +1178,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 sampleStall_.Apply(proto::StallEvent{page}, 1);
                 hudContext_.stallRequest = [](proto::MessageId id, std::vector<std::byte>) { core::LogInfo("gallery: stall request 0x{:04X}", id); };
                 hud_.Show(hud::kStallNetwork);
-                if (ui::Interface* ui = hud_.interface()) StallNetworkBuy(*ui, 0);
+                if (ui::Interface* ui = hud_.interface(); ui != nullptr && !many) StallNetworkBuy(*ui, 0);
             }
         }
         const bool stallPage = page_ == "stall" || page_ == "stall-buy" || page_ == "stall-price";

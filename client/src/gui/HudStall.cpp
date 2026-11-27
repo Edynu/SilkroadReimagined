@@ -318,27 +318,67 @@ public:
     }
 };
 
-// The page numbers, four at a time (the group of the page asked), each pressed for its page.
+// The page numbers as 1.188's CNIFPageManager (a .2dt's kind 14): "[" four numbers (20 wide, 14 high) "]", the page shown
+// in orange (0xFFFF9951), the others white; mall_page_prev (36 x 12) 13 left of "[" while a group of four comes before,
+// mall_page_next 17 right of "]" while one comes after (Prev: the last page of the group before; Next: the first after).
 class NetworkPages : public ui::Static {
 public:
     using Static::Static;
     int page = 0, pages = 0;
     void Draw(ui::Frame& frame) override {
-        const ui::Rect r = ScreenRect();
+        const Layout l = Lay();
+        frame.paint.Text("[", {l.open, l.y, 8.0f, 14.0f}, ui::kWhite, 0, 1, 1);
+        frame.paint.Text("]", {l.close, l.y, 8.0f, 14.0f}, ui::kWhite, 0, 1, 1);
         const int first = page / 4 * 4;
         for (int k = 0; k < 4 && first + k < pages; ++k) {
-            const std::string label = std::to_string(first + k + 1);
-            frame.paint.Text(label, {r.x + float(k) * 22.0f, r.y, 20.0f, r.h}, first + k == page ? ui::Argb(0xFFFFD953) : ui::kWhite, 0, 1, 1);
+            frame.paint.Text(std::to_string(first + k + 1), {l.numbers + float(k) * 20.0f, l.y, 20.0f, 14.0f},
+                             first + k == page ? ui::Argb(0xFFFF9951) : ui::kWhite, 0, 1, 1);
         }
+        if (first > 0) frame.paint.Image("interface\\mall\\mall_page_prev.ddj", l.prev, {0, 0}, {1, 1}, ui::kWhite);
+        if (first + 4 < pages) frame.paint.Image("interface\\mall\\mall_page_next.ddj", l.next, {0, 0}, {1, 1}, ui::kWhite);
     }
     void Created(ui::Interface& ui) override {
         Static::Created(ui);
         interactive = true;
     }
+    bool Hit(ui::Vec2 p) const override {
+        const Layout l = Lay();
+        const auto in = [&](const ui::Rect& r) { return p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h; };
+        return in(l.prev) || in(l.next) || in({l.open, l.y, l.close + 8.0f - l.open, 14.0f});
+    }
     void Mouse(ui::Frame& frame) override {
         if (!frame.input.Pressed(ui::MouseButton::Left) || frame.pointer.hovered != this) return;
-        const int k = int((frame.pointer.position.x - ScreenRect().x) / 22.0f);
-        if (k >= 0 && k < 4 && page / 4 * 4 + k < pages) Notify(ui::Notice::Kind::Clicked, page / 4 * 4 + k);
+        const Layout l = Lay();
+        const ui::Vec2 p = frame.pointer.position;
+        const auto in = [&](const ui::Rect& r) { return p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h; };
+        const int first = page / 4 * 4;
+        if (first > 0 && in(l.prev)) {
+            Notify(ui::Notice::Kind::Clicked, first - 1);
+            return;
+        }
+        if (first + 4 < pages && in(l.next)) {
+            Notify(ui::Notice::Kind::Clicked, first + 4);
+            return;
+        }
+        const int k = int(std::floor((p.x - l.numbers) / 20.0f));
+        if (p.x >= l.numbers && k >= 0 && k < 4 && first + k < pages) Notify(ui::Notice::Kind::Clicked, first + k);
+    }
+
+private:
+    struct Layout {
+        float numbers = 0, open = 0, close = 0, y = 0;
+        ui::Rect prev, next;
+    };
+    Layout Lay() const {
+        const ui::Rect r = ScreenRect();
+        Layout l;
+        l.numbers = std::floor(r.x + (r.w - 80.0f) / 2.0f);
+        l.y = std::floor(r.y + (r.h - 14.0f) / 2.0f);
+        l.open = l.numbers - 8.0f;
+        l.close = l.numbers + 80.0f;
+        l.prev = {l.open - 13.0f - 36.0f, l.y + 1.0f, 36.0f, 12.0f};
+        l.next = {l.close + 8.0f + 17.0f, l.y + 1.0f, 36.0f, 12.0f};
+        return l;
     }
 };
 
