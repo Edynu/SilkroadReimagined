@@ -1004,7 +1004,9 @@ private:
         std::uint32_t attacker = 0, target = 0;
         bool critical = false;
         double at = 0;
+        std::uint32_t guard = 0; // the target's guard buff that showed (its SND_DDMG instead)
     };
+    const assets::SkillRow* GuardBuffOf(std::uint32_t target) const;
     std::vector<HitSound> hitSounds_;
     // A sound its clip names, due at `at` (the clip's sound track); not if its clip was cut short.
     struct ClipSound {

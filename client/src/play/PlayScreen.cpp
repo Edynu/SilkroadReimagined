@@ -1956,7 +1956,8 @@ void PlayScreen::Sounds(ScreenContext& context, const game::TitleEvent& event) {
         if (!at(hit->target, p)) return;
         if (hit->damage > 0 && hit->attacker != 0 && (hit->flags & proto::kDamageState) == 0) {
             const bool critical = (hit->flags & proto::kDamageCritical) != 0;
-            hitSounds_.push_back({hit->attacker, hit->target, critical, context.time + 0.1}); // P12: 100 ms after
+            const assets::SkillRow* guard = GuardBuffOf(hit->target);
+            hitSounds_.push_back({hit->attacker, hit->target, critical, context.time + 0.1, guard != nullptr ? guard->id : 0u}); // P12: 100 ms after
             // A guard's share or a reflection: its skill's own hit sound (SND_DDMG).
             if ((hit->flags & proto::kDamageReturn) != 0 && hit->imbue != 0) {
                 if (const assets::SkillRow* guard = tables_->skills.Find(hit->imbue)) {

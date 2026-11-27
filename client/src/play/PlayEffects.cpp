@@ -174,6 +174,25 @@ void PlayScreen::StartShot(std::uint32_t caster, double at) {
     }
 }
 
+// A guard buff `target` holds: the first of its buffs whose presentation has a DefenseEfp (col 12; the Warriors' screens, the
+// ice wall): its hits show that effect, and 100 ms later sound its SND_DDMG instead of the attacker's SND_DMG
+// (1.188:0xA49780, the flag 0xA4F720 passes); null without one.
+const assets::SkillRow* PlayScreen::GuardBuffOf(std::uint32_t target) const {
+    if (!tables_ || !tables_->Usable()) return nullptr;
+    std::vector<std::uint32_t> held;
+    if (target == view_.Self()) {
+        for (const auto& [token, skill] : buffSkills_) held.push_back(skill);
+    } else if (const auto b = buffed_.find(target); b != buffed_.end()) {
+        held = b->second.skills;
+    }
+    for (const std::uint32_t id : held) {
+        const assets::SkillRow* s = tables_->skills.Find(id);
+        const assets::SkillAnimation* anim = s != nullptr ? tables_->skillAnimations.Find(AnimationKey(Shown(*s))) : nullptr;
+        if (anim != nullptr && !anim->defenseEffect.empty()) return s;
+    }
+    return nullptr;
+}
+
 void PlayScreen::HitEffects(const proto::EntityDamaged& hit) {
     const bool blocked = (hit.flags & proto::kDamageBlocked) != 0;
     if (!world_ || (hit.damage == 0 && !blocked)) return;
@@ -190,21 +209,8 @@ void PlayScreen::HitEffects(const proto::EntityDamaged& hit) {
     // The target's own guard first: the DefenseEfp (col 12) of a buff it holds (a shield-type one),
     // else the attacker's (then).
     std::string defence;
-    {
-        std::vector<std::uint32_t> held;
-        if (hit.target == view_.Self()) {
-            for (const auto& [token, skill] : buffSkills_) held.push_back(skill);
-        } else if (const auto b = buffed_.find(hit.target); b != buffed_.end()) {
-            held = b->second.skills;
-        }
-        for (const std::uint32_t id : held) {
-            const assets::SkillRow* s = tables_->skills.Find(id);
-            const assets::SkillAnimation* anim = s != nullptr ? tables_->skillAnimations.Find(AnimationKey(Shown(*s))) : nullptr;
-            if (anim != nullptr && !anim->defenseEffect.empty()) {
-                defence = anim->defenseEffect;
-                break;
-            }
-        }
+    if (const assets::SkillRow* guard = GuardBuffOf(hit.target)) {
+        if (const assets::SkillAnimation* anim = tables_->skillAnimations.Find(AnimationKey(Shown(*guard)))) defence = anim->defenseEffect;
     }
     if (!defence.empty()) {
         stageEffects_.Play(*world_, slot, defence, at, gfx::EffectSystem::Kind::Hit);
@@ -784,10 +790,16 @@ void PlayScreen::FlyEffects(ScreenContext& context) {
         }
         const game::WorldView::Entity* e = view_.Find(it->target);
         if (e != nullptr && context.audio != nullptr) {
-            const game::WorldView::Entity* a = view_.Find(it->attacker);
-            const bool player = a != nullptr && IsPlayer(*a);
-            context.audio->Hit(it->attacker, it->critical, world_->OriginRelative(e->position) + glm::vec3(0.0f, 10.0f, 0.0f), player,
-                               berserkers_.contains(it->attacker));
+            const glm::vec3 at = world_->OriginRelative(e->position) + glm::vec3(0.0f, 10.0f, 0.0f);
+            // The target's guard showed: its own hit sound (SND_DDMG, by the skill's base name) in place of the attacker's.
+            const assets::SkillRow* guard = it->guard != 0 && tables_ ? tables_->skills.Find(it->guard) : nullptr;
+            if (guard != nullptr) {
+                context.audio->Guarded(!guard->baseName.empty() && guard->baseName != "xxx" ? guard->baseName : guard->codename, at);
+            } else {
+                const game::WorldView::Entity* a = view_.Find(it->attacker);
+                const bool player = a != nullptr && IsPlayer(*a);
+                context.audio->Hit(it->attacker, it->critical, at, player, berserkers_.contains(it->attacker));
+            }
         }
         it = hitSounds_.erase(it);
     }
