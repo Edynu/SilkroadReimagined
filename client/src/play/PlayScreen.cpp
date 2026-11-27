@@ -3034,6 +3034,20 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.book = &book_;
     hudContext_.summonList = &summonList_;
     hudContext_.questNpc = [this](std::uint32_t entity) { return QuestMarkOf(entity).has_value(); };
+    hudContext_.questPlaces = [this](std::uint32_t quest) {
+        std::vector<proto::WorldPosition> out;
+        const game::QuestDef* q = quests_.Find(quest);
+        const auto state = quests_.Active().find(quest);
+        if (q == nullptr || state == quests_.Active().end() || tables_ == nullptr) return out;
+        for (const std::string& npc : game::QuestTaskNpcs(*q, state->second.status == proto::QuestStatus::Achieved, state->second.progress)) {
+            const assets::ObjectRow* row = tables_->characters.Find(npc);
+            if (row == nullptr) continue;
+            for (const assets::NpcPosition& p : tables_->npcPlaces) {
+                if (p.refObjId == row->refObjId) out.push_back({p.region, p.x, p.y, p.z});
+            }
+        }
+        return out;
+    };
     hudContext_.systemLine = [this](const std::string& line) { player_.Post(game::GameMessage::Kind::General, line, lastTime_); };
     hudContext_.townName = [this](int town) {
         const auto& areas = towns_.Areas();

@@ -1334,4 +1334,36 @@ bool QuestFinishesAt(const QuestDef& q, std::string_view npc) {
     });
 }
 
+std::vector<std::string> QuestTaskNpcs(const QuestDef& q, bool achieved, const std::vector<std::uint16_t>& progress) {
+    std::vector<std::string> out;
+    const auto add = [&](const std::string& npc) {
+        if (!npc.empty() && std::find(out.begin(), out.end(), npc) == out.end()) out.push_back(npc);
+    };
+    const auto atNpc = [](const QuestGoal& g) {
+        return g.kind == QuestGoalKind::Deliver || g.kind == QuestGoalKind::Talk || g.kind == QuestGoalKind::Capture;
+    };
+    if (achieved) {
+        if (!q.tiers.empty()) {
+            for (const std::string& n : q.givers) add(n);
+        } else if (!q.finisher.empty()) {
+            add(q.finisher);
+        } else {
+            for (const QuestGoal& g : q.goals) {
+                if (!atNpc(g)) continue;
+                add(g.npc);
+                for (const std::string& n : g.alsoAt) add(n);
+            }
+        }
+        return out;
+    }
+    for (std::size_t i = 0; i < q.goals.size(); ++i) {
+        const QuestGoal& g = q.goals[i];
+        if (g.hidden || !atNpc(g)) continue;
+        if (i < progress.size() && progress[i] >= g.count) continue;
+        add(g.npc);
+        for (const std::string& n : g.alsoAt) add(n);
+    }
+    return out;
+}
+
 } // namespace sr::game

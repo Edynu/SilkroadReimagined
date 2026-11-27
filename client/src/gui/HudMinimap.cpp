@@ -199,6 +199,14 @@ void Minimap::Draw(ui::Frame& frame) {
                        16.0f);
             }
         }
+        // The chosen quest's NPCs (its row's map button): the quest NPC's sign within 47 pixels, farther the quest
+        // arrow (32 x 32) on the circle (1.188's minimap: npcpos.txt's places); the quest no longer under way, none.
+        if (context_.trackedQuest != 0 && (context_.quests == nullptr || !context_.quests->Active().contains(context_.trackedQuest))) context_.trackedQuest = 0;
+        if (context_.trackedQuest != 0 && context_.questPlaces) {
+            for (const proto::WorldPosition& where : context_.questPlaces(context_.trackedQuest)) {
+                member(where, "interface\\minimap\\mm_sign_questnpc.ddj", "interface\\minimap\\mm_sign_questarrow.ddj", 32.0f);
+            }
+        }
     }
     // The player's marks (Tag Point): the hunting point's red arrow, 16 x 16 and turned
     // as the player's, where its target is (seen: where it stands; else where the server last said),

@@ -542,4 +542,9 @@ bool ParseQuest(std::string_view text, QuestDef& out, std::string& error);
 // one of the talk's others: the Beginner's Assistant's merchants).
 bool QuestFinishesAt(const QuestDef& q, std::string_view npc);
 
+// The NPCs the quest leads to now (the 1.188 client's quest points on its minimap, for the quest chosen by its row's map
+// button): under way, the NPC of each goal still open that is done at one (a delivery's, a talk's, a capture's, and the
+// talk's others); achieved, those who take it back (QuestFinishesAt's). `progress` by goal, as the server tells it.
+std::vector<std::string> QuestTaskNpcs(const QuestDef& q, bool achieved, const std::vector<std::uint16_t>& progress);
+
 } // namespace sr::game

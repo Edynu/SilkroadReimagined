@@ -184,7 +184,8 @@ public:
                 return true;
             }
             if (n.source == r.map) {
-                // Ours: the map (1.188's button shows the quest's place on it; not read yet).
+                // The quest chosen: its NPCs marked on the minimap (1.188's CNIFQuestSlot control 18), and the map.
+                c_.trackedQuest = r.quest;
                 if (c_.hud != nullptr) c_.hud->Show(hud::kWorldMap);
                 return true;
             }

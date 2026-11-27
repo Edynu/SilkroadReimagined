@@ -162,6 +162,10 @@ struct HudContext {
     std::function<void(const std::string& line)> systemLine;
     // Whether an entity in sight is an NPC with something about the player's quests (its minimap sign).
     std::function<bool(std::uint32_t entity)> questNpc;
+    // The quest chosen by its row's map button (the 1.188 client's: its points on the minimap; 0 none), and where its
+    // NPCs stand now (game::QuestTaskNpcs at npcpos.txt's places).
+    std::uint32_t trackedQuest = 0;
+    std::function<std::vector<game::proto::WorldPosition>(std::uint32_t quest)> questPlaces;
     const assets::StallNetworkData* stallNetwork = nullptr;
     std::function<void(game::proto::MessageId id, std::vector<std::byte> payload)> stallRequest;
     std::function<std::string(int town)> townName;

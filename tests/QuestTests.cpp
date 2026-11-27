@@ -1802,3 +1802,24 @@ TEST_CASE("Quests: a kill counts for its killer; in a party sharing both it is s
     CHECK(count(1, 20030) == 1);
     CHECK(count(2, 20030) == 1);
 }
+
+TEST_CASE("QuestTaskNpcs: the open goals' NPCs under way, the finisher once achieved") {
+    sr::game::QuestDef q;
+    q.finisher = "NPC_END";
+    sr::game::QuestGoal kill;
+    kill.kind = sr::game::QuestGoalKind::Kill;
+    kill.count = 5;
+    sr::game::QuestGoal talk;
+    talk.kind = sr::game::QuestGoalKind::Talk;
+    talk.npc = "NPC_TALK";
+    talk.alsoAt = {"NPC_OTHER"};
+    sr::game::QuestGoal deliver;
+    deliver.kind = sr::game::QuestGoalKind::Deliver;
+    deliver.npc = "NPC_DELIVER";
+    q.goals = {kill, talk, deliver};
+    CHECK(sr::game::QuestTaskNpcs(q, false, {0, 0, 0}) == std::vector<std::string>{"NPC_TALK", "NPC_OTHER", "NPC_DELIVER"});
+    CHECK(sr::game::QuestTaskNpcs(q, false, {5, 1, 0}) == std::vector<std::string>{"NPC_DELIVER"});
+    CHECK(sr::game::QuestTaskNpcs(q, true, {5, 1, 1}) == std::vector<std::string>{"NPC_END"});
+    q.finisher.clear();
+    CHECK(sr::game::QuestTaskNpcs(q, true, {5, 1, 1}) == std::vector<std::string>{"NPC_TALK", "NPC_OTHER", "NPC_DELIVER"});
+}

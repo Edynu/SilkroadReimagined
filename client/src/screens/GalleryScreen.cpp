@@ -1511,7 +1511,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         }
         // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
         // (one goal met: "Completed" in its colour).
-        if (page_ == "quest-list" && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+        if ((page_ == "quest-list" || page_ == "quest-track") && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
             hud_.Created()) {
             questListShown_ = true;
             namespace proto = game::proto;
@@ -1528,6 +1528,22 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             hudContext_.quests = &sampleQuests_;
             core::LogInfo("gallery: quest-list: {} definitions, {} under way", sampleQuests_.Defs().size(), sampleQuests_.Active().size());
             ToggleQuestWindow(hudContext_);
+            // --page quest-track: the first quest chosen by its map button: its points on the minimap, one 300 east of
+            // the sample character (its sign) and one 1,270 north-west (the arrow on the edge).
+            if (page_ == "quest-track") {
+                hudContext_.trackedQuest = 90002;
+                hudContext_.questPlaces = [this](std::uint32_t) {
+                    std::vector<proto::WorldPosition> out;
+                    if (const game::WorldView::Entity* self = hudContext_.world != nullptr ? hudContext_.world->Find(hudContext_.world->Self()) : nullptr) {
+                        proto::WorldPosition near = self->position, far = self->position;
+                        near.x += 300.0f;
+                        far.x -= 900.0f;
+                        far.z += 900.0f;
+                        out = {near, far};
+                    }
+                    return out;
+                };
+            }
         }
         // --page quest-talk[:N]: a finisher's talk of several pages with the player's rows under them (the White Viper's
         // return to Leebaek: _09 with the row _10, _11 with _12, _13 with "Receive reward."); N rows picked first.
