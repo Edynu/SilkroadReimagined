@@ -244,6 +244,15 @@ const proto::EntityGuild* GuildView::EntityTag(std::uint32_t entity) const {
     return it != entities_.end() ? &it->second : nullptr;
 }
 
+std::uint32_t GuildView::UnionOf(std::uint32_t guild) const {
+    if (guild == 0) return 0;
+    if (InGuild() && Guild().id == guild) return Guild().unionId;
+    for (const auto& [entity, tag] : entities_) {
+        if (tag.guild == guild) return tag.unionId;
+    }
+    return 0;
+}
+
 std::string GuildView::HeadLine(std::string_view guild, std::string_view nickname) {
     std::string line = "[";
     line += guild;

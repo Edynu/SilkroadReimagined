@@ -809,6 +809,8 @@ private:
     const std::vector<assets::ResourceData::ParticleModifier>& CarriedEffects(ScreenContext& context, const std::string& model);
     // Another player the fortress war makes an enemy (both in its area; not of the guild or its union).
     bool FortressFoe(std::uint32_t entity, const game::WorldView::Entity& e) const;
+    // A player's fortress war mark over its head (its texture; null: none), as the 1.188 client picks it.
+    const char* FortressWarMark(std::uint32_t entity) const;
     // A fortress's structure of the player's guild or union (never hit by them).
     bool OwnStructure(std::uint32_t entity) const;
     // The test bots: a random attack skill known and off its wait (0: none).

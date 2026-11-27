@@ -799,6 +799,9 @@ struct EntityGuild {
     std::uint32_t unionId = 0;
     std::uint32_t crest = 0;
     std::uint32_t unionCrest = 0;
+    // Its fortress war position (game::kPosition*: 1 commander, 2 deputy, ...), told to those around as the original's
+    // 0x3103 (their over-head war mark is the commander's and the deputy's).
+    std::uint8_t fortressRole = 0;
     template <typename V>
     void Visit(V& v) {
         v("entity", entity);
@@ -808,6 +811,7 @@ struct EntityGuild {
         v("unionId", unionId);
         v("crest", crest);
         v("unionCrest", unionCrest);
+        v("fortressRole", fortressRole);
     }
 };
 

@@ -48,6 +48,40 @@ bool PlayScreen::FortressFoe(std::uint32_t entity, const game::WorldView::Entity
     return tag == nullptr || (tag->guild != guild_.Guild().id && (tag->unionId == 0 || tag->unionId != guild_.Guild().unionId));
 }
 
+// The fortress war's mark over a commander's or a deputy's head (the original's CICUser pass 4 and its relation
+// routine): while the war runs at the viewer's place, for a player of a guild with one of those two positions. Its side
+// against the viewer's: the defenders are the holder and its union. The viewer attacking: friends (its own guild, its
+// union) the fortress mark, the defenders the defensive mark, the other attackers the aggressive mark; the viewer
+// defending: friends the fortress mark, the others the defensive mark. The commander's "2" art, the deputy's "3".
+const char* PlayScreen::FortressWarMark(std::uint32_t entity) const {
+    const proto::EntityGuild* tag = guild_.EntityTag(entity);
+    if (tag == nullptr || tag->guild == 0 || (tag->fortressRole != game::kPositionCommander && tag->fortressRole != game::kPositionDeputy)) return nullptr;
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (self == nullptr || !guild_.InGuild()) return nullptr;
+    const proto::FortressRecord* f = fortress_.Fortress(fortress_.WarArea(self->position.region));
+    if (f == nullptr || !f->atWar) return nullptr;
+    const std::uint32_t holder = f->holder != 0 ? f->holder : f->owner, holderUnion = guild_.UnionOf(holder);
+    const auto defends = [&](std::uint32_t guild, std::uint32_t unionId) {
+        return holder != 0 && (guild == holder || (holderUnion != 0 && unionId == holderUnion));
+    };
+    const std::uint32_t mine = guild_.Guild().id, myUnion = guild_.Guild().unionId;
+    const bool friendOf = tag->guild == mine || (myUnion != 0 && tag->unionId == myUnion);
+    const bool deputy = tag->fortressRole == game::kPositionDeputy;
+    const char* kind = nullptr;
+    if (friendOf) {
+        kind = "fortress";
+    } else if (defends(mine, myUnion)) {
+        kind = "defensive";
+    } else {
+        kind = defends(tag->guild, tag->unionId) ? "defensive" : "aggressive";
+    }
+    static const std::string kMarks[3][2] = {{"icon\\etc\\mark_fortress2.ddj", "icon\\etc\\mark_fortress3.ddj"},
+                                              {"icon\\etc\\mark_defensive2.ddj", "icon\\etc\\mark_defensive3.ddj"},
+                                              {"icon\\etc\\mark_aggressive2.ddj", "icon\\etc\\mark_aggressive3.ddj"}};
+    const int row = kind[0] == 'f' ? 0 : kind[0] == 'd' ? 1 : 2;
+    return kMarks[row][deputy ? 1 : 0].c_str();
+}
+
 bool PlayScreen::OwnStructure(std::uint32_t entity) const {
     const proto::EntityStructure* s = fortress_.Structure(entity);
     if (s == nullptr || !guild_.InGuild() || s->owner == 0) return false;

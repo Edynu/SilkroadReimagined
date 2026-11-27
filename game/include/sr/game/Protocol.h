@@ -48,7 +48,8 @@ using MessageId = std::uint16_t;
 // 7: the casting gauge's kind (ReturnStarted.kind, .quest; CancelCasting).
 // 8: the guild's mercenaries (GuildInfo.mercenaryAttr, .mercenaries; GuildMercenaryAbility).
 // 9: an academy join request's highest level and race (AcademyAsk.maxLevel, .race).
-inline constexpr std::uint32_t kProtocolVersion = 9;
+// 10: a member's fortress war position to those around (EntityGuild.fortressRole).
+inline constexpr std::uint32_t kProtocolVersion = 10;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

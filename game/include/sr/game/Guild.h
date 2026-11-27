@@ -274,6 +274,8 @@ public:
     int Online() const;
     // The guild a player in view belongs to (null: none told).
     const proto::EntityGuild* EntityTag(std::uint32_t entity) const;
+    // A guild's union as its members in view tell it (the player's own guild's too; 0: none known).
+    std::uint32_t UnionOf(std::uint32_t guild) const;
     // Emblems: the pixels of a guild's (proto::kCrestGuild) or a union's emblem at that revision, once
     // the server sent them (else null; the request is queued when the revision is first seen).
     const std::vector<std::uint8_t>* Crest(std::uint8_t kind, std::uint32_t id, std::uint32_t revision) const;

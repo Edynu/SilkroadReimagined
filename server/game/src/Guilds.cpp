@@ -499,7 +499,10 @@ struct Guilds::State {
             tag.unionId = g->alliance;
             tag.crest = g->crest;
             if (const auto u = alliances.find(g->alliance); g->alliance != 0 && u != alliances.end()) tag.unionCrest = u->second.crest;
-            if (const Member* m = g->Find(character)) tag.nickname = m->nickname;
+            if (const Member* m = g->Find(character)) {
+                tag.nickname = m->nickname;
+                tag.fortressRole = m->position;
+            }
         }
         const std::vector<std::byte> bytes = proto::Encode(tag);
         host.GuildToObservers(tag.entity, proto::EntityGuild::kId, bytes);
@@ -849,6 +852,8 @@ struct Guilds::State {
         Write([id = g->id, from = a.character, to = next->character](Database& db) { DelegateGuildMaster(db, id, from, to); });
         ToGuild(*g, proto::GuildMemberChanged{Record(*me)});
         ToGuild(*g, proto::GuildMemberChanged{Record(*next)});
+        TellAppearance(me->character); // the commander's position moved: those around told
+        TellAppearance(next->character);
         if (g->alliance != 0) TellUnion(g->alliance); // its master's name
         Answer(a.peer, proto::GuildAction::MasterTransfer, GuildError::Ok);
         core::LogInfo("guilds: {} handed guild {} '{}' to {}", a.name, g->id, g->name, next->name);
@@ -996,6 +1001,7 @@ struct Guilds::State {
         m->position = r.position;
         Write([id = g->id, character = m->character, position = r.position](Database& db) { SaveGuildPosition(db, id, character, position); });
         ToGuild(*g, proto::GuildMemberChanged{Record(*m)});
+        TellAppearance(m->character); // those around told its position (the original's 0x3103)
         Answer(a.peer, proto::GuildAction::Position, GuildError::Ok);
         core::LogInfo("guilds: {} gives {} position {}", a.name, m->name, int(r.position));
     }

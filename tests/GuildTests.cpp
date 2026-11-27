@@ -234,6 +234,15 @@ TEST_CASE("Guilds: fortress positions by the original's checks, and what the poi
     CHECK(position("Ann") == game::kPositionNone);
     CHECK(position("Bob") == game::kPositionDeputy);
     CHECK(position("Eve") == game::kPositionEngineer);
+    // A position given is told to those around the member (its guild tag, the original's 0x3103): a fellow member sees it.
+    CHECK(grant(lead, members[0], game::kPositionDeputy) == GuildError::Ok);
+    bool told = false;
+    for (int i = 0; i < 100 && !told; ++i) {
+        rig.Settle();
+        proto::EntityGuild tag;
+        while (members[2].c->Expect(tag, 2ms)) told = told || (tag.entity == members[0].entity && tag.fortressRole == game::kPositionDeputy);
+    }
+    CHECK(told);
 
     // A promotion is written down, the GP asked at the NPC; the donation answers with its amount.
     lead.c->Send(proto::GuildDonate{game::kGuildLevelUpPoints[1]});

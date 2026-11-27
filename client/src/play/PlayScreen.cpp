@@ -3906,6 +3906,14 @@ void PlayScreen::DrawNames(ScreenContext& context, ui::Painter& paint) {
             const float pw = paint.TextWidth(petLine, 0) + 2.0f;
             ui::DrawLabel(paint, petLine, {std::floor(x - pw / 2.0f), at.y + pitch, pw, pitch}, ui::Argb(0xFFFFFF55), 0, 1, 1, ui::kTextShadow);
         }
+        // The fortress war's mark (32 x 32) centred 44 over the name's point, 64 with the guild row shown, 16 more when a
+        // status gauge shows; with the Game page's fortress mark row (PlayFortress.cpp: which mark).
+        if (e.kind == proto::EntityKind::Character && !IsNpc(e) && (context.options == nullptr || context.options->game.Get("fortressNames"))) {
+            if (const char* mark = FortressWarMark(id)) {
+                const float up = (guildLine ? 64.0f : 44.0f) + (gauge != 0 ? 16.0f : 0.0f);
+                paint.Image(mark, {std::floor(x - 16.0f), std::floor(y - up), 32.0f, 32.0f});
+            }
+        }
         // A stall's name over its booth, in the booth's colour (0xFFFEB5FF); ours a line above.
         if (const auto booth = entityStalls_.find(id); booth != entityStalls_.end()) {
             const float bw = paint.TextWidth(booth->second.name, 0) + 2.0f;
