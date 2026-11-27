@@ -50,7 +50,19 @@ bool PlayScreen::UseMallItem(std::uint8_t place) {
     if (!tables_ || !tables_->Usable()) return false;
     const game::ItemInstance* item = player_.inventory.At(place);
     const assets::ItemRow* row = item != nullptr ? tables_->items.Find(item->refId) : nullptr;
-    if (row == nullptr || row->typeId[0] != 3 || row->typeId[1] != 3 || row->typeId[2] != 13) return false;
+    if (row == nullptr || row->typeId[0] != 3 || row->typeId[1] != 3) return false;
+    // The bag's use asks first for the guild recall scroll (12 / 3: "Recall all guild members now?") and for a
+    // Forgotten World's hole (12 / 7: "Will you create the gate to the Forgotten World?"), in a confirmation box; Yes
+    // uses it.
+    if (row->typeId[2] == 12 && (row->typeId[3] == 3 || row->typeId[3] == 7)) {
+        if (replay_ || !shared_ || !shared_->session) return true;
+        const char* key = row->typeId[3] == 3 ? "UIIT_MSG_GUILD_RECALL" : "UIIT_MSG_USE_MAGIC_HOLE_CREATE_GATE";
+        hud_.Confirm("UIIT_STT_CONFIRM_BOX", {gui_.data().Text(key)}, [this, place](bool yes) {
+            if (yes && !replay_ && shared_ && shared_->session) shared_->session->UseItem(place);
+        });
+        return true;
+    }
+    if (row->typeId[2] != 13) return false;
     const int kind = row->typeId[3];
     if (kind != 17) return false; // 15, 16: a target picked first (HudServices.cpp, the cursor mode 0xA6)
     if (replay_ || !shared_ || !shared_->session) return true;
