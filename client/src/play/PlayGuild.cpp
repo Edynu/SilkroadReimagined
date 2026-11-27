@@ -193,6 +193,7 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
     if (const auto* e = std::get_if<proto::EntityGuild>(&event)) {
         core::LogInfo("game: guild: {} is in {} '{}'{}", e->entity, e->guild, e->name, e->nickname.empty() ? "" : " as " + e->nickname);
     }
+    const bool electionWas = guild_.Election().active != 0;
     for (const game::GuildView::Line& line : guild_.Apply(event)) {
         const std::string shown = FormatText(text(line.key), {line.argument, line.secondKey.empty() ? line.second : text(line.secondKey), line.third});
         core::LogInfo("game: guild: {}", shown);
@@ -211,6 +212,8 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
         if (line.key == "UIIT_MSG_GUILDWAR_GOTOWAR") player_.Notify(game::Banner::Kind::Warning, shown, context.time);
     }
     player_.self.guild = guild_.Guild().id;
+    // A vote for the leader begun: 1.188's "Alarm" box says so (UIIT_CTL_MASTERRELEASE_NOTICE).
+    if (!electionWas && guild_.Election().active != 0) hud_.Inform("UIIT_STT_EVENTGUIDE", {text("UIIT_CTL_MASTERRELEASE_NOTICE")}, {});
     // The election's window asked open (its row at the guild NPC).
     if (guild_.TakeElectionShow()) OpenGuildElection(hudContext_);
     if (const auto history = guild_.TakeGpHistory()) OpenGuildGpHistory(hudContext_, *history);

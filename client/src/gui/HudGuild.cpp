@@ -152,6 +152,8 @@ std::string GuildErrorText(const HudContext& c, std::uint16_t error, std::uint32
         return FormatText(c.text("UIIT_MSG_GUILD_SECESSION_PENALTY"),
                           {std::to_string(minutes / 1440), std::to_string(minutes / 60 % 24), std::to_string(minutes % 60)});
     }
+    // No war points to spend: the original's pair of lines.
+    if (error == 0x4C43) return c.text("UIIT_MSG_GUILDWAR_SUGGESTIONS_01") + "\n" + c.text("UIIT_MSG_GUILDWAR_SUGGESTIONS_02");
     const char* key = ErrorKey(error);
     return key != nullptr ? c.text(key) : std::string();
 }
@@ -313,6 +315,7 @@ public:
         tip(Child(72), c_.text("UIIT_STT_GUILD_INFO"));
         tip(Child(73), c_.text("UIIT_CTL_GUILD_RESPECT"));
         tip(Child(74), c_.text("UIIT_CTL_WARSIT_WARSITUATION"));
+        tip(Child(87), c_.text("UIIT_CTL_WARSIT_GUILDWAR"));
         tip(Child(220), c_.text("UIIT_CTL_WK_GUILD"));
         tip(Child(221), c_.text("UIIT_STT_SILKMALL_COMMUNITY"));
         if (info_ != nullptr) tip(info_->Child(250), c_.text("UIIT_MSG_GUILD_SP_GP_TOOLTIP"));
@@ -841,7 +844,7 @@ private:
             return true;
         case 52:
             if (c_.hud != nullptr) {
-                c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c_.text("UIIT_MSG_GUILD_QUESTION_ALLY_EXIT")}, [this](bool yes) {
+                c_.hud->Confirm("UIIT_STT_GUILD_RESPECT_ALLY_EXIT", {c_.text("UIIT_MSG_GUILD_QUESTION_ALLY_EXIT")}, [this](bool yes) {
                     if (yes) Send(proto::UnionLeave{});
                 });
             }
@@ -849,7 +852,7 @@ private:
         case 53:
             if (c_.hud != nullptr && selectedUnion_ >= 0 && selectedUnion_ < int(u.guilds.size())) {
                 const proto::UnionGuildRecord g = *UnionRows()[std::size_t(selectedUnion_)];
-                c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(c_.text("UIIT_MSG_QUESTION_GUILD_RESPECT_ALLY_EXPEL"), {g.name})},
+                c_.hud->Confirm("UIIT_STT_GUILD_RESPECT_ALLY_EXPULSION", {FormatText(c_.text("UIIT_MSG_QUESTION_GUILD_RESPECT_ALLY_EXPEL"), {g.name})},
                                 [this, id = g.id](bool yes) {
                                     if (yes) Send(proto::UnionKick{id});
                                 });

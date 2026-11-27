@@ -69,6 +69,8 @@ std::vector<AcademyView::Line> AcademyView::Apply(const proto::AcademyEvent& eve
         rankingArrived_ = true;
     } else if (const auto* list = std::get_if<proto::AcademyMatchList>(&event)) {
         matches_ = *list;
+        // A search that found none (1.188's matching list says so in the system messages).
+        if (list->rows.empty()) lines.push_back({"UIIT_STT_TC_MACHING_REFERENCE_ERROR", {}});
     } else if (const auto* progress = std::get_if<proto::AcademyMatchProgress>(&event)) {
         joining = progress->waiting != 0;
     } else if (const auto* refusal = std::get_if<proto::AcademyRefusal>(&event)) {
@@ -80,7 +82,7 @@ std::vector<AcademyView::Line> AcademyView::Apply(const proto::AcademyEvent& eve
         switch (news->kind) {
         case K::Founded: lines.push_back({"UIIT_MSG_TC_OPEN_SUCCESS", {}}); break;
         case K::Joined:
-            lines.push_back(own ? Line{"UIIT_STT_TC_JOIN_ANNOUNCE", {}} : Line{"UIIT_STT_TC_JOIN_OTHER_USER", {news->name}});
+            lines.push_back(own ? Line{"UIIT_STT_TC_JOIN_ANNOUNCE", {}} : Line{"UIIT_MSG_TC_MACHING_JOINING_MEMBER", {news->name}});
             break;
         case K::Left:
             lines.push_back(own ? Line{"UIIT_STT_TC_OUT_TRAININGCAMP_ANNOUNCE", {}} : Line{"UIIT_STT_TC_OUT_TRAININGCAMP_OTHER_USER", {news->name}});

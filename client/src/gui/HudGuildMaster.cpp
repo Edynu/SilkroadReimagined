@@ -167,7 +167,7 @@ private:
 class ElectionWindow : public MasterListWindow {
 public:
     ElectionWindow(const assets::UiLayoutNode& node, HudContext& c)
-        : MasterListWindow(node, c, "resinfo\\ifguildmasterelection.txt", "resinfo\\ifguildmasterelectionslot.txt", "UIIT_STT_MRELEASE_VOTESTATE") {}
+        : MasterListWindow(node, c, "resinfo\\ifguildmasterelection.txt", "resinfo\\ifguildmasterelectionslot.txt", "UIIT_CTL_MRELEASE_PROGRESSWINDOW") {}
 
     void Confirm() override {
         if (selected_ == 0 || !c_.guildRequest) return;
