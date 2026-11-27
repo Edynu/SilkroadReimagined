@@ -636,11 +636,8 @@ void MagicPopPlayed(HudContext& c, const proto::PopPlayed& a) {
 
 void MagicPopExchanged(HudContext& c, const proto::PopExchanged& a) {
     if (c.state == nullptr) return;
-    if (a.code != 0) {
-        // Ours: the original prints nothing for an exchange's failure.
-        c.state->Post(game::GameMessage::Kind::General, c.Text("UIIT_MSG_STRGERR_TRADE_FAILURE"), c.time);
-        return;
-    }
+    // A failure (its error group 1, code 2) prints nothing, as the original's error text routine (no line of that code).
+    if (a.code != 0) return;
     // "Has been changed to [%s][%d]." a coupon (the original's from each 0x3040).
     for (const proto::ItemRecord& r : a.items) {
         c.state->Post(game::GameMessage::Kind::General, PrizeLine(c, "UIIT_MSG_GACHA_EXCHANGE", r.item, std::max<int>(1, r.quantity)), c.time);
