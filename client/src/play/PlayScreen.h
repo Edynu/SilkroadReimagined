@@ -488,7 +488,7 @@ private:
     // when there is none.
     QuestSceneRun::Placed* QuestScenePlaced(const std::string& name);
     // A clip for it from now (scene time `at`): a state of a set (empty: its stance; WorldScreen::kClipFile: a file).
-    static void PlayClip(QuestSceneRun::Placed& placed, std::string set, std::uint32_t state, float at);
+    static void PlayClip(QuestSceneRun::Placed& placed, std::string set, std::uint32_t state, float at, float speed = 1.0f);
     std::size_t QuestSceneSlot(const std::string& name) const; // StageEffects::kNone: not shown
     // A walker the quest scene hides (the player under INVISIBLE_USER, a player shown in its crowd): its glows off.
     bool SceneHides(std::uint32_t entity) const;

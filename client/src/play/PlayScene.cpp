@@ -5,8 +5,8 @@
 // STITLE_START / STITLE_FINISH), its sounds (S_SoundPlay), its characters (S_ObjectCreate in a free stage slot, its
 // animation by S_ObjectAniToIndex, gone at S_ObjectRelease), over at S_End.
 // The scene's music (S_SetBGM, and a scene sound naming a Music.pk2 track: the Roc's own track). The Roc's crowd of
-// adventurers (S_ObjectCreateIndex): the players there in their own looks. Not shown yet (logged once): the berserk
-// quests' shots (S_DecoSkillTarget).
+// adventurers (S_ObjectCreateIndex): the players there in their own looks. The berserk quests' shots between their
+// stones (S_DecoSkillTarget: a skilleffect.txt name's stages from one actor at another).
 // The screen washed with a colour: S_Lighting (a flash, a dip to black before a cut).
 // Its texts on the screen: S_StaticCreateEx / S_StaticRelease (the dialogue's lines in the White Viper's scenes).
 // Its characters, its own and the player (*player, over where the game has it until S_End): S_Teleport, S_ObjectTurn,
@@ -256,21 +256,21 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
             // those kinds; ours' crowd are the players there, in their own gear: nothing to change.
         } else if (c.verb == "S_ObjectAniToIndex") {
             // <name> <blend> <speed> *ANI_...: a state of its own set (*ANI_DIE1, *ANI_ATTREADY, ...); *ANI_EMOTION01..
-            // the default set's animation 50 + n, as the emotes. Ours: at its own speed.
+            // the default set's animation 50 + n, as the emotes; at its speed (0.5 .. 2.0 in the scripts).
             std::string ani = arg(3);
             if (ani.starts_with('*')) ani.erase(0, 1);
             QuestSceneRun::Placed* placed = QuestScenePlaced(arg(0));
             if (placed != nullptr && ani.starts_with("ANI_EMOTION")) {
                 const auto emote = proto::kEmoteFirstState + std::uint32_t(std::max(0, std::atoi(ani.c_str() + 11) - 1));
-                PlayClip(*placed, "default", emote, c.time);
+                PlayClip(*placed, "default", emote, c.time, c.Number(2, 1.0f));
             } else if (const int state = assets::AnimationState(ani); placed != nullptr && state >= 0) {
-                PlayClip(*placed, std::string(), std::uint32_t(state), c.time);
+                PlayClip(*placed, std::string(), std::uint32_t(state), c.time, c.Number(2, 1.0f));
             }
         } else if (c.verb == "S_ObjectAniToName") {
             // <name> *SCR_ANI_BLEND | *SCR_ANI_NOBLEND <speed> <.ban>: that clip, looping or once as the clip is (the
-            // original asks the clip which; NOBLEND stops what plays first). Ours: at its own speed.
+            // original asks the clip which; NOBLEND stops what plays first), at its speed.
             if (QuestSceneRun::Placed* placed = QuestScenePlaced(arg(0)); placed != nullptr && !arg(3).empty()) {
-                PlayClip(*placed, std::string(WorldScreen::kClipFile) + arg(3), kSceneStand, c.time);
+                PlayClip(*placed, std::string(WorldScreen::kClipFile) + arg(3), kSceneStand, c.time, c.Number(2, 1.0f));
             }
         } else if (c.verb == "S_ObjectAniStopAll") {
             // Its clips stopped: it stands.
@@ -456,7 +456,8 @@ void PlayScreen::StepQuestScene(ScreenContext& context) {
     if (scene_.active && scene_.next >= scene_.commands.size() && t > scene_.commands.back().time + 5.0f) EndQuestScene();
 }
 
-void PlayScreen::PlayClip(QuestSceneRun::Placed& placed, std::string set, std::uint32_t state, float at) {
+void PlayScreen::PlayClip(QuestSceneRun::Placed& placed, std::string set, std::uint32_t state, float at, float speed) {
+    placed.look.speed = std::clamp(speed, 0.05f, 10.0f);
     placed.look.clipSet = std::move(set);
     placed.look.state = state;
     placed.look.take += 1;
@@ -522,12 +523,13 @@ void PlayScreen::PlaceQuestSceneActors(ScreenContext& context) {
         if (!placed.look.held && (placed.look.state != kSceneStand || !placed.look.clipSet.empty())) {
             bool loops = false;
             const double seconds = world_->StageClipSeconds(slot, placed.look.clipSet, placed.look.state, &loops);
-            const double ends = placed.clipFrom + seconds + (placed.look.clipSet.empty() ? 0.0 : 0.2);
+            const double ends = placed.clipFrom + seconds / double(std::max(0.05f, placed.look.speed)) + (placed.look.clipSet.empty() ? 0.0 : 0.2);
             if (seconds > 0.0 && !loops && placed.noIdle && t >= ends - 0.03) {
                 placed.look.held = true;
             } else if (seconds > 0.0 && !loops && !placed.noIdle && t > ends + 0.2) {
                 placed.look.clipSet.clear();
                 placed.look.state = kSceneStand;
+                placed.look.speed = 1.0f;
                 placed.look.take += 1;
             }
         }
