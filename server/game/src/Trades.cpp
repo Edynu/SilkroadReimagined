@@ -224,7 +224,7 @@ void Trades::Sell(std::uint32_t entity, std::uint32_t npc, std::uint8_t place, s
     CargoChanged(entity);
 }
 
-void Trades::CargoChanged(std::uint32_t owner) {
+void Trades::CargoChanged(std::uint32_t owner, bool tellOnly) {
     const auto t = host_.TradeTrader(owner);
     if (!t) return;
     const auto cart = host_.TradeCart(owner);
@@ -237,7 +237,7 @@ void Trades::CargoChanged(std::uint32_t owner) {
     }
     const game::JobRules& rules = host_.TradeRules();
     const auto stars = std::uint8_t(cart ? game::CargoStars(rules, goods, t->highestLevel, cart->codename) : 0);
-    if (goods > 0) host_.TradeCaravan(owner); // the bandits' caravan
+    if (goods > 0 && !tellOnly) host_.TradeCaravan(owner); // the bandits' caravan
     // Told with its rule (the deal window's scale of a count typed), whenever the goods aboard change.
     proto::TradeScale told;
     told.stars = stars;
@@ -246,6 +246,10 @@ void Trades::CargoChanged(std::uint32_t owner) {
     told.capacity = std::uint8_t(cart ? game::CartCapacity(game::CartClassOf(cart->codename)) : 0);
     told.threeStarCap = host_.TradeThreeStarCap() ? 1 : 0;
     told.scale.assign(rules.scale.begin(), rules.scale.begin() + 4);
+    if (tellOnly) {
+        host_.TradeSend(t->peer, proto::TradeScale::kId, proto::Encode(told));
+        return;
+    }
     const auto before = stars_.find(owner);
     const bool starsChanged = before == stars_.end() || before->second != stars;
     const auto last = goods_.find(owner);

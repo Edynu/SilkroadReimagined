@@ -3981,6 +3981,9 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void CosTransportGone(std::uint32_t owner) override {
         if (trades) trades->CargoChanged(owner); // its goods went with it: no stars
     }
+    void CosTransportSummoned(std::uint32_t owner) override {
+        if (trades) trades->CargoChanged(owner, true); // its scale's rule for the deal window, nothing else
+    }
     void CosTransportBack(std::uint32_t owner) override {
         if (trades) trades->CargoChanged(owner); // its goods count again: their stars, the bandits' caravan
     }
@@ -10636,6 +10639,17 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             });
         }
         if (worn) {
+            // A free-battle suit put on (3/1/7/5, the PvP cape): its wearer's growth pets sent away, as the 1.188 client's
+            // warning says (ours: the original's server leaves them out; the user's call 2026-11-27).
+            if (const game::ItemInstance* suit = player.inventory.At(game::slot::kJobSuit);
+                coses && suit != nullptr && std::find(r.touched.begin(), r.touched.end(), std::uint8_t(game::slot::kJobSuit)) != r.touched.end()) {
+                const assets::ItemRow* row = config.rules->items->Find(suit->refId);
+                if (row != nullptr && row->typeId == std::array<int, 4>{3, 1, 7, 5}) {
+                    if (const int sent = coses->DismissKind(player.entity, game::CosKind::AttackPet); sent > 0) {
+                        core::LogInfo("{}: {} wears a free-battle suit: {} growth pet(s) sent away", config.name, player.name, sent);
+                    }
+                }
+            }
             world->SetEquipment(player.entity, player.inventory.Worn());
             TellJob(&peer, player, true);
             UpdateStats(&peer, player);

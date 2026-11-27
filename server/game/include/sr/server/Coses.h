@@ -212,6 +212,8 @@ public:
     virtual void CosSellPay(std::uint32_t owner, std::uint64_t price) { (void)owner, (void)price; }
     // `owner`'s transport, kept in its row through his leaving, is out again (Entered): its goods count again.
     virtual void CosTransportBack(std::uint32_t owner) { (void)owner; }
+    // A transport summoned: its trade scale's rule told to its owner (the deal window's), nothing else.
+    virtual void CosTransportSummoned(std::uint32_t owner) { (void)owner; }
     // A transport killed: every slot of its bag dropped whole where it fell, its goods with no owner's mark.
     virtual void CosCargoDropped(std::uint32_t owner, const game::proto::WorldPosition& at, std::map<std::uint8_t, game::ItemInstance> bag) {
         (void)owner;
@@ -300,6 +302,8 @@ public:
     // ride and transport stay out (a teleport on this server: BringTransport). Its transport's row stays (it comes back at
     // the next entry); its ride's row stays only on a move to another game server (`moving`), else it is its end.
     void DismissAll(std::uint32_t owner, bool comesBack = false, bool keepTransport = false, bool moving = false);
+    // Every COS of `owner` of that kind sent away, as its owner's unsummon (its row Inactive); how many went.
+    int DismissKind(std::uint32_t owner, game::CosKind kind);
     // Its owner died: as the original's, only the COS it rides goes (its ride slot; a ridden transport too, its goods
     // not dropped); its pets and a transport it walks beside stay out.
     void OwnerDied(std::uint32_t owner);

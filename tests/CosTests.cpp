@@ -38,6 +38,7 @@ namespace proto = sr::game::proto;
 namespace {
 
 constexpr std::uint32_t kHorseScroll = 900101, kCartScroll = 900102, kTraderSuit = 900104, kHunterSuit = 900105;
+constexpr std::uint32_t kPvpCape = 900190; // a free-battle cape (3/1/7/5)
 constexpr std::uint32_t kHorse = 900201, kCart = 900202;
 constexpr std::uint32_t kFlute = 900106, kRabbitScroll = 900107, kWolf = 900203, kRabbit = 900204, kHerb = 900108;
 constexpr std::uint32_t kClock = 900109, kGrass = 900110; // a Clock of Reincarnation (28 days), a Grass of Life
@@ -113,6 +114,7 @@ struct CosServer {
         items->Add(Scroll(kCartScroll, "ITEM_COS_T_TEST_CART", "COS_T_TEST_CART"));
         items->Add(Suit(kTraderSuit, "ITEM_CH_M_TRADE_TRADER_TEST", 1));
         items->Add(Suit(kHunterSuit, "ITEM_CH_M_TRADE_HUNTER_TEST", 3));
+        items->Add(Suit(kPvpCape, "ITEM_CH_M_FRPVP_VOUCHER_TEST", 5));
         items->Add(PetItem(kFlute, "ITEM_COS_P_TEST_FLUTE", 1, "COS_P_TEST_WOLF_001"));
         items->Add(PetItem(kRabbitScroll, "ITEM_COS_P_TEST_RABBIT_SCROLL", 2, "COS_P_TEST_RABBIT", 40320));
         assets::ItemRow herb;
@@ -578,6 +580,21 @@ TEST_CASE("Game server: an attack pet fights a monster: its hits, the monster's 
     a.client->Send(proto::UseItem{PlaceOf(a.bag, flute->refObjId)});
     CHECK(Next<proto::CosRefused>(a).text == "UIIT_MSG_COSPETERR_CANT_USEITEM");
     s.game.Stop();
+}
+
+TEST_CASE("Game server: a free-battle cape put on sends its wearer's growth pets away (ours)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    CosServer s(t);
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    auto a = s.Make("Duelist", 1000, {PetStored(kFlute), Stored(kPvpCape, 1)}, 20);
+    a.client->Send(proto::UseItem{PlaceOf(a.bag, kFlute)});
+    const auto wolf = Next<proto::CosSummoned>(a);
+    REQUIRE(wolf.kind == std::uint8_t(game::CosKind::AttackPet));
+    // The cape on (3/1/7/5): the growth pet goes, as the 1.188 client's warning says (its server never sent it away).
+    a.client->Send(proto::ItemMove{PlaceOf(a.bag, kPvpCape), game::slot::kJobSuit, 0});
+    REQUIRE(Next<proto::ItemMoved>(a).status == proto::ItemStatus::Ok);
+    CHECK(Next<proto::CosDismissed>(a).entity == wolf.entity);
 }
 
 TEST_CASE("Game server: a ride summoned, ridden, left and sent away") {
@@ -1685,6 +1702,11 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     const auto cart = Next<proto::CosSummoned>(a);
     const auto empty = Next<proto::CosBag>(a);
     CHECK(empty.entity == cart.entity);
+    // Its trade scale's rule told at once (the deal window's scale): no goods, no stars.
+    const auto summonedScale = Next<proto::TradeScale>(a);
+    CHECK(summonedScale.stars == 0);
+    CHECK(summonedScale.goods == 0);
+    CHECK(summonedScale.unit > 0);
     // Its bag by its owner's level (the original's: int(40 / 40 x int(GoldMin(30) x 1.25) x 2448 / 11796) = 33), at most
     // its row's 40.
     CHECK(empty.size == 33);
@@ -2583,6 +2605,7 @@ TEST_CASE("Game server: the jobs' rest: safe trade, the logout in a suit, partie
     trader.client->Send(proto::UseItem{PlaceOf(trader.bag, kCartScroll)});
     const auto cart = Next<proto::CosSummoned>(trader);
     CHECK(Next<proto::CosBag>(trader).items.empty());
+    CHECK(Next<proto::TradeScale>(trader).stars == 0); // the rule told at the summon
     // Boarded when summoned: off it, on his own feet (a rider attacks nobody; his own attack is tried below).
     REQUIRE(Next<proto::CosRiding>(trader).riding);
     trader.client->Send(proto::CosRide{cart.entity, false});

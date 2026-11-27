@@ -216,7 +216,7 @@ Coses::Use Coses::UseItem(std::uint32_t owner, const assets::ItemRow& item, cons
     owned_[owner].push_back(entity);
     Send(owner, proto::CosSummoned{entity, c.model, std::uint8_t(kind), c.hp, c.maxHp, c.item});
     if (kind == game::CosKind::Transport && c.bagSize > 0) SendBag(c);
-    if (kind == game::CosKind::Transport) host_.CosTransportBack(owner); // its trade scale's rule told (the deal window's)
+    if (kind == game::CosKind::Transport) host_.CosTransportSummoned(owner); // its trade scale's rule told (the deal window's)
     core::LogInfo("cos: {} summons {} ({})", o->name, row->codename, entity);
     // Boarded at once, a ride and a transport alike (the user's account of the original, 2026-11-14); a transport is
     // left and boarded again through its Ride command.
@@ -1474,6 +1474,17 @@ void Coses::RestoreCart(std::uint32_t owner, const CosRow& row, Clock::time_poin
     // A ride is always ridden (getting off it is its end); a transport as it was.
     if (kind == game::CosKind::Ride || row.state == std::uint8_t(game::CosState::Active)) Ride(owner, entity, true, now);
     if (kind == game::CosKind::Transport) host_.CosTransportBack(owner); // its goods count again: their stars, the bandits' caravan
+}
+
+int Coses::DismissKind(std::uint32_t owner, game::CosKind kind) {
+    std::vector<std::uint32_t> going;
+    if (const auto it = owned_.find(owner); it != owned_.end()) {
+        for (const std::uint32_t entity : it->second) {
+            if (const auto c = coses_.find(entity); c != coses_.end() && c->second.kind == kind) going.push_back(entity);
+        }
+    }
+    for (const std::uint32_t entity : going) Dismiss(entity);
+    return int(going.size());
 }
 
 void Coses::DismissAll(std::uint32_t owner, bool comesBack, bool keepTransport, bool moving) {

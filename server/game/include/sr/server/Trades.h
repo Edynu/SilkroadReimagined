@@ -132,7 +132,8 @@ public:
     // A shop opened at `npc` (its entity): a specialty NPC's prices told, and again each 10 minutes while it stays near.
     void ShopOpened(std::uint32_t entity, std::uint32_t npc);
     // The trader's cargo changed by other means (its transport gone): its stars told again.
-    void CargoChanged(std::uint32_t owner);
+    // `tellOnly`: the scale and its rule told (a transport summoned: the deal window's), its stars' consequences left alone.
+    void CargoChanged(std::uint32_t owner, bool tellOnly = false);
     void Left(std::uint32_t entity);
     // A specialty NPC closed by a trader: bargain goods bought there and aboard lock further bargain purchases for 10
     // minutes from now (the original's timed job (7, 0) turned (7, 1) at the close).

@@ -3696,17 +3696,19 @@ void PlayScreen::HudRequests(ScreenContext& context) {
         case HudRequest::Kind::MoveItem:
             // The server decides and answers (ItemMoved); what others see follows (EquipmentChanged).
             if (!replay_) shared_->session->MoveItem({std::uint8_t(r.value), std::uint8_t(r.extra & 0xFF), std::uint16_t(r.extra >> 8)});
-            // A PvP suit (3/1/7) put on with a growth pet out and no grab pet: 1.188's equipment warns "When wearing PvP Suit,
-            // growth pets are automatically unsummoned." (CIFEquipment::vf_070; the piece still goes on).
+            // A PvP suit put on with a growth pet out: 1.188's equipment warns "When wearing PvP Suit, growth pets are
+            // automatically unsummoned." (CIFEquipment::vf_070: a line and the warning banner; the piece still goes on). Ours
+            // when our server sends the pets away (the free-battle suit 3/1/7/5, any grab pet aside; 1.188's server never does).
             if (const std::uint8_t to = std::uint8_t(r.extra & 0xFF); to < game::slot::kWorn && tables_ && tables_->Usable()) {
                 const game::ItemInstance* item = player_.inventory.At(std::uint8_t(r.value));
                 const assets::ItemRow* row = item != nullptr ? tables_->items.Find(item->refId) : nullptr;
                 const auto out = [&](game::CosKind kind) {
                     return std::any_of(ownCoses_.begin(), ownCoses_.end(), [&](const OwnCos& c) { return c.kind == std::uint8_t(kind); });
                 };
-                if (row != nullptr && row->typeId[0] == 3 && row->typeId[1] == 1 && row->typeId[2] == 7 && out(game::CosKind::AttackPet) &&
-                    !out(game::CosKind::GrabPet)) {
-                    player_.Post(game::GameMessage::Kind::General, gui_.data().Text("UIIT_MSG_COSPETERR_UNSUMMON_FREEBATTLE"), context.time);
+                if (row != nullptr && row->typeId == std::array<int, 4>{3, 1, 7, 5} && out(game::CosKind::AttackPet)) {
+                    const std::string line = gui_.data().Text("UIIT_MSG_COSPETERR_UNSUMMON_FREEBATTLE");
+                    player_.Post(game::GameMessage::Kind::General, line, context.time);
+                    player_.Notify(game::Banner::Kind::Warning, line, context.time);
                 }
             }
             break;
