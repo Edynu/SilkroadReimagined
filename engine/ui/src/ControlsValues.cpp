@@ -69,6 +69,11 @@ void ScrollBar::Created(Interface&) {
     if (auto* up = As<Button>(Child(0))) up->behaviour = Button::kRepeat;
     if (auto* down = As<Button>(Child(1))) down->behaviour = Button::kRepeat;
     if (auto* thumb = As<Button>(Child(2))) thumb->behaviour = Button::kDragNotify;
+    // The new interface's (CNIFVerticalScroll, a .2dt layout's): the chat window's arrows.
+    if (node().name == "CNIFVerticalScroll") {
+        if (auto* up = As<Button>(Child(0))) up->texture = "interface\\chattingwnd\\chat_arrow_up.ddj";
+        if (auto* down = As<Button>(Child(1))) down->texture = "interface\\chattingwnd\\chat_arrow_down.ddj";
+    }
     track = rect.h;
     SetRange(0, 100, 1);
 }

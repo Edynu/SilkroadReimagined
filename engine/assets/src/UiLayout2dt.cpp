@@ -98,8 +98,9 @@ UiLayoutNode Ui2dtNode(const Ui2dtRecord& c, float originX, float originY) {
         n.type = "CIFCheckBox";
         n.ddj = c.art;
         break;
-    case 13:
+    case 13: // the new interface's scroll bar (CNIFVerticalScroll): the classic one's parts, its own arrows
         n.type = "CIFVerticalScroll";
+        if (n.name.empty()) n.name = "CNIFVerticalScroll";
         break;
     default: // statics, texts, slots, rows: their art and text
         n.type = "CIFStatic";
