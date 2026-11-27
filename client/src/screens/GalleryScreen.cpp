@@ -896,8 +896,16 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 const std::string codes = context.config.GetString("bag-items", "");
                 for (std::size_t from = 0; from < codes.size();) {
                     const std::size_t comma = std::min(codes.find(',', from), codes.size());
-                    if (const assets::ItemRow* row = tables_->items.Find(std::string_view(codes).substr(from, comma - from))) {
-                        bag.items.push_back({next++, row->refObjId, 0, 0, game::NewDurability(*row), 1, {}});
+                    // CODE+awake / CODE+over: a Devil's Spirit awake for three days more / its awakening over.
+                    std::string_view code = std::string_view(codes).substr(from, comma - from);
+                    std::int64_t awake = 0;
+                    if (const std::size_t plus = code.find('+'); plus != std::string_view::npos) {
+                        const auto unix = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                        awake = code.substr(plus + 1) == "awake" ? unix + 3 * 86400 : unix - 60;
+                        code = code.substr(0, plus);
+                    }
+                    if (const assets::ItemRow* row = tables_->items.Find(code)) {
+                        bag.items.push_back({next++, row->refObjId, 0, 0, awake != 0 ? std::uint32_t(awake) : game::NewDurability(*row), 1, {}});
                     }
                     from = comma + 1;
                 }

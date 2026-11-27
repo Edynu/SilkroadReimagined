@@ -8,6 +8,7 @@
 
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
+#include "sr/game/TimedServices.h"
 #include "sr/game/MagicPop.h"
 #include "sr/game/Mall.h"
 #include "sr/game/Alchemy.h"
@@ -139,6 +140,7 @@ void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& 
         slot.usable = true;
         slot.rare = false;
         slot.petOut = false;
+        slot.spiritAwake = false;
         slot.veil = 0;
         return;
     }
@@ -147,7 +149,14 @@ void ShowItem(ui::Slot& slot, const game::ItemInstance* item, const HudContext& 
     // A pet's item whose pet is out: its edge runs (CosPetItems); whose pet is dead (an attack pet killed, a grab
     // pet's rental over: state 4) the blue veil (0x80004B7E).
     slot.petOut = false;
+    slot.spiritAwake = false;
     slot.veil = 0;
+    // A Devil's Spirit: awake (time left), its edge runs; its awakening over, the blue veil (1.188's slot, 0x80004B7E).
+    if (game::IsDevilSpirit(*row) && item->durability > 1'000'000'000u) {
+        const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        slot.spiritAwake = game::DevilSpiritAwake(item->durability, now);
+        if (!slot.spiritAwake) slot.veil = ui::Argb(0x80004B7E);
+    }
     if (game::IsCosSummoner(*row) && item->durability != 0) {
         const auto pet = context.petItems.find(std::int64_t(item->durability));
         slot.petOut = pet != context.petItems.end() && pet->second.state == std::uint8_t(game::CosState::Summoned);

@@ -82,6 +82,12 @@ void Slot::Draw(Frame& frame) {
         const Vec2 uv0{float(f % 8) / 8.0f, float(f / 8) / 4.0f};
         frame.paint.Image("icon\\item\\etc\\icon_edge_rare.ddj", r, uv0, {uv0.x + 0.125f, uv0.y + 0.25f}, WithAlpha(kWhite, opacity));
     }
+    if (spiritAwake) {
+        // An awakened Devil's Spirit (1.188's slot, its time left above 0): a strip of sixteen 32-pixel frames (512
+        // wide) on the slot's frame counter (ours: 40 ms a frame, as the rare sparkle's).
+        const int f = int(frame.time * 25.0) % 16;
+        frame.paint.Image("icon\\item\\etc\\icon_edge_nasrun.ddj", r, {float(f) / 16.0f, 0.0f}, {float(f + 1) / 16.0f, 1.0f}, WithAlpha(kWhite, opacity));
+    }
     if (petOut) {
         // Its pet out: a strip of nine 32-pixel frames (288 wide), 50 ms each, looping (1.188: the slot's timer 4,
         // drawn from its frame counter 9..1).
