@@ -989,6 +989,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         }
     } else if (const auto* used = std::get_if<proto::ItemUsed>(&event)) {
         ItemUseEffect(used->entity, used->item);
+        if (used->entity == view_.Self()) OwnItemUsed(used->item);
         ++itemEffectsSeen_;
     } else if (const auto* mall = std::get_if<proto::MallEvent>(&event)) {
         // Magic POP's answers and the shard's announce (HudMagicPop.cpp).

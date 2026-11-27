@@ -167,6 +167,8 @@ void PlayScreen::HandleInstance(ScreenContext& context, const proto::InstanceEve
         for (const auto& entry : b->entries) book_.insert(entry.theme << 8 | entry.slot);
     } else if (const auto* t = std::get_if<proto::TalismanRegistered>(&event)) {
         if (t->ok) {
+            // The original's item use answer for a talisman (12 / 5): eventcomplete1.wav at the player.
+            if (hudContext_.playAtPlayer && !replay_) hudContext_.playAtPlayer("prim\\snd\\ui\\eventcomplete1.wav");
             book_.insert(t->theme << 8 | t->slot);
             ShowTalismanRegistered(hudContext_, t->theme, t->slot); // the book shown, the slot's flip-book
         }

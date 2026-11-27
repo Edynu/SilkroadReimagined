@@ -75,6 +75,19 @@ bool PlayScreen::UseMallItem(std::uint8_t place) {
     return true;
 }
 
+// The original's item use answer on a success, by the item's kind: the guild recall scroll (12 / 3) "Recall has been
+// requested to all guild members." in a confirmation box; a hole (12 / 7) gacha_change_2.wav at the player.
+void PlayScreen::OwnItemUsed(std::uint32_t item) {
+    if (!tables_ || !tables_->Usable() || replay_) return;
+    const assets::ItemRow* row = tables_->items.Find(item);
+    if (row == nullptr || row->typeId[0] != 3 || row->typeId[1] != 3 || row->typeId[2] != 12) return;
+    if (row->typeId[3] == 3) {
+        hud_.Inform("UIIT_STT_CONFIRM_BOX", {gui_.data().Text("UIIT_MSG_GUILD_RECALL_CONFIRM")}, nullptr);
+    } else if (row->typeId[3] == 7 && hudContext_.playAtPlayer) {
+        hudContext_.playAtPlayer("prim\\snd\\ui\\gacha_change_2.wav");
+    }
+}
+
 bool PlayScreen::PremiumCommand(const std::string& line) {
     if (!tables_ || !tables_->Usable()) return false;
     const UiData& d = gui_.data();

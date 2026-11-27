@@ -194,6 +194,11 @@ public:
     // The item in a bag place (its RefObjID; 0: none) and one of it taken (false: not there).
     virtual std::uint32_t InstanceItemAt(std::uint32_t entity, std::uint8_t slot) = 0;
     virtual bool InstanceTakeOne(std::uint32_t entity, std::uint8_t slot) = 0;
+    // An item's use gone through (a hole's gate made): told to those around and the user, as every use is (ItemUsed).
+    virtual void InstanceItemUsed(std::uint32_t entity, std::uint32_t item) {
+        (void)entity;
+        (void)item;
+    }
     virtual void InstanceSaveEntry(std::int64_t character, const InstanceEntry& entry) = 0;
     virtual void InstanceSaveBook(std::int64_t character, const BookEntry& entry) = 0;
     virtual void InstanceSaveWait(std::int64_t character, const ItemWait& wait) = 0;

@@ -657,7 +657,9 @@ struct Instances::State {
             return;
         }
         if (host.InstanceItemAt(entity, slot) != hole.item || !host.InstanceTakeOne(entity, slot)) return;
-        if (Open(*spec, hole, *p, entity, place->position, place->yaw, Clock::now()) != nullptr && hole.waitGroup != 0 && hole.waitMs != 0) {
+        const Instance* opened = Open(*spec, hole, *p, entity, place->position, place->yaw, Clock::now());
+        if (opened != nullptr) host.InstanceItemUsed(entity, hole.item);
+        if (opened != nullptr && hole.waitGroup != 0 && hole.waitMs != 0) {
             me->second.waits[hole.waitGroup] = now;
             host.InstanceSaveWait(me->second.character, {hole.waitGroup, now});
             Send(entity, proto::Cooldown{proto::CooldownKind::Item, hole.item, hole.waitMs});

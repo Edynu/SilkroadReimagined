@@ -879,6 +879,8 @@ private:
     // The item mall's items (PlayMallItems.cpp): the uses that ask first or need a target (true:
     // one of them), the premium's chat commands, the services' answers.
     bool UseMallItem(std::uint8_t place);
+    // The player's own use gone through (ItemUsed): what the original's item use answer does by its kind.
+    void OwnItemUsed(std::uint32_t item);
     bool PremiumCommand(const std::string& line);
     // The premium package's entry (its item) used: the chat's commands and the composite window's buttons.
     void UsePremium(std::uint32_t item);

@@ -5717,6 +5717,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const game::ItemInstance* item = p != nullptr && slot >= game::slot::kWorn ? p->inventory.At(slot) : nullptr;
         return item != nullptr ? item->refId : 0;
     }
+    void InstanceItemUsed(std::uint32_t entity, std::uint32_t item) override { Broadcast(entity, proto::ItemUsed{entity, item}); }
     bool InstanceTakeOne(std::uint32_t entity, std::uint8_t slot) override {
         PlayerWorld* p = PlayerByEntity(entity);
         Peer* peer = peers->Find(world->PeerOf(entity));
