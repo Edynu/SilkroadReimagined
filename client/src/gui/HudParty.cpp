@@ -987,6 +987,8 @@ private:
     HudContext& context_;
 };
 
+} // namespace
+
 // A simple box made to the size of one of the original's kinds (centred again): its text hidden (the kind's own lines are
 // placed), the frame's pieces and background tile reaching the right or the bottom edge following it, the close button
 // with the right edge, Yes and No at their places.
@@ -1023,7 +1025,6 @@ void PutLine(ui::Interface& ui, ConfirmBox& box, const std::string& text, float 
     if (ui::Widget* line = box.Add(ui.Make(n))) line->SetText(text);
 }
 
-} // namespace
 
 ConfirmBox* OpenPartyInviteBox(HudContext& c, const std::string& from, std::uint8_t settings, std::function<void(bool yes)> answer) {
     if (c.hud == nullptr || c.hud->interface() == nullptr) return nullptr;

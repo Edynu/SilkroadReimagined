@@ -525,6 +525,11 @@ bool ChooseSkin(HudContext& context, bool male, int figure, int height, int volu
 // The open confirmation box made taller by `extra` (its text and the buttons below; HudGuild.cpp).
 void GrowConfirm(ui::Interface& ui, float extra);
 void GrowConfirm(ConfirmBox& box, float extra);
+// A simple box shaped as one of the original's kinds (HudParty.cpp): its size (centred again), its text hidden, the frame,
+// background and close button following the edges, Yes and No placed; and a line added to it (`ddj` a picture behind it,
+// a black box; `align` 0 left, 1 centre, 2 right).
+void ShapeBox(ConfirmBox& box, float width, float height, float yesX, float noX, float buttonsY);
+void PutLine(ui::Interface& ui, ConfirmBox& box, const std::string& text, float x, float y, float w, float h, const char* ddj, int align);
 // The emblem item's boxes (the original's message box kinds 0x15 / 0x18 the question, 0x1A / 0x1B the success, one
 // Confirm button): the guild's or the union's lines.
 ConfirmBox* OpenCrestBox(HudContext& c, bool ofGuild, bool complete, std::function<void(bool yes)> answer);

@@ -643,14 +643,19 @@ std::uint64_t RepairAllPrice(const HudContext& c) {
 void AskRepairAll(HudContext& c, std::uint32_t npc) {
     if (c.hud == nullptr) return;
     HudContext* ctx = &c;
-    // The original's box 0x0C: "Repair All" on the name strip, the question, the price (ours: a line; the original's in a
-    // black box beside "Gold").
-    if (ConfirmBox* box = c.hud->Confirm("UIIT_STT_AGREEMENT_BOX", {c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM"), std::format("{} : {}", c.Text("UIIT_STT_GOLD"), RepairAllPrice(c))},
-                                         [ctx, npc](bool yes) {
-                                             if (yes) Send(*ctx, proto::Repair{npc, 2, 0});
-                                         })) {
-        box->Header("UIIT_CTL_REPAIR_ALL");
-    }
+    // The original's box 0x0C: 400 x 210, "Repair All" on the name strip (msgbox_skillname.ddj, 212 x 26) at 94, 46, the
+    // question centred at y 100, the price on the right of msgbox_blackbox_04.ddj (124 x 24) at 149, 124 with "Gold" at
+    // 278, 131, the buttons at 123, 168 and 203, 168.
+    ConfirmBox* box = c.hud->Confirm("UIIT_STT_AGREEMENT_BOX", {}, [ctx, npc](bool yes) {
+        if (yes) Send(*ctx, proto::Repair{npc, 2, 0});
+    });
+    ui::Interface* ui = c.hud->interface();
+    if (box == nullptr || ui == nullptr) return;
+    ShapeBox(*box, 400.0f, 210.0f, 123.0f, 203.0f, 168.0f);
+    PutLine(*ui, *box, c.Text("UIIT_CTL_REPAIR_ALL"), 94.0f, 46.0f, 212.0f, 26.0f, "interface\\messagebox\\msgbox_skillname.ddj", 1);
+    PutLine(*ui, *box, c.Text("UIIT_MSG_MSGBOX_REPAIR_ITEM"), 0.0f, 94.0f, 400.0f, 16.0f, nullptr, 1);
+    PutLine(*ui, *box, GoldText(RepairAllPrice(c)) + " ", 149.0f, 124.0f, 124.0f, 24.0f, "interface\\messagebox\\msgbox_blackbox_04.ddj", 2);
+    PutLine(*ui, *box, c.Text("UIIT_STT_GOLD"), 278.0f, 127.0f, 40.0f, 16.0f, nullptr, 0);
 }
 
 bool CubeDrop(HudContext& c, int from, int to) {
