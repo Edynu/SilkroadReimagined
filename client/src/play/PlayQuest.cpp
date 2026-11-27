@@ -61,6 +61,12 @@ void PlayScreen::HandleQuest(ScreenContext& context, const proto::QuestEvent& ev
         const std::uint32_t quest = ask->quest;
         const auto answer = [this, quest](bool yes) {
             questEnterBox_ = nullptr;
+            // Yes while dead: 1.188's box (on_252, a quest instance's kind 4) says "A teleport cannot be carried out when
+            // you are dead." on the warning banner and sends nothing (the server's wait ends it as a no).
+            if (yes && player_.self.hp == 0) {
+                player_.Notify(game::Banner::Kind::Warning, gui_.data().Text("UIIT_MSG_QUEST_INS_DEATH"), lastTime_);
+                return;
+            }
             core::LogInfo("game: quest {}: its instance's entry answered {}", quest, yes ? "yes" : "no");
             if (!replay_ && shared_ && shared_->session) {
                 shared_->session->SendGame(proto::QuestEnterReply::kId, proto::Encode(proto::QuestEnterReply{quest, std::uint8_t(yes ? 1 : 0)}));
