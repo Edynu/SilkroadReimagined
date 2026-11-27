@@ -108,6 +108,9 @@ void Slot::Draw(Frame& frame) {
         const int s = int(std::ceil(seconds));
         const int shown = s <= 60 ? s : s <= 3600 ? (s + 59) / 60 : (s + 3599) / 3600;
         const Color colour = s <= 60 ? kWhite : s <= 3600 ? Argb(0xFFE1E700) : Argb(0xFF000CA9);
+        // Under the digits the original's tint over the slot: effect\icon\icon_effect (dark blue) up to an hour, int_effect
+        // (white) beyond.
+        frame.paint.Image(s <= 3600 ? "effect\\icon\\icon_effect.ddj" : "effect\\icon\\int_effect.ddj", r, {0, 0}, {1, 1}, WithAlpha(kWhite, opacity));
         const std::string digits = std::to_string(shown);
         float x = r.x + r.w / 2.0f - 4.0f * float(digits.size());
         for (const char d : digits) {
