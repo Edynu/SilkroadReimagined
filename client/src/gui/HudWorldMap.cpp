@@ -298,6 +298,11 @@ void WorldMapWindow::Created(ui::Interface& ui) {
 
 void WorldMapWindow::Update(ui::Frame& frame) {
     MainFrame::Update(frame);
+    // The pin's help: "Auto Move State" while the map follows the player, else "Manual Move State" (1.188's world map,
+    // its switch's two texts).
+    if (ui::Widget* pin = Child(kPinButton); pin != nullptr && frame.pointer.hovered == pin) {
+        frame.interface.ShowTooltip(c_.Text(following_ ? "UIIT_STT_WORLDMAP_AUTO_MOVE" : "UIIT_STT_WORLDMAP_MANUAL_MOVE"), pin->ScreenRect());
+    }
     if (c_.worldMap == nullptr) return;
     const game::WorldView::Entity* self = Self(c_);
     if (!view_.Shown()) {
