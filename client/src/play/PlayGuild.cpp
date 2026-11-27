@@ -480,6 +480,21 @@ void PlayScreen::GuildScript(ScreenContext& context) {
             gateTo_ = to;
             gateTries_ = 20;
         }
+    } else if (verb == "place-item") {
+        // place-item:CODENAME: the bag's first fortress item of it placed by a ground click 10 beside the player (its 5 s
+        // gauge, its questions; then "yes" for a guard or a tablet), as a pick from the bag would.
+        const game::WorldView::Entity* self = view_.Find(view_.Self());
+        bool picked = false;
+        for (const auto& [place, item] : player_.inventory.places) {
+            const assets::ItemRow* row = tables_ && tables_->Usable() ? tables_->items.Find(item.refId) : nullptr;
+            if (row == nullptr || row->codename != arg || place < game::slot::kWorn || self == nullptr) continue;
+            fortressPick_ = place;
+            proto::WorldPosition at = self->position;
+            at.x += 10.0f;
+            picked = FortressPicked(at);
+            break;
+        }
+        if (!picked) core::LogWarning("game: --guild {}: no {} placed", step, arg);
     } else if (verb == "dev-learn") {
         // dev-learn:MASTERY,LEVEL: a developer's mastery and its board (the skill lab's DevLearn; SroGame --dev-commands).
         unsigned mastery = 0, level = 0;
