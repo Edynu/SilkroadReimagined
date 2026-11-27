@@ -11,6 +11,7 @@
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/assets/UiLayout2dt.h"
+#include "sr/game/Academy.h"
 #include "sr/game/Guild.h"
 
 namespace sr::client {
@@ -48,13 +49,13 @@ public:
         auto* title = ui::As<ui::Edit>(Child(kTitle));
         auto* body = ui::As<ui::Edit>(Child(kBody));
         if (title != nullptr) {
-            title->limit = kTitleMost;
+            title->limit = academy ? int(game::academy::kNoticeTitleMax) : int(kTitleMost); // the academy's 1..128, 1..2048 (its server's)
             title->SetValue(noticeTitle);
             if (ui_ != nullptr) ui_->Focus(title);
         }
         if (body != nullptr) {
             body->multiline = true;
-            body->limit = kBodyMost;
+            body->limit = academy ? int(game::academy::kNoticeTextMax) : int(kBodyMost);
             body->SetValue(notice);
         }
     }
@@ -65,7 +66,7 @@ public:
         const auto* body = ui::As<ui::Edit>(Child(kBody));
         ui::Widget* counter = Child(kCounter);
         if (body == nullptr || counter == nullptr || !c_.text) return;
-        const std::string text = FormatText(c_.text("UIIT_MSG_GUILD_COMMON_KNOW_REMIND"), {std::to_string(game::Utf8Length(body->text())), std::to_string(kBodyMost)});
+        const std::string text = FormatText(c_.text("UIIT_MSG_GUILD_COMMON_KNOW_REMIND"), {std::to_string(game::Utf8Length(body->text())), std::to_string(body->limit)});
         if (counter->text() != text) counter->SetText(text);
     }
 

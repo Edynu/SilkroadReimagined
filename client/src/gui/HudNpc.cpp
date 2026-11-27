@@ -708,12 +708,14 @@ void NpcWindow::ShowDestinations() {
     if (from == nullptr) return;
     // Every place the point leads to with its fee, then the end of the talk:
     // "Teleport to [Donwhang]area. [5,000]gold", or without the fee when it is free.
+    // Free for one whose highest level is 20 or less (the server's rule: the window says what it will take).
+    const bool young = context_.state != nullptr && std::max(context_.state->self.level, context_.state->self.highestLevel) <= 20;
     for (const assets::TeleportLink* link : context_.teleports->LinksFrom(from->id)) {
         const assets::TeleportPoint* to = context_.teleports->Point(link->to);
         if (to == nullptr) continue;
         const std::string place = context_.Text(to->nameKey);
         // The fare with the gate's fortress tax; a free one untaxed.
-        const std::string text = link->fee > 0 ? FormatText(context_.Text("UIIT_CTL_TELEPORT_RESULT"), {place, GoldText(context_.TaxedBuy(link->fee))})
+        const std::string text = link->fee > 0 && !young ?FormatText(context_.Text("UIIT_CTL_TELEPORT_RESULT"), {place, GoldText(context_.TaxedBuy(link->fee))})
                                                : FormatText(context_.Text("UIIT_CTL_TELEPORT_FREE_RESULT"), {place});
         AddChoice(text, {Choice::Kind::Destination, link->to});
     }

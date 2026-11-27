@@ -260,7 +260,8 @@ public:
         }
         if (n.control == kOwnerMsg && mine) {
             HudContext* c = &c_;
-            AskGuildText(c_, c_.Text("UIIT_STT_STALL"), proto::kStallGreetingLength, [c](std::string text) {
+            // The greeting's 64 (the original's bytes; ours characters, the server checks the bytes).
+            AskGuildText(c_, c_.Text("UIIT_STT_STALL"), proto::kStallGreetingMost, [c](std::string text) {
                 if (c->stallRequest) c->stallRequest(proto::StallSetText::kId, proto::Encode(proto::StallSetText{1, std::move(text)}));
             }, v->Greeting());
             return true;
