@@ -1229,6 +1229,13 @@ TEST_CASE("Game server: EASTEU_21's key takes its master's party into Cerberus's
             if (b.client->Expect(st, 3ms)) (st.world == 11 ? bIn : bOut) = true;
             proto::InstanceNotice n;
             if (a.client->Expect(n, 3ms)) notices.push_back(n.text);
+            // The lines Cerberus speaks himself (chat kind 13 since 14f1ea7, the original's), with the notices.
+            proto::ChatLine said;
+            if (a.client->Expect(said, 3ms) && said.kind == proto::ChatKind::Speech) notices.push_back(said.text);
+            // Each member asked before being taken in (673a461, the original's invitation): yes.
+            proto::QuestEnterAsk asked;
+            if (a.client->Expect(asked, 3ms)) a.client->Send(proto::QuestEnterReply{asked.quest, 1});
+            if (b.client->Expect(asked, 3ms)) b.client->Send(proto::QuestEnterReply{asked.quest, 1});
         }
         return until();
     };

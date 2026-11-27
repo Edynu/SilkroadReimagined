@@ -2867,6 +2867,7 @@ TEST_CASE("Game server: a pet's charm (/charm): its greeting gesture to those ar
     auto a = s.Make("Charmer", 1000, {PetStored(kFlute)});
     a.client->Send(proto::UseItem{PlaceOf(a.bag, kFlute)});
     const auto wolf = Next<proto::CosSummoned>(a);
+    for (int i = 0; i < 100; ++i) s.game.Poll(2ms); // in its owner's view (the gesture goes to those who see it)
     a.client->Send(proto::CosCommand{wolf.entity, proto::CosOrder::Charm, 0});
     const auto emote = Next<proto::EntityEmote>(a);
     CHECK(emote.entity == wolf.entity);
