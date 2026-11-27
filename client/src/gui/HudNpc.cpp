@@ -1318,7 +1318,7 @@ void ConfirmBox::Header(const std::string& key) {
     assets::UiLayoutNode strip;
     strip.type = "CIFStatic";
     strip.name = "GDR_MSGBOX_NAME";
-    strip.ddj = "interface\messagebox\msgbox_skillname.ddj";
+    strip.ddj = "interface\\messagebox\\msgbox_skillname.ddj";
     strip.text = key;
     strip.hAlign = 1;
     strip.vAlign = 1;

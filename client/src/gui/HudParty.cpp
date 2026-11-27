@@ -1078,7 +1078,7 @@ void OpenPartyMatchRegister(ui::Interface& ui, HudContext& context, bool modify)
 
 void OpenAcademyMatchRegister(ui::Interface& ui, HudContext& context, bool modify) {
     if (auto* open = FindWindow<PartyMatchRegisterBox>(ui)) ui.Close(open);
-    const assets::UiLayoutNode* node = NodeIn(ui, "resinfo\ifmentormatch.txt", "MentoRegister", 105);
+    const assets::UiLayoutNode* node = NodeIn(ui, "resinfo\\ifmentormatch.txt", "MentoRegister", 105);
     if (node == nullptr) return;
     auto* box = dynamic_cast<PartyMatchRegisterBox*>(ui.Open(*node));
     if (box == nullptr) return;
@@ -1092,7 +1092,7 @@ void SyncAcademyProgress(ui::Interface& ui, HudContext& context) {
     const bool joining = context.state->academy.joining;
     PartyJoinProgressBox* progress = FindWindow<PartyJoinProgressBox>(ui);
     if (joining && progress == nullptr) {
-        if (const assets::UiLayoutNode* node = NodeIn(ui, "resinfo\ifmentormatch.txt", "JoinProgress", 200)) {
+        if (const assets::UiLayoutNode* node = NodeIn(ui, "resinfo\\ifmentormatch.txt", "JoinProgress", 200)) {
             if (ui::Widget* w = ui.Open(*node)) ui.Centre(*w, ui.screen());
         }
     } else if (!joining && progress != nullptr && context.state->party.joining == 0) {
