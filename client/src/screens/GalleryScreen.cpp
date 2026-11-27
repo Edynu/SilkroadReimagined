@@ -747,6 +747,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 }
             }
             if (page_ == "rebirth") hud_.Rebirth(20, [](int) {});
+            if (page_ == "options") hud_.OpenOptions(); // the Option window (--mouse over a video row: its description)
             if (page_ == "academy-join") OpenAcademyJoinBox(hudContext_, "Ann", 32, 35, 1, [](bool) {}); // a guardian asked (box kind 0x0E)
             if (page_ == "repair-all") AskRepairAll(hudContext_, 0); // the smith's Repair All box (its name strip)
             // the emblem item's boxes: crest-box[:union] the question, crest-done[:union] the success.

@@ -348,6 +348,14 @@ void OptionWindow::BuildGame(ui::Interface& ui) {
             if (box != nullptr) gameBoxes_.push_back({box, i});
             list.rows.push_back(slot);
         }
+        // The beginner mark's row (the original's Game page, "Beginner's Mark"; its row -1 here: the option's own field).
+        if (group == 0) {
+            ui::Widget* slot = MakeNode(ui, *list.manager, "CIFStatic", 300 + count, {6.0f + 160.0f * float(list.rows.size() % 2), 0.0f, 160.0f, 28.0f});
+            MakeNode(ui, *slot, "CIFStatic", 1, {14.0f, 8.0f, 112.0f, 16.0f})->SetText(context_.Text("UIIT_STT_FIRSTSTEP_MARK_SIGN"));
+            auto* box = ui::As<ui::CheckBox>(MakeNode(ui, *slot, "CIFCheckBox", 11, {130.0f, 6.0f, 16.0f, 16.0f}, "interface\\ifcommon\\com_checkbutton_off.ddj"));
+            if (box != nullptr) gameBoxes_.push_back({box, -1});
+            list.rows.push_back(slot);
+        }
     }
 }
 
@@ -516,7 +524,7 @@ void OptionWindow::Fill() {
     }
     int count = 0;
     const core::GameOptions::Row* rows = core::GameOptions::Rows(count);
-    for (auto& [box, row] : gameBoxes_) box->checked = draft_.game.Get(rows[row].key);
+    for (auto& [box, row] : gameBoxes_) box->checked = row < 0 ? draft_.game.beginnerMark : draft_.game.Get(rows[row].key);
     // Online: a bar's far end is everything the server's share allows (kept as 0, so a server that
     // raises its shares raises the view too); below it, the count asked for.
     const int asked[2] = {draft_.online.players, draft_.online.monsters};
@@ -598,6 +606,33 @@ void OptionWindow::Update(ui::Frame& frame) {
     // The movement as the Beta page's radio shows it.
     if (betaMovement_ != nullptr) draft_.beta.movement = core::BetaOptions::Movement(std::clamp(betaMovement_->selected, 0, 1));
     if (betaNames_ != nullptr) draft_.beta.namesFar = betaNames_->selected == 1;
+    // The video page's descriptions under the mouse (the original's UIIT_STT_VIDIO_TTDESC_01..17): the resolution, the
+    // brightness, each of the original's rows (by its slot; ours have none).
+    if (page_ == 0) {
+        static constexpr const char* kDescriptions[16] = {
+            "UIIT_STT_VIDIO_TTDESC_03", "UIIT_STT_VIDIO_TTDESC_04", "UIIT_STT_VIDIO_TTDESC_05", "UIIT_STT_VIDIO_TTDESC_06",
+            "UIIT_STT_VIDIO_TTDESC_07", "UIIT_STT_VIDIO_TTDESC_08", "UIIT_STT_VIDIO_TTDESC_09", "UIIT_STT_VIDIO_TTDESC_10",
+            "UIIT_STT_VIDIO_TTDESC_15", "UIIT_STT_VIDIO_TTDESC_11", "UIIT_STT_VIDIO_TTDESC_12", "UIIT_STT_VIDIO_TTDESC_13",
+            "UIIT_STT_VIDIO_TTDESC_14", "UIIT_STT_VIDIO_TTDESC_16", nullptr, "UIIT_STT_VIDIO_TTDESC_17"};
+        const auto over = [&](const ui::Widget* w) { return w != nullptr && w->ShownOnScreen() && Inside(w->ScreenRect(), frame.pointer.position); };
+        const char* tip = nullptr;
+        ui::Rect at{};
+        if (ui::Widget* page = Child(10)) {
+            for (const auto& [id, key] : {std::pair{11, "UIIT_STT_VIDIO_TTDESC_01"}, std::pair{13, "UIIT_STT_VIDIO_TTDESC_02"}}) {
+                if (ui::Widget* w = page->Child(id); over(w)) {
+                    tip = key;
+                    at = w->ScreenRect();
+                }
+            }
+        }
+        for (const Row& r : videoRows_) {
+            if (r.slot >= 0 && r.slot < 16 && kDescriptions[r.slot] != nullptr && over(r.box) && !(videoList_.manager != nullptr && !over(videoList_.manager))) {
+                tip = kDescriptions[r.slot];
+                at = r.box->ScreenRect();
+            }
+        }
+        if (tip != nullptr) frame.interface.ShowTooltip(context_.Text(tip), at);
+    }
     // A key slot clicked waits for a key.
     if (page_ == 3 && frame.input.Released(ui::MouseButton::Left)) {
         for (std::size_t i = 0; i < keySlots_.size(); ++i) {
@@ -752,6 +787,10 @@ bool OptionWindow::OnNotice(const ui::Notice& notice) {
         const core::GameOptions::Row* rows = core::GameOptions::Rows(count);
         for (auto& [box, row] : gameBoxes_) {
             if (notice.source == box) {
+                if (row < 0) {
+                    draft_.game.beginnerMark = box->checked;
+                    return true;
+                }
                 draft_.game.Set(rows[row].key, box->checked);
                 Fill(); // a pair's other box (the camera's two methods) follows
                 return true;
