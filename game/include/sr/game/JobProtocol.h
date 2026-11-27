@@ -238,12 +238,23 @@ struct TradePrices {
 };
 
 // The trader's trade scale (the original's 0x30E8 {u8 stars}): 0 without goods, 1..5; told whenever the cargo changes.
+// Ours also its rule, for the deal window's scale of a count typed (1.188's client works it out from its own tables):
+// the goods aboard, the trader's gold unit (game::JobRules::GoldUnit), the transport's capacity, the scale's first four
+// bounds and the shard's three-star cap.
 struct TradeScale {
     static constexpr MessageId kId = 0x1347;
     std::uint8_t stars = 0;
+    std::uint32_t goods = 0, unit = 0;
+    std::uint8_t capacity = 0, threeStarCap = 0;
+    std::vector<std::uint32_t> scale;
     template <typename V>
     void Visit(V& v) {
         v("stars", stars);
+        v("goods", goods);
+        v("unit", unit);
+        v("capacity", capacity);
+        v("threeStarCap", threeStarCap);
+        v("scale", scale, 5);
     }
 };
 

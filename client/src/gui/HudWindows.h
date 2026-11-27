@@ -148,6 +148,7 @@ struct HudContext {
     // (specialnpcdata.txt's NPCs) and the price board's last answer.
     std::function<void(game::proto::MessageId id, std::vector<std::byte> payload)> tradeRequest;
     std::uint8_t tradeStars = 0;
+    game::proto::TradeScale tradeScale; // the last told, with its rule (the deal window's scale of a count typed)
     std::uint32_t tradeNpc = 0;
     bool tradeStolenBuyer = false;
     std::map<std::uint32_t, std::uint32_t> tradePrices;

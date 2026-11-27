@@ -165,6 +165,7 @@ public:
 
 private:
     std::unordered_map<std::uint32_t, std::uint8_t> stars_;                   // a trader -> its stars last told
+    std::unordered_map<std::uint32_t, std::uint32_t> goods_;                  // a trader -> its goods last told
     std::unordered_map<std::uint32_t, Clock::time_point> bargainLock_;        // a trader -> no bargain goods until then
     std::unordered_set<std::uint32_t> bargainBought_;                          // traders who bought bargain goods this visit
     Clock::time_point nextRecovery_{};

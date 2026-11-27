@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <string>
 #include <vector>
@@ -154,9 +155,13 @@ int CartCapacity(int classByte);
 // The trade's value: goods x 348 / GoldUnit(level) / (40 / capacity),
 // the level the trader's highest held to [20, 140]; a value in (0, 1) is 1, none without goods.
 std::uint32_t TradeValue(const JobRules& rules, std::uint64_t goods, int level, int capacity);
+// The same with the level's unit given (the client's, from TradeScale).
+std::uint32_t TradeValueByUnit(std::uint64_t goods, std::uint64_t unit, int capacity);
 // Its stars: 0 without goods; the first n of 1..4 the value is within
 // TRADESCALEn_AMOUNT_MAX, else 5.
 int TradeStars(const JobRules& rules, std::uint32_t value);
+// The same over the scale's bounds given (the first four of TRADESCALEn_AMOUNT_MAX).
+int TradeStarsBy(std::span<const std::uint32_t> scale, std::uint32_t value);
 
 // --- The bandits ---------------------------------------------------------------------------
 

@@ -235,13 +235,25 @@ void Trades::CargoChanged(std::uint32_t owner) {
             if (const assets::ItemRow* row = items->Find(item.refId); row != nullptr && game::IsSpecialtyGood(*row)) goods += item.count;
         }
     }
-    const auto stars = std::uint8_t(cart ? game::CargoStars(host_.TradeRules(), goods, t->highestLevel, cart->codename) : 0);
+    const game::JobRules& rules = host_.TradeRules();
+    const auto stars = std::uint8_t(cart ? game::CargoStars(rules, goods, t->highestLevel, cart->codename) : 0);
     if (goods > 0) host_.TradeCaravan(owner); // the bandits' caravan
-    const auto told = stars_.find(owner);
-    if (told != stars_.end() && told->second == stars) return;
+    // Told with its rule (the deal window's scale of a count typed), whenever the goods aboard change.
+    proto::TradeScale told;
+    told.stars = stars;
+    told.goods = std::uint32_t(std::min<std::uint64_t>(goods, 0xFFFFFFFFu));
+    told.unit = rules.GoldUnit(std::clamp(t->highestLevel, 20, 140));
+    told.capacity = std::uint8_t(cart ? game::CartCapacity(game::CartClassOf(cart->codename)) : 0);
+    told.threeStarCap = host_.TradeThreeStarCap() ? 1 : 0;
+    told.scale.assign(rules.scale.begin(), rules.scale.begin() + 4);
+    const auto before = stars_.find(owner);
+    const bool starsChanged = before == stars_.end() || before->second != stars;
+    const auto last = goods_.find(owner);
+    if (!starsChanged && last != goods_.end() && last->second == told.goods) return;
+    goods_[owner] = told.goods;
     stars_[owner] = stars;
-    host_.TradeSend(t->peer, proto::TradeScale::kId, proto::Encode(proto::TradeScale{stars}));
-    host_.TradeStarsChanged(owner, stars);
+    host_.TradeSend(t->peer, proto::TradeScale::kId, proto::Encode(told));
+    if (starsChanged) host_.TradeStarsChanged(owner, stars);
 }
 
 void Trades::TellPrices(std::uint64_t peer, std::uint32_t npcEntity, std::uint32_t npcRef) {
@@ -264,6 +276,7 @@ void Trades::ShopOpened(std::uint32_t entity, std::uint32_t npc) {
 void Trades::Left(std::uint32_t entity) {
     watching_.erase(entity);
     stars_.erase(entity);
+    goods_.erase(entity);
     bargainLock_.erase(entity);
     bargainBought_.erase(entity);
 }

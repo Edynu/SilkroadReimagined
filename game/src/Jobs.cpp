@@ -138,16 +138,22 @@ int CartCapacity(int classByte) { return classByte == 1 ? 40 : classByte == 2 ? 
 
 std::uint32_t TradeValue(const JobRules& rules, std::uint64_t goods, int level, int capacity) {
     if (goods == 0 || capacity <= 0) return 0;
-    const std::uint64_t unit = rules.GoldUnit(std::clamp(level, 20, 140));
+    return TradeValueByUnit(goods, rules.GoldUnit(std::clamp(level, 20, 140)), capacity);
+}
+
+std::uint32_t TradeValueByUnit(std::uint64_t goods, std::uint64_t unit, int capacity) {
+    if (goods == 0 || capacity <= 0 || unit == 0) return 0;
     // (40 / capacity): as a fraction (a class-2 transport's 30 counts 1.33; inferred, the class-1 40 is exact).
     const double value = double(goods * 348u / unit) / (40.0 / double(capacity));
     return std::max<std::uint32_t>(1, std::uint32_t(value));
 }
 
-int TradeStars(const JobRules& rules, std::uint32_t value) {
+int TradeStars(const JobRules& rules, std::uint32_t value) { return TradeStarsBy(rules.scale, value); }
+
+int TradeStarsBy(std::span<const std::uint32_t> scale, std::uint32_t value) {
     if (value == 0) return 0;
-    for (int n = 1; n <= 4; ++n) {
-        if (value <= rules.scale[std::size_t(n - 1)]) return n;
+    for (int n = 1; n <= 4 && std::size_t(n) <= scale.size(); ++n) {
+        if (value <= scale[std::size_t(n - 1)]) return n;
     }
     return 5;
 }

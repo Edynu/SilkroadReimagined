@@ -50,7 +50,8 @@ using MessageId = std::uint16_t;
 // 9: an academy join request's highest level and race (AcademyAsk.maxLevel, .race).
 // 10: a member's fortress war position to those around (EntityGuild.fortressRole).
 // 11: a states-only skill's hit told (EntityDamaged with kDamageResist, damage 0).
-inline constexpr std::uint32_t kProtocolVersion = 11;
+// 12: TradeScale carries the cargo and its rule (goods, the trader's unit, capacity, the scale, the three-star cap).
+inline constexpr std::uint32_t kProtocolVersion = 12;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

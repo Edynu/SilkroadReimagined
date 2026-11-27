@@ -85,9 +85,16 @@ public:
             Put(Child(33), GoldText(sold));
             Put(Child(32), sold >= bought ? GoldText(sold - bought) : "-" + GoldText(bought - sold));
         }
-        // The scale by its name ("3 Stars", the original's list UIIT_STT_TRADE_TRADESCALE1..5; ours: the trade's now, the
-        // original's the one this deal's count would make).
-        Put(Child(34), c_.tradeStars >= 1 && c_.tradeStars <= 5 ? c_.Text("UIIT_STT_TRADE_TRADESCALE" + std::to_string(c_.tradeStars)) : std::string());
+        // The scale this deal's count would make, by its name ("3 Stars", 1.188's list UIIT_STT_TRADE_TRADESCALE1..5, three
+        // of them under the shard's three-star cap): the goods aboard with the count bought or without the count sold.
+        const proto::TradeScale& s = c_.tradeScale;
+        int stars = c_.tradeStars;
+        if (s.unit != 0 && s.capacity != 0) {
+            const std::int64_t after = std::int64_t(s.goods) + (deal_.buy ? count : -count);
+            stars = game::TradeStarsBy(s.scale, game::TradeValueByUnit(std::uint64_t(std::max<std::int64_t>(0, after)), s.unit, s.capacity));
+            if (s.threeStarCap != 0) stars = std::min(stars, 3);
+        }
+        Put(Child(34), stars >= 1 && stars <= 5 ? c_.Text("UIIT_STT_TRADE_TRADESCALE" + std::to_string(stars)) : std::string());
     }
 
     bool OnNotice(const ui::Notice& n) override {

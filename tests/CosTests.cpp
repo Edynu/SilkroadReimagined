@@ -1700,7 +1700,12 @@ TEST_CASE("Game server: trade: goods bought into the transport in Jangan, sold i
     CHECK(loaded.items[0].item == kGood);
     CHECK(loaded.items[0].quantity == 40);
     CHECK(loaded.items[0].creator == "Seller1");
-    CHECK(Next<proto::TradeScale>(a).stars == 1);
+    const auto scale = Next<proto::TradeScale>(a);
+    CHECK(scale.stars == 1);
+    // Its rule for the deal window: the goods aboard, and the stars it gives the same as the server's.
+    CHECK(scale.goods == 40);
+    CHECK(scale.scale.size() == 4);
+    CHECK(game::TradeStarsBy(scale.scale, game::TradeValueByUnit(scale.goods, scale.unit, scale.capacity)) == scale.stars);
     // Written with its price in one transaction (the original's _STRG_ADD_SPECIALTY): the good in the transport's row
     // (_CharCOS, _InvCOS), its buyer's alias, the gold.
     const auto goods = [&] {

@@ -1168,6 +1168,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
             for (const proto::TradePrice& p : prices->prices) hudContext_.tradePrices[p.item] = p.price;
         } else if (const auto* scale = std::get_if<proto::TradeScale>(jobs)) {
             hudContext_.tradeStars = scale->stars;
+            hudContext_.tradeScale = *scale;
         } else if (const auto* notice = std::get_if<proto::TradeBargainNotice>(jobs)) {
             TradeNotice(hudContext_, *notice);
         } else if (const auto* board = std::get_if<proto::TradeBoard>(jobs)) {
