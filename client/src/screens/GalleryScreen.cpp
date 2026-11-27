@@ -529,7 +529,14 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.hasText = [this](const std::string& key) { return host_.data().HasText(key); };
     hudContext_.regionKey = [this](std::uint16_t region) { return host_.data().RegionKey(region); };
     hudContext_.slotIcon = SampleIcon;
-    hudContext_.effectIcon = [](const game::ActiveEffect& e) { return SampleIcon({game::QuickSlot::Kind::Skill, e.id}); };
+    hudContext_.effectIcon = [this](const game::ActiveEffect& e) {
+        // A time service's entry (--page premium-gauges): its item's icon.
+        if (e.kind == game::ActiveEffect::Kind::TimedJob && tables_ && tables_->Usable()) {
+            const assets::ItemRow* r = tables_->items.Find(e.id);
+            return r != nullptr && !r->iconPath.empty() ? "icon\\" + r->iconPath : std::string();
+        }
+        return SampleIcon({game::QuickSlot::Kind::Skill, e.id});
+    };
     hudContext_.effectName = [](const game::ActiveEffect& e) {
         return e.id == 2 ? std::string("Snow Shield Lv 1") : e.id == 4 ? std::string("Tag Point Lv 1") : std::string("Ice Flower Lv 1");
     };
@@ -1398,6 +1405,25 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             ShowQuestGuide(hudContext_, {{1, "SN_QNO_CH_SMITH_1", "SN_NN_QNO_CH_SMITH_1", "SN_NC_QNO_CH_SMITH_1"},
                                          {2, "SN_QNO_CH_POTION_1", "SN_NN_QNO_CH_POTION_1", "SN_NC_QNO_CH_POTION_1"}});
             if (page_ == "quest-guide:window") hud_.Show(45);
+        }
+        // --page premium-gauges: a Gold Time service on the buff board, its two gauges (three quarters of the term left, today's
+        // three hours half spent in battle).
+        if (page_ == "premium-gauges" && !compositeShown_ && interface_ != nullptr && hud_.Created() && tables_ && tables_->Ready() && tables_->Usable()) {
+            compositeShown_ = true;
+            hudContext_.items = &tables_->items;
+            if (const assets::ItemRow* row = tables_->items.Find(std::string_view("ITEM_MALL_GOLD_TIME_SERVICE_TICKET_4W"))) {
+                game::proto::TimedService s;
+                s.category = 3;
+                s.item = row->refObjId;
+                s.secondsLeft = std::uint32_t(std::max(0, row->params[0]) / 4 * 3);
+                s.bonus = std::uint32_t(std::max(0, row->params[2]) / 1000 / 4);
+                sample_.timedServices.services = {s};
+                sample_.timedServicesAt = sample_.now;
+                sample_.ShowTimedServices();
+                core::LogInfo("gallery: premium-gauges: {} effects, the service {} ({} s, bonus {})", sample_.effects.size(), row->codename, s.secondsLeft, s.bonus);
+            } else {
+                core::LogWarning("gallery: premium-gauges: no gold time item");
+            }
         }
         // --page composite-item: the premium package's uses window (its right click on the buff board) on sample uses.
         if (page_ == "composite-item" && !compositeShown_ && interface_ != nullptr && hud_.Created() && tables_ && tables_->Ready() && tables_->Usable()) {

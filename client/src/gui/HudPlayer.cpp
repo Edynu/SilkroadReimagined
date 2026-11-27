@@ -409,7 +409,22 @@ void BuffBoard::Draw(ui::Frame& frame) {
         const ui::Vec2 at{o.x + places_[i].x, o.y + places_[i].y};
         // The time gauge: its black frame, then the light blue fill shrinking from the right; none
         // for what has no end.
-        if (e.duration > 0.0) {
+        // A time service with a daily bonus (the premium's hours a day, spent in battle): 1.188's two gauges in one place
+        // (0x806D50 kind 3; 0x8056A0): s_stateodd_time02_gauge for its term (the item's Param1 seconds), the plain gauge
+        // over it for the bonus left of its day's (yesterday's and today's over Param3 / 1000, at most full).
+        const assets::ItemRow* service = e.kind == game::ActiveEffect::Kind::TimedJob && (e.token & 0xFFFF0000u) == game::PlayerState::kTimedServiceToken &&
+                                                 context_.items != nullptr
+                                             ? context_.items->Find(e.id)
+                                             : nullptr;
+        const double daily = service != nullptr ? double(std::max(0, service->params[2]) / 1000) : 0.0;
+        if (daily > 0.0 && e.duration > 0.0) {
+            const double term = std::max(1.0, double(std::max(0, service->params[0])));
+            const float term01 = float(std::clamp((e.started + e.duration - context_.time) / term, 0.0, 1.0));
+            const float bonus01 = float(std::clamp(double((e.bonus >> 16) + (e.bonus & 0xFFFFu)) / daily, 0.0, 1.0));
+            frame.paint.Image("icon\\stateodd\\s_stateodd_time.ddj", {at.x, at.y + 20, 20, 4}, {0, 0}, {1, 1}, tint);
+            if (term01 > 0.0f) frame.paint.Image("icon\\stateodd\\s_stateodd_time02_gauge.ddj", {at.x, at.y + 20, 20 * term01, 4}, {0, 0}, {term01, 1}, tint);
+            if (bonus01 > 0.0f) frame.paint.Image("icon\\stateodd\\s_stateodd_time_gauge.ddj", {at.x, at.y + 20, 20 * bonus01, 4}, {0, 0}, {bonus01, 1}, tint);
+        } else if (e.duration > 0.0) {
             const float left = float(std::clamp((e.started + e.duration - context_.time) / e.duration, 0.0, 1.0));
             frame.paint.Image("icon\\stateodd\\s_stateodd_time.ddj", {at.x, at.y + 20, 20, 4}, {0, 0}, {1, 1}, tint);
             if (left > 0.0f) {

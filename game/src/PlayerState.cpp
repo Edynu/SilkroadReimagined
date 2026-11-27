@@ -409,6 +409,7 @@ void PlayerState::ShowTimedServices() {
         e.token = kTimedServiceToken | s.category;
         e.started = now - elapsed;
         e.duration = double(s.secondsLeft);
+        e.bonus = s.bonus;
         effects.push_back(std::move(e));
     }
 }

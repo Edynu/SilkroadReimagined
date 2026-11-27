@@ -66,6 +66,8 @@ struct ActiveEffect {
     std::string target;
     // A timed job (the Forgotten World's re-entry limit): its icon and its tooltip's subject and text keys.
     std::string icon, subject, text;
+    // A time service's daily bonus as last told (proto::TimedService::bonus: yesterday's << 16 | today's), spent in battle.
+    std::uint32_t bonus = 0;
 };
 
 // A mark the player put on someone (the Rogue's Tag Point, 'hntp'):
