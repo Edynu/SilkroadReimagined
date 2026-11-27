@@ -181,15 +181,16 @@ void PlayScreen::PostTemple(ScreenContext& context, const proto::TempleNotice& n
     if (notice.kind == proto::TempleNotice::kBefore) {
         line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_ALARM"), {names, std::to_string(notice.minutes)});
     } else if (notice.kind == proto::TempleNotice::kOpened) {
-        const std::string who = notice.allowed == proto::TempleNotice::kTraderHunter
-                                    ? text("UIIT_PAG_COMPANY_MERCHANT") + ", " + text("UIIT_PAG_COMPANY_HENTER")
-                                    : notice.allowed == proto::TempleNotice::kThief ? text("UIIT_PAG_COMPANY_THIEF")
-                                                                                    : text("UIIT_STT_EGYPT_SHRINE_ENTRANCE_UNION_ALL");
-        if (notice.allowed == proto::TempleNotice::kNobody) {
-            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_04"), {who, names});
-        } else if (notice.allowed == proto::TempleNotice::kEveryone) {
-            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_03"), {names});
+        // 1.188's (Msg_300C 0xC18): equal reputations and nobody let in: _ALARM_04 with UNION_ALL; else _ALARM_01 with the
+        // alliance let in (nobody UNION_EMPTY, "Trader Guild / Hunter Guild", the thieves', everyone UNION_ALL).
+        if (notice.equal && notice.allowed == proto::TempleNotice::kNobody) {
+            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_04"), {text("UIIT_STT_EGYPT_SHRINE_ENTRANCE_UNION_ALL"), names});
         } else {
+            const std::string who = notice.allowed == proto::TempleNotice::kTraderHunter
+                                        ? text("UIIT_PAG_COMPANY_MERCHANT") + " / " + text("UIIT_PAG_COMPANY_HENTER")
+                                    : notice.allowed == proto::TempleNotice::kThief  ? text("UIIT_PAG_COMPANY_THIEF")
+                                    : notice.allowed == proto::TempleNotice::kNobody ? text("UIIT_STT_EGYPT_SHRINE_ENTRANCE_UNION_EMPTY")
+                                                                                     : text("UIIT_STT_EGYPT_SHRINE_ENTRANCE_UNION_ALL");
             line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_01"), {who, names});
         }
     }
