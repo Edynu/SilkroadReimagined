@@ -138,6 +138,22 @@ void PlayScreen::HandleFortress(ScreenContext& context, const proto::FortressEve
                           r.zone, r.refObjId, r.hp, r.maxHp, r.state, r.repairCost, r.upgradeGold, r.upgradePoints, int(r.upgradeLevel), r.waitMinutes);
         }
     }
+    // The war's countdowns (1.188's 0x7B69A0): the heart's seconds told with the towers' fall (kind 0x0A); a capture's
+    // five minutes for those outside the new holder's side (its guild and union); the war's end clears both.
+    if (const auto* n = std::get_if<proto::FortressNotice>(&event)) {
+        using K = proto::FortressNoticeKind;
+        if (n->kind == K::SealReleasing) fortHeartAt_[n->fortress] = context.time + double(n->value);
+        if (n->kind == K::Conquer) {
+            bool holderSide = guild_.InGuild() && guild_.Guild().name == n->guild;
+            for (const proto::UnionGuildRecord& g : guild_.Union().guilds) holderSide = holderSide || (guild_.InGuild() && g.name == n->guild);
+            if (!holderSide) fortEntryAt_[n->fortress] = context.time + double(game::kCaptureEntrySeconds);
+            fortHeartAt_.erase(n->fortress);
+        }
+        if (n->kind == K::WarEnd) {
+            fortHeartAt_.clear();
+            fortEntryAt_.clear();
+        }
+    }
     // A new tax rate (kind 7): the NPC or gate talked to shows it (its waiver stays the server's word).
     if (const auto* n = std::get_if<proto::FortressNotice>(&event); n != nullptr && n->kind == proto::FortressNoticeKind::TaxRate && npcTax_.fortress == n->fortress) {
         const std::int16_t rate = std::int16_t(std::uint16_t(n->value));
@@ -461,6 +477,32 @@ void PlayScreen::CastingTick(double now) {
     } else if (c.kind == proto::CastingKind::GuildRecall && now > c.started + c.seconds + 3.0) {
         c = {}; // ours: the recall no longer went (the member's state changed on its gauge), no teleport came
     }
+}
+
+// The countdowns of the fortress whose area the player stands in, on the warning banner at each whole minute, at 90 s and
+// each second under 31 (1.188's CIFPlayerMiniInfo tick, 0x7B69A0): "It is allowed to enter the fortress after %d seconds."
+// and "It is allowed to attack Fortress Heart after %d seconds.".
+void PlayScreen::StepFortressCountdowns(ScreenContext& context) {
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    const std::uint32_t here = self != nullptr ? fortress_.WarArea(self->position.region) : 0;
+    const auto step = [&](std::map<std::uint32_t, double>& at, int& said, const char* key) {
+        const auto it = at.find(here);
+        if (here == 0 || it == at.end()) return;
+        const int left = int(std::ceil(it->second - context.time));
+        if (left <= 0) {
+            at.erase(it);
+            return;
+        }
+        if (left == said) return;
+        said = left;
+        if (left % 60 == 0 || left == 90 || left < 31) {
+            std::string line = gui_.data().Text(key);
+            if (const std::size_t p = line.find("%d"); p != std::string::npos) line.replace(p, 2, std::to_string(left));
+            player_.Notify(game::Banner::Kind::Warning, line, context.time);
+        }
+    };
+    step(fortEntryAt_, fortEntrySaid_, "UIIT_MSG_FORT_ETC_ENTER_COUNTDOWN");
+    step(fortHeartAt_, fortHeartSaid_, "UIIT_MSG_FORT_ATTACK_FORT_STONE_COUNTDOWN");
 }
 
 void PlayScreen::FortressScript(ScreenContext& context) {

@@ -615,6 +615,10 @@ private:
     int TempleOrder(std::uint16_t region) const;
     std::string TempleName(std::uint16_t region);
     void StepTempleNotices(ScreenContext& context);
+    // The fortress war's countdowns (PlayFortress.cpp): the capture's entry and the heart's opening, by fortress (screen time).
+    std::map<std::uint32_t, double> fortEntryAt_, fortHeartAt_;
+    int fortEntrySaid_ = -1, fortHeartSaid_ = -1;
+    void StepFortressCountdowns(ScreenContext& context);
     void PostTemple(ScreenContext& context, const game::proto::TempleNotice& notice, const std::string& names);
     std::set<std::uint32_t> book_;
     game::proto::SummonList summonList_;
