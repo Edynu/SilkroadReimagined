@@ -98,8 +98,8 @@ void PlayScreen::ChatCommand(ScreenContext& context, const std::string& key, con
             CosDismiss();
         }
     } else {
-        // The PvP proposal and the user search: features of the original not built.
-        core::LogInfo("game: the chat command {} ({}): not built", key, line);
+        // /Fight and /Acquire: taken and nothing done, as 1.188 (its command routine jumps to its end for them).
+        core::LogInfo("game: the chat command {} ({}): taken, nothing done (as the original)", key, line);
     }
 }
 

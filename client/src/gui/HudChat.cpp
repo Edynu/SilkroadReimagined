@@ -610,7 +610,7 @@ void ChatWindow::Update(ui::Frame& frame) {
     // The buttons' help texts.
     if (context_.text) {
         constexpr std::pair<int, const char*> kHelp[] = {
-            {12, "UIIT_STT_CHATING_VIEW_OFF"}, {14, "UIIT_CTL_WHISPER_LIST"}, {15, "UIIT_STT_TOGGLE_CHATING_WINDOW_SETING"}};
+            {12, "UIIT_STT_CHATING_VIEW_AUTO_OFF"}, {14, "UIIT_CTL_WHISPER_LIST"}, {15, "UIIT_STT_TOGGLE_CHATING_WINDOW_SETING"}};
         for (const auto& [id, key] : kHelp) {
             if (Widget* b = Child(id); b != nullptr && frame.pointer.hovered == b) frame.interface.ShowTooltip(context_.Text(key), b->ScreenRect());
         }

@@ -778,8 +778,13 @@ std::string CommunityLineText(const HudContext& c, const game::CommunityView::Li
     case Kind::FriendAdded: return FormatText(text("UIIT_MSG_CHAT_FRIEND_INVITE"), {line.name});
     case Kind::LetterArrived: return text("UIIT_MSG_LETTERERR_UNKNOWNLETTER");
     case Kind::Block:
-        // 0xB66F's numbers; done says nothing, the list shows it.
+        // 0xB66F's numbers (the 1.188 client's Msg_B30D): done, "Blocked whisper from [%s]." or "Removed whisper block
+        // from [%s].".
         switch (line.result) {
+        case 0:
+            if (line.op == 1) return FormatText(text("UIIT_MSG_CHAT_WHISPER_BLOCK"), {line.name});
+            if (line.op == 2) return FormatText(text("UIIT_MSG_CHAT_WHISPER_ADMISSION"), {line.name});
+            return {};
         case 1: return text("UIIT_MSG_COSPETERR_PETNAME_SUMENESS");
         case 2: return text("UIIT_MSG_ALIAS_ACTION_ERR_NOTALLOW");
         case 3: return text("UIIT_STT_BLOCKMAN_DELETE_LISTFULL");
