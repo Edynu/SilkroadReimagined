@@ -997,12 +997,21 @@ ConfirmBox* OpenPartyInviteBox(HudContext& c, const std::string& from, std::uint
     // The original's kind 6 (8 the same): 300 x 176, the lines at 16, 48 and 16, 64, the settings in two black boxes
     // (msgbox_blackbox.ddj, 100 x 24) at 44, 93 and 156, 93, "anyone may invite" at 6, 121, Accept and Refuse at
     // 72, 139 and 152, 139.
-    box->rect.x += std::floor((box->rect.w - 300.0f) / 2.0f);
-    box->rect.y += std::floor((box->rect.h - 176.0f) / 2.0f);
+    const float oldW = box->rect.w, oldH = box->rect.h, dw = 300.0f - oldW, dh = 176.0f - oldH;
+    box->rect.x += std::floor(-dw / 2.0f);
+    box->rect.y += std::floor(-dh / 2.0f);
     box->rect.w = 300.0f;
     box->rect.h = 176.0f;
     for (const auto& child : box->children()) {
-        if (child->id() == 251) child->visible = false;
+        const int id = child->id();
+        if (id == 251) child->visible = false; // the simple box's text: ours are placed below
+        if (id == 2) {
+            child->rect.x += dw; // the close button keeps to the right edge
+        } else if (id != 251 && id != 252 && id != 253) {
+            // The frame's pieces and the background tile: those reaching the right or the bottom edge follow it.
+            if (child->rect.x + child->rect.w >= oldW - 40.0f) child->rect.w += dw;
+            if (child->rect.y + child->rect.h >= oldH - 40.0f) child->rect.h += dh;
+        }
         if (child->id() == 252) {
             child->rect.x = 72.0f;
             child->rect.y = 139.0f;
@@ -1013,7 +1022,6 @@ ConfirmBox* OpenPartyInviteBox(HudContext& c, const std::string& from, std::uint
             child->rect.y = 139.0f;
             child->SetText(c.Text("UIIT_STT_REFUSE"));
         }
-        if (child->id() != 2 && child->id() < 250 && child->rect.y > 30.0f) child->visible = false; // the simple box's text tile
     }
     const auto put = [&](const std::string& text, float x, float y, float w, float h, const char* ddj, int align) {
         assets::UiLayoutNode n;
