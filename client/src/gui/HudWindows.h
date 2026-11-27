@@ -198,6 +198,7 @@ struct HudContext {
         std::string name;
         std::uint8_t level = 0;
         std::int64_t rentUntil = 0; // Unix seconds on this machine's clock (0: none, or over)
+        double lifeFrom = -1;       // back from dead at this HUD time: its slot's pt_life_effect (-1 none)
     };
     std::map<std::int64_t, PetItemShown> petItems;
     std::uint32_t cosSelected = 0;

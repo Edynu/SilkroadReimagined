@@ -94,6 +94,12 @@ void Slot::Draw(Frame& frame) {
         const int f = int(frame.time * 20.0) % 9;
         frame.paint.Image("interface\\pet\\pt_edge_effect.ddj", r, {float(f) / 9.0f, 0.0f}, {float(f + 1) / 9.0f, 1.0f}, WithAlpha(kWhite, opacity));
     }
+    if (lifeFrom >= 0.0 && frame.time >= lifeFrom) {
+        // A pet's item back from dead (1.188's slot: its state 4 -> 3, 0x6666D0): eight 32-pixel frames (256 wide), 80 ms
+        // each (its timer 5, the counter 8..1), once.
+        const int f = int((frame.time - lifeFrom) / 0.08);
+        if (f < 8) frame.paint.Image("interface\\pet\\pt_life_effect.ddj", r, {float(f) / 8.0f, 0.0f}, {float(f + 1) / 8.0f, 1.0f}, WithAlpha(kWhite, opacity));
+    }
     // A wait: the clock wiping clear as it ends, then the ready flash; the time left on top.
     if (cooling > 0.0f) {
         const int f = std::clamp(int(239.0f - cooling * 239.0f), 0, 239);

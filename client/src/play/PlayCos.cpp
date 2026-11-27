@@ -72,7 +72,12 @@ void PlayScreen::HandleCos(ScreenContext& context, const proto::CosEvent& event)
         // The pets of the bag's summoning items: their tooltips and slots (redrawn).
         const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         for (const proto::CosPetItem& p : items->pets) {
-            hudContext_.petItems[p.id] = {p.model, p.state, p.name, p.level, p.rentSeconds != 0 ? std::int64_t(now) + std::int64_t(p.rentSeconds) : 0};
+            // Back from dead (a Grass of Life, a Clock of Reincarnation): its slot's life mark once (1.188: state 4 -> 3).
+            const auto before = hudContext_.petItems.find(p.id);
+            const bool revived = before != hudContext_.petItems.end() && before->second.state == std::uint8_t(game::CosState::Dead) &&
+                                 p.state != std::uint8_t(game::CosState::Dead);
+            hudContext_.petItems[p.id] = {p.model, p.state, p.name, p.level, p.rentSeconds != 0 ? std::int64_t(now) + std::int64_t(p.rentSeconds) : 0,
+                                          revived ? context.time : -1.0};
         }
         ++player_.inventoryVersion;
     } else if (const auto* exp = std::get_if<proto::CosExperience>(&event)) {
