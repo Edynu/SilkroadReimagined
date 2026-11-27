@@ -9088,8 +9088,16 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     void StartCoolTime(Peer& peer, PlayerWorld& player, const assets::ItemRow& row, Clock::time_point now) {
         const game::ItemCoolTime cool = game::CoolTimeOf(row);
         if (cool.ms == 0) return;
-        player.coolTimes[game::CoolTimeKey(row.refObjId, cool.group)] = now + std::chrono::milliseconds(cool.ms);
+        const std::uint32_t key = game::CoolTimeKey(row.refObjId, cool.group);
+        player.coolTimes[key] = now + std::chrono::milliseconds(cool.ms);
         SendMessage(*peer.connection, proto::Cooldown{proto::CooldownKind::Item, row.refObjId, cool.ms});
+        // Five minutes or more: kept over a logout, as the original's (its item use keeps them as a timed job).
+        if (cool.ms >= 300'000) {
+            const std::int64_t started = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            database.Submit([character = player.selected, wait = CharacterRow::ItemCooldown{key, row.refObjId, started, cool.ms}](Database& db) {
+                SaveItemCooldown(db, character, wait);
+            });
+        }
     }
 
     // An item used from a bag place (or `given`, a premium's daily use). One with a COOLTIME is refused 0x185B while its
@@ -12698,6 +12706,22 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                         else over.push_back(c.skill);
                     }
                     if (!over.empty()) database.Submit([character = player.selected, over = std::move(over)](Database& db) { DeleteLongCooldowns(db, character, over); });
+                }
+                // The items' long waits it left running (the original's timed jobs, category 6 job 100): their time left, the
+                // client told (the slots' grey); those over, forgotten.
+                if (!row->itemCooldowns.empty()) {
+                    const std::int64_t unixNow = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                    std::vector<std::uint32_t> over;
+                    for (const CharacterRow::ItemCooldown& c : row->itemCooldowns) {
+                        const std::int64_t leftMs = (c.started * 1000 + std::int64_t(c.ms)) - unixNow * 1000;
+                        if (leftMs <= 0) {
+                            over.push_back(c.key);
+                            continue;
+                        }
+                        player.coolTimes[c.key] = Clock::now() + std::chrono::milliseconds(leftMs);
+                        if (Peer* p = peers->Find(peerId)) SendMessage(*p->connection, proto::Cooldown{proto::CooldownKind::Item, c.refObjId, std::uint32_t(leftMs)});
+                    }
+                    if (!over.empty()) database.Submit([character = player.selected, over = std::move(over)](Database& db) { DeleteItemCooldowns(db, character, over); });
                 }
                 if (skillUnit && !restoring.empty()) {
                     SkillCaster caster = CasterOf(player);

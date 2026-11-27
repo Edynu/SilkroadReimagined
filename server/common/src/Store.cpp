@@ -1207,6 +1207,7 @@ std::optional<CharacterRow> LoadCharacter(Database& db, std::int64_t account, st
                                   {character});
     QueryResult potionItems = db.Query("SELECT configtype, refobjid, setting FROM sr_auto_potion WHERE charid = $1", {character});
     QueryResult longCooldowns = db.Query("SELECT data1, data2 FROM _timedjob WHERE charid = $1 AND category = 6 AND jobid = 200", {character});
+    QueryResult itemCooldowns = db.Query("SELECT data1, data2, data3, data4 FROM _timedjob WHERE charid = $1 AND category = 6 AND jobid = 100", {character});
     // Its buffs as the original keeps them: _timedjob category 0, the skill and its time left (seconds).
     QueryResult buffs = db.Query("SELECT jobid, timetokeep::bigint * 1000 FROM _timedjob WHERE charid = $1 AND category = 0 AND timetokeep > 0", {character});
     QueryResult masteries = db.Query("SELECT masteryid, level FROM _charskillmastery WHERE charid = $1 AND level > 0", {character});
@@ -1265,6 +1266,12 @@ std::optional<CharacterRow> LoadCharacter(Database& db, std::int64_t account, st
     if (keeper.Rows() > 0) c.pkKeeper = CharacterRow::PkKeeper{keeper.Int(0, 0), keeper.Int(0, 1)};
     for (int k = 0; k < buffs.Rows(); ++k) c.buffs.push_back({std::uint32_t(buffs.Int(k, 0)), std::uint64_t(buffs.Int(k, 1))});
     for (int k = 0; k < longCooldowns.Rows(); ++k) c.longCooldowns.push_back({std::uint32_t(longCooldowns.Int(k, 0)), longCooldowns.Int(k, 1)});
+    if (itemCooldowns.Ok()) {
+        for (int k = 0; k < itemCooldowns.Rows(); ++k) {
+            c.itemCooldowns.push_back({std::uint32_t(itemCooldowns.Int(k, 0)), std::uint32_t(itemCooldowns.Int(k, 3)), itemCooldowns.Int(k, 1),
+                                       std::uint32_t(itemCooldowns.Int(k, 2))});
+        }
+    }
     for (int k = 0; k < masteries.Rows(); ++k) c.masteries.push_back({std::uint32_t(masteries.Int(k, 0)), int(masteries.Int(k, 1))});
     for (int k = 0; k < deeds.Rows(); ++k) c.deeds[std::string(deeds.View(k, 0))] = int(deeds.Int(k, 1));
     for (int k = 0; k < quests.Rows(); ++k) {
@@ -2039,6 +2046,30 @@ bool SaveLongCooldown(Database& db, std::int64_t character, std::uint32_t skill,
                             {character, std::int64_t(skill), started}).Ok();
         },
         error);
+}
+
+// The original's item wait job (category 6, job 100): Data1 the key (a 32-bit column: the key's bits as they are), Data2
+// its start, Data3 its length in ms, Data4 the item (ours, for its grey on entering).
+bool SaveItemCooldown(Database& db, std::int64_t character, const CharacterRow::ItemCooldown& wait) {
+    std::string error;
+    const std::int64_t key = std::int64_t(std::int32_t(wait.key));
+    return db.Transaction(
+        [&](Database& tx) {
+            return tx.Query("DELETE FROM _timedjob WHERE charid = $1 AND category = 6 AND jobid = 100 AND data1 = $2", {character, key}).Ok() &&
+                   tx.Query("INSERT INTO _timedjob (charid, category, jobid, timetokeep, data1, data2, data3, data4, serial64, jid) "
+                            "VALUES ($1, 6, 100, 1, $2, $3, $4, $5, 0, coalesce((SELECT userjid FROM _user WHERE charid = $1), 0))",
+                            {character, key, wait.started, std::int64_t(wait.ms), std::int64_t(std::int32_t(wait.refObjId))})
+                       .Ok();
+        },
+        error);
+}
+
+bool DeleteItemCooldowns(Database& db, std::int64_t character, const std::vector<std::uint32_t>& keys) {
+    bool ok = true;
+    for (const std::uint32_t key : keys) {
+        ok = db.Query("DELETE FROM _timedjob WHERE charid = $1 AND category = 6 AND jobid = 100 AND data1 = $2", {character, std::int64_t(std::int32_t(key))}).Ok() && ok;
+    }
+    return ok;
 }
 
 bool DeleteLongCooldowns(Database& db, std::int64_t character, const std::vector<std::uint32_t>& skills) {

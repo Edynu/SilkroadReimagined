@@ -39,7 +39,8 @@ namespace {
 
 constexpr std::uint32_t kFirework = 930001, kHwan = 930002, kExpScroll = 930003, kSkillScroll = 930004, kStatReset = 930005,
                         kWarehouse = 930006, kSkillPoints = 930007, kArena = 930008, kQuestItem = 930009, kCape = 930010,
-                        kCertificate = 930011, kPetPill = 930012, kPillBag = 930013, kCoolFirework = 930014, kIndulgence = 930015;
+                        kCertificate = 930011, kPetPill = 930012, kPillBag = 930013, kCoolFirework = 930014, kIndulgence = 930015,
+                        kLongCool = 930016;
 
 assets::ItemRow Row(std::uint32_t id, const char* codename, std::array<int, 4> tid) {
     assets::ItemRow r;
@@ -59,6 +60,11 @@ std::shared_ptr<assets::ItemTable> Items() {
     cool.params[1] = 60000;
     cool.paramTexts[1] = "COOLTIME:0x000000C9";
     items->Add(cool);
+    // A wait of 20 minutes (the second berserk potion's, ITEM_ETC_SECOND_HWAN: COOLTIME 0xC9, 1,200,000 ms).
+    assets::ItemRow longCool = Row(kLongCool, "ITEM_ETC_FIREWORK_LONG_WAIT", {3, 3, 6, 1});
+    longCool.params[1] = 1'200'000;
+    longCool.paramTexts[1] = "COOLTIME:0x000000D1";
+    items->Add(longCool);
     assets::ItemRow hwan = Row(kHwan, "ITEM_EVENT_HWAN_POTION", {3, 3, 1, 8});
     hwan.params[0] = 5;
     items->Add(hwan);
@@ -320,7 +326,7 @@ TEST_CASE("Game server: the special items' uses") {
     SKIP_WITHOUT_DATABASE(t);
     UseServer s(t);
     REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
-    auto p = s.Make("Special", {Stored(kFirework, 3), Stored(kCoolFirework, 2), Stored(kHwan, 2), Stored(kExpScroll, 2), Stored(kSkillScroll, 1),
+    auto p = s.Make("Special", {Stored(kFirework, 3), Stored(kCoolFirework, 2), Stored(kLongCool, 2), Stored(kHwan, 2), Stored(kExpScroll, 2), Stored(kSkillScroll, 1),
                                 Stored(kStatReset), Stored(kWarehouse), Stored(kSkillPoints), Stored(kArena), Stored(kQuestItem),
                                 Stored(kCape), Stored(kCertificate), Stored(kPetPill), Stored(kPillBag, 3), Stored(kIndulgence)});
     const auto count = [&](std::uint32_t item) {
@@ -342,6 +348,24 @@ TEST_CASE("Game server: the special items' uses") {
         for (int i = 0; i < 100; ++i) s.game.Poll(2ms);
         CHECK(count(kFirework) == 2);
         CHECK(count(kCoolFirework) == 1);
+    }
+    SUBCASE("a wait of five minutes or more: kept over a relog with its time left (the original's timed job 6 / 100), the slot told") {
+        CHECK(Use(s, p, kLongCool) == 0);
+        proto::Cooldown wait;
+        REQUIRE(p.client->Expect(wait));
+        CHECK(wait.id == kLongCool);
+        for (int i = 0; i < 100; ++i) s.game.Poll(2ms);
+        const auto kept = t.Db().Query("SELECT data3, data4 FROM _timedjob WHERE charid = $1 AND category = 6 AND jobid = 100", {p.character});
+        REQUIRE(kept.Rows() == 1);
+        CHECK(kept.Int(0, 0) == 1'200'000);
+        CHECK(kept.Int(0, 1) == kLongCool);
+        auto again = s.Relog(p);
+        proto::Cooldown restored;
+        REQUIRE(again.client->Expect(restored));
+        CHECK(restored.id == kLongCool);
+        CHECK(restored.ms <= 1'200'000u);
+        CHECK(restored.ms > 1'150'000u);
+        CHECK(Use(s, again, kLongCool) == game::kCoolTimeRefused);
     }
     SUBCASE("the berserk potion: the gauge full; refused in berserk (0x18CE)") {
         CHECK(Use(s, p, kHwan) == 0);

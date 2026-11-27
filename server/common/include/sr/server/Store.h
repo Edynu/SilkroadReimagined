@@ -359,6 +359,14 @@ struct CharacterRow {
         std::int64_t started = 0; // Unix seconds
     };
     std::vector<LongCooldown> longCooldowns;
+    // An item's wait of five minutes or more (the original keeps them as _TimedJob category 6, job 100): its key
+    // (game::CoolTimeKey), when it began (Unix seconds), how long it is (ms) and the item that started it (its grey).
+    struct ItemCooldown {
+        std::uint32_t key = 0, refObjId = 0;
+        std::int64_t started = 0;
+        std::uint32_t ms = 0;
+    };
+    std::vector<ItemCooldown> itemCooldowns;
     // Its quests as _CharQuest keeps them (LoadCharacter only): the original's status, times
     // finished, the start and end (Unix seconds), the goals' counts (QuestData1 / QuestData2).
     struct Quest {
@@ -541,6 +549,9 @@ bool SaveBuffs(Database& db, std::int64_t character, const std::vector<Character
 // A skill's reuse of five minutes or more, as the original keeps one: _timedjob category 6, job 200, the skill
 // and the second it began. Written when it begins; removed once it is over.
 bool SaveLongCooldown(Database& db, std::int64_t character, std::uint32_t skill, std::int64_t started);
+// An item's long wait kept (replacing one of the same key), and those over dropped.
+bool SaveItemCooldown(Database& db, std::int64_t character, const CharacterRow::ItemCooldown& wait);
+bool DeleteItemCooldowns(Database& db, std::int64_t character, const std::vector<std::uint32_t>& keys);
 bool DeleteLongCooldowns(Database& db, std::int64_t character, const std::vector<std::uint32_t>& skills);
 
 // A character's gold, and its return point (the gate's object id, as _char.appointedteleport keeps it).
