@@ -107,11 +107,12 @@ TEST_CASE("effectsound.txt rows: by object and handle, by skill, events as filte
         "\tPLAYER\tSND_DMG\t-\tSWORD\t-\tCRITYCAL\t0\tplayer\\\tbatSwordCHit.wav\t100\t\t\r\n"
         "\tPLAYER\tSND_SWING1\tSKILL_CH_SWORD_BASE\t-\t-\t-\t0\tplayer\\\tbatSwordSwing1.wav\t80\t\t\r\n"
         "\tPLAYER\tSND_SWING4\t-\t-\t-\t-\t0\t-\t-\t-\t\t\r\n"
-        "\tMOB_MANGNYANG\tVOC_DEATH\t-\t-\t-\t-\t0\tmonster\\\tcm_Mang_die.wav\t80\t\t\r\n";
+        "\tMOB_MANGNYANG\tVOC_DEATH\t-\t-\t-\t-\t0\tmonster\\\tcm_Mang_die.wav\t80\t\t\r\n"
+        "\tPLAYER\tSND_DDMG\tSKILL_EU_WARLOCK_SOULA_RETURN_A\t-\t-\t-\t0\tskill2\\\tusk_warlock_blood_return_dmg_a.wav\t100\t\t\r\n";
     EffectSoundTable t;
     std::string error;
     REQUIRE_MESSAGE(t.Parse(text, error), error);
-    CHECK(t.Size() == 9);
+    CHECK(t.Size() == 10);
     CHECK(t.Find({"UI", "SND_BUTTON_CLICK"}).size() == 2);
     CHECK(t.Find({"UI", "SND_WARP"}).empty());
     const auto sword = t.Find({"ITEM", "SND_EQUIP", {}, {"SWORD"}});
@@ -129,6 +130,8 @@ TEST_CASE("effectsound.txt rows: by object and handle, by skill, events as filte
     std::minstd_rand random;
     CHECK(t.Pick({"MOB_MANGNYANG", "VOC_DEATH"}, random) != nullptr);
     CHECK(t.Pick({"MOB_MANGNYANG", "VOC_SHOUT1"}, random) == nullptr);
+    // A guarding skill's own hit sound (GameAudio::Guarded): by the skill.
+    CHECK(t.Pick({"PLAYER", "SND_DDMG", "SKILL_EU_WARLOCK_SOULA_RETURN_A"}, random) != nullptr);
 }
 
 TEST_CASE("effectenvsnd.txt and regioninfo.txt: the music and ambience of the area a point is in") {

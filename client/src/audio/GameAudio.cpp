@@ -255,6 +255,13 @@ void GameAudio::Hit(std::uint32_t attacker, bool critical, glm::vec3 at, bool pl
     if (row != nullptr) sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
 }
 
+void GameAudio::Guarded(std::string_view skill, glm::vec3 at) {
+    if (!Ready() || skill.empty()) return;
+    const audio::EffectSoundRow* row = tables_->effects.Pick({"PLAYER", "SND_DDMG", skill}, random_);
+    if (row == nullptr) row = tables_->effects.Pick({{}, "SND_DDMG", skill}, random_);
+    if (row != nullptr) sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
+}
+
 const std::string& GameAudio::VoiceObject(std::string_view codename) {
     const auto found = voiceObjects_.find(std::string(codename));
     if (found != voiceObjects_.end()) return found->second;

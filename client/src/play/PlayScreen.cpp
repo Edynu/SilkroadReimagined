@@ -1957,6 +1957,10 @@ void PlayScreen::Sounds(ScreenContext& context, const game::TitleEvent& event) {
         if (hit->damage > 0 && hit->attacker != 0 && (hit->flags & proto::kDamageState) == 0) {
             const bool critical = (hit->flags & proto::kDamageCritical) != 0;
             hitSounds_.push_back({hit->attacker, hit->target, critical, context.time + 0.1}); // P12: 100 ms after
+            // A guard's share or a reflection: its skill's own hit sound (SND_DDMG).
+            if ((hit->flags & proto::kDamageReturn) != 0 && hit->imbue != 0) {
+                if (const assets::SkillRow* guard = tables_->skills.Find(hit->imbue)) audio->Guarded(guard->codename, p);
+            }
             // One's own critical shakes the camera 50 for 500 ms in steps of 20; in berserk (the original's character
             // mode 1) every hit of one's own does, a critical 200 in steps of 25.
             const bool berserk = context.time < berserkUntil_;

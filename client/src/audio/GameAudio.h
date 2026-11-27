@@ -85,6 +85,9 @@ public:
     // CRITYCAL rows). A critical sounds SND_CRIDMG first, as the original's: the skill's own rows, else a player's
     // (`player`) PLAYER rows tied to no skill (batCriHit; in berserk, `berserk`, the HWAN row's batHwanCriHit).
     void Hit(std::uint32_t attacker, bool critical, glm::vec3 at, bool player = false, bool berserk = false);
+    // A hit a guarding skill took or sent back (a screen's share, a reflection): that skill's own hit sound (effectsound's
+    // SND_DDMG rows: the screens, Reflect Return, Ice Wall), as the original's hit naming its guard.
+    void Guarded(std::string_view skill, glm::vec3 at);
     // A blocked hit (effectsound's PLAYER SND_BLOCKING): by the attacker's weapon
     // ("BOW", "CROSSBOW"; empty: any other) and whether it was critical.
     void Blocked(std::string_view weapon, bool critical, glm::vec3 at);
