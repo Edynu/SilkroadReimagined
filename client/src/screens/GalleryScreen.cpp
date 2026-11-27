@@ -729,7 +729,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 hudContext_.worldMap = host_.data().WorldMap();
                 hud_.OpenPage(hud::kPageActions);
             }
-            if (page_ == "practice" || page_ == "practice-mastery") {
+            if (page_ == "practice" || page_ == "practice-mastery" || page_ == "practice-short") {
                 SkillPracticeBox::Question q;
                 q.isMastery = page_ == "practice-mastery";
                 q.mastery = "Bicheon";
@@ -738,7 +738,13 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 q.level = 1;
                 q.description = "You will soar high into the sky mastering swords.";
                 q.next = "Learn [Bicheon]skill.";
+                q.skillPoints = 50;
                 hud_.Practice(q, [] {});
+                // practice-short: Learn pressed without the points: the original's box kind 9.
+                if (auto* box = page_ == "practice-short" ? dynamic_cast<SkillPracticeBox*>(hud_.Show(hud::kPractice)) : nullptr) {
+                    sample_.self.skillPoints = 24;
+                    box->Answer(true);
+                }
             }
             if (page_ == "rebirth") hud_.Rebirth(20, [](int) {});
             if (page_ == "repair-all") AskRepairAll(hudContext_, 0); // the smith's Repair All box (its name strip)

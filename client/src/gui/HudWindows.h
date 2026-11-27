@@ -1265,6 +1265,7 @@ private:
     HudContext& context_;
     ui::Interface* ui_ = nullptr;
     std::function<void()> confirmed_;
+    std::uint32_t skillPoints_ = 0; // what the asked level costs
 };
 
 // CIFMessageBox with MsgBoxDivideCount: an item's icon and

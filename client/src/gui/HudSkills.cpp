@@ -551,14 +551,19 @@ void SkillPracticeBox::Ask(const Question& q, std::function<void()> confirmed) {
     if (ui::Widget* w = Child(18)) w->SetText(q.description);
     if (ui::Widget* w = Child(21)) w->SetText(q.next);
     if (ui::Widget* w = Child(23)) w->SetText(std::to_string(q.skillPoints));
-    // The skill points short: the box says so instead of sending (a message box of kind 9 in the original).
-    if (ui::Widget* ok = Child(19)) ok->enabled = context_.state == nullptr || context_.state->self.skillPoints >= q.skillPoints;
+    skillPoints_ = q.skillPoints;
+    if (ui::Widget* ok = Child(19)) ok->enabled = true; // short or not, Learn answers (Answer)
 }
 
 void SkillPracticeBox::Answer(bool yes) {
     auto confirmed = std::move(confirmed_);
     confirmed_ = nullptr;
-    const bool affordable = Child(19) == nullptr || Child(19)->enabled;
+    // The skill points short: Learn (19) closes the box and opens the original's message box kind 9 instead of sending
+    // ("You can't learn the current skill due to insufficient skill points.", one button), a mastery's as a skill's.
+    const bool affordable = context_.state == nullptr || context_.state->self.skillPoints >= skillPoints_;
+    if (yes && !affordable && context_.hud != nullptr && context_.text) {
+        context_.hud->Inform("UIIT_STT_CONFIRM_BOX", {context_.text("UIIT_STT_SKILL_POINT_INSUFFICIENCY")}, nullptr);
+    }
     // Hidden, not closed: the box is one of the HUD's windows made once at the start (window 31);
     // closed, it was gone and no skill could be raised again.
     if (context_.hud != nullptr) {
