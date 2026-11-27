@@ -85,6 +85,8 @@ const GameOptions::Row kGameRows[] = {
     {"hpWarning", "UIIT_STT_CAUTION_HP", false, true, 1},
     {"mpWarning", "UIIT_STT_CAUTION_MP", false, true, 1},
     {"warningSound", "UIIT_STT_CAUTION_SOUND", false, true, 1},
+    // The original's row 0x0C, "Open the guide" (the quick party's guide); saved, its reader not traced.
+    {"quickPartyGuide", "UIIT_STT_QUICKPARTY_OPEN_GUIDE", true, true, 1},
     // The right button's (the original's Default: the short cut off, the camera's method 1): a right click on a player opens
     // its menu; method 1 a turn past 5 pixels opens none, method 2 the cursor goes back where the turn began (one or the other).
     {"actionShortcut", "UIIT_CTL_ACTION_LIST_ACTIVE", false, false, 1},
