@@ -80,8 +80,13 @@ void PlayScreen::HandleStall(ScreenContext& context, const proto::StallEvent& ev
             // Through the network: "[%s] has purchased [%s] through stall network." and the commission paid.
             const assets::ItemRow* row = tables_ ? tables_->items.Find(line.item.item) : nullptr;
             const std::string what = row != nullptr ? text(row->nameKey.c_str()) : std::string();
-            // In the stall: "[buyer]bought item [item]." (the original's 0x30B7 kind 3).
-            post(FormatText(text(line.network ? "UIIT_MSG_WARENETWORK_BUY_SUCCESS" : "UIIT_MSG_STREET_STORE_SELL_COMMODITY"), {line.name, what}));
+            // In the stall: "[buyer]bought item [item]." (the original's 0x30B7 kind 3); both into the stall's own chat, as
+            // 1.188's (0x778A10 to chat module 1, 0xFFDBC99B), else (no stall open) a system line.
+            {
+                const std::string said = FormatText(text(line.network ? "UIIT_MSG_WARENETWORK_BUY_SUCCESS" : "UIIT_MSG_STREET_STORE_SELL_COMMODITY"), {line.name, what});
+                if (stall_.In()) stall_.AddNotice(said, 0xFFDBC99Bu);
+                else post(said);
+            }
             if (line.gold > 0) post(FormatText(text("UIIT_MSG_WARENETWORK_CHARGE"), {GoldText(line.gold)}));
             core::LogInfo("game: stall: sold to {}{} (commission {})", line.name, line.network ? " through the network" : "", line.gold);
             break;

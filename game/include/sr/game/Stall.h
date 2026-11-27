@@ -23,6 +23,7 @@ public:
     };
     struct ChatLine {
         std::string name, text;
+        std::uint32_t colour = 0; // a notice's (no name): its ARGB; 0 a player's line
     };
     // A line for the system messages; the HUD words it in the client's texts.
     struct Line {
@@ -57,6 +58,12 @@ public:
     const std::array<std::optional<Item>, proto::kStallSlots>& Items() const { return items_; }
     const std::vector<proto::StallPerson>& People() const { return people_; }
     const std::vector<ChatLine>& Chat() const { return chat_; }
+    // A notice in the stall's chat (no name, its own colour): 1.188's sale lines (Msg_30B7 into the stall's chat module).
+    void AddNotice(std::string text, std::uint32_t colour) {
+        chat_.push_back({{}, std::move(text), colour});
+        if (chat_.size() > 100) chat_.erase(chat_.begin());
+        ++revision_;
+    }
     // The bag place of an item the player put up in its own stall (it stays in the bag, held).
     bool Up(int place) const;
     // Anything the stall window shows changed.

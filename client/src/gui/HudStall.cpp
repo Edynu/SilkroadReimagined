@@ -201,7 +201,9 @@ public:
         if (auto* box = ui::As<ui::TextBox>(ChatPart(this, kChatLines)); box != nullptr && v->Chat().size() != chatShown_) {
             for (std::size_t k = chatShown_ < v->Chat().size() ? chatShown_ : 0; k < v->Chat().size(); ++k) {
                 if (k == 0 && chatShown_ > v->Chat().size()) box->ClearParagraphs();
-                box->AddParagraph(v->Chat()[k].name + ": " + v->Chat()[k].text, ui::kWhite);
+                const game::StallView::ChatLine& l = v->Chat()[k];
+                if (l.name.empty()) box->AddParagraph(l.text, ui::Argb(l.colour != 0 ? l.colour : 0xFFFFFFFFu));
+                else box->AddParagraph(l.name + ": " + l.text, ui::kWhite);
             }
             chatShown_ = v->Chat().size();
             box->ScrollToEnd();
