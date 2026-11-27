@@ -524,6 +524,10 @@ void ServiceEvent(HudContext& context, const game::proto::MallEvent& event);
 bool ChooseSkin(HudContext& context, bool male, int figure, int height, int volume, bool confirm);
 // The open confirmation box made taller by `extra` (its text and the buttons below; HudGuild.cpp).
 void GrowConfirm(ui::Interface& ui, float extra);
+void GrowConfirm(ConfirmBox& box, float extra);
+// The emblem item's boxes (the original's message box kinds 0x15 / 0x18 the question, 0x1A / 0x1B the success, one
+// Confirm button): the guild's or the union's lines.
+ConfirmBox* OpenCrestBox(HudContext& c, bool ofGuild, bool complete, std::function<void(bool yes)> answer);
 void GuildNpcChoice(ui::Interface& ui, HudContext& context, int choice, std::uint32_t npc);
 // The open name box answered with `name` (the test options); false when none is open.
 bool AnswerGuildNameBox(ui::Interface& ui, const std::string& name);

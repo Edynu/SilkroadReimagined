@@ -113,13 +113,10 @@ bool PlayScreen::UseCrestItem(std::uint8_t place) {
         });
         return true;
     }
-    // the format asked, the file's size and kind, where it is, then the question.
-    const std::string of = ofGuild ? "UIIT_MSG_GUILD_" : "UIIT_MSG_UNION_";
-    hud_.Confirm("UIIT_STT_CONFIRM_BOX",
-                 {text(of + "USER_CREST"), text("UIIT_MSG_GUILD_USER_CREST_FILE"), text(of + "USER_CREST_FOLDER"), text(of + "CREST_REGISTER")},
-                 [this, kind, place](bool yes) {
-                     if (yes) RegisterCrest(kind, place);
-                 });
+    // The question (the original's box 0x15 / 0x18: the format, where the file goes, then "Register the ... emblem?").
+    OpenCrestBox(hudContext_, ofGuild, false, [this, kind, place](bool yes) {
+        if (yes) RegisterCrest(kind, place);
+    });
     return true;
 }
 
@@ -260,6 +257,11 @@ void PlayScreen::HandleGuild(ScreenContext& context, const proto::GuildEvent& ev
         // "Contributed [%d]GP.".
         if (a.action == proto::GuildAction::Donate && a.error == 0 && hudContext_.text) {
             player_.Post(game::GameMessage::Kind::General, FormatText(text("UIIT_MSG_GUILD_GP_SUBSCRIPION_RESULT"), {std::to_string(a.value)}), context.time);
+        }
+        // An emblem registered: the original's box of its success and the notice that it shows in a few minutes, one
+        // Confirm button.
+        if ((a.action == proto::GuildAction::CrestRegister || a.action == proto::GuildAction::UnionCrestRegister) && a.error == 0 && hudContext_.text) {
+            OpenCrestBox(hudContext_, a.action == proto::GuildAction::CrestRegister, true, nullptr);
         }
         if (a.error == 0 || !hudContext_.text) continue;
         // The war's answers the client words itself: no answer in time, nothing to collect, not at war.

@@ -1119,23 +1119,51 @@ void RegisterGuildBoxes(ui::Interface& ui) {
 
 // The price's box holds two long lines: taller, its text with it and its buttons lower (ours: the
 // original's box 0x12 is sized in its code, not traced).
+void GrowConfirm(ConfirmBox& box, float extra) {
+    box.rect.h += extra;
+    for (const auto& child : box.children()) {
+        if (child->id() == 251) {
+            child->rect.h += extra;
+        } else if (child->rect.y > 60.0f) {
+            child->rect.y += extra;
+        } else if (child->rect.y > 30.0f && child->rect.h > 60.0f) {
+            child->rect.h += extra; // the dark tile under the text
+        }
+    }
+}
+
 void GrowConfirm(ui::Interface& ui, float extra) {
     const auto windows = ui.Windows();
     for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
         auto* box = dynamic_cast<ConfirmBox*>(*it);
         if (box == nullptr || !box->visible) continue;
-        box->rect.h += extra;
-        for (const auto& child : box->children()) {
-            if (child->id() == 251) {
-                child->rect.h += extra;
-            } else if (child->rect.y > 60.0f) {
-                child->rect.y += extra;
-            } else if (child->rect.y > 30.0f && child->rect.h > 60.0f) {
-                child->rect.h += extra; // the dark tile under the text
-            }
-        }
+        GrowConfirm(*box, extra);
         return;
     }
+}
+
+ConfirmBox* OpenCrestBox(HudContext& c, bool ofGuild, bool complete, std::function<void(bool yes)> answer) {
+    if (c.hud == nullptr || !c.text) return nullptr;
+    std::vector<std::string> lines;
+    if (complete) {
+        // "Registering guild emblem successful." and the notice that it may take a few minutes to show.
+        lines = {c.text(ofGuild ? "UIIT_MSG_GUILD_CREST_REGISTER_COMPLETE" : "UIIT_MSG_UNION_CREST_REGISTER_COMPLETE"), c.text("UIIT_MSG_CREST_REGISTER_INFORMATION_01"),
+                 c.text("UIIT_MSG_CREST_REGISTER_INFORMATION_02"), c.text("UIIT_MSG_CREST_REGISTER_INFORMATION_03"), c.text("UIIT_MSG_CREST_REGISTER_INFORMATION_04")};
+    } else if (ofGuild) {
+        // the format asked, the file's size and kind, where it is, then the question.
+        lines = {c.text("UIIT_MSG_GUILD_USER_CREST"), c.text("UIIT_MSG_GUILD_USER_CREST_FILE"), c.text("UIIT_MSG_GUILD_USER_CREST_FOLDER"),
+                 c.text("UIIT_MSG_GUILD_CREST_REGISTER")};
+    } else {
+        // the union's: the format, where it is, "Register the union emblem.", then the question (no size line).
+        lines = {c.text("UIIT_MSG_UNION_USER_CREST"), c.text("UIIT_MSG_UNION_USER_CREST_FOLDER"), c.text("UIIT_CTL_UNION_CREST_REGISTER"),
+                 c.text("UIIT_MSG_UNION_CREST_REGISTER")};
+    }
+    ConfirmBox* box = complete ? c.hud->Inform("UIIT_STT_CONFIRM_BOX", lines, [answer = std::move(answer)] { if (answer) answer(true); })
+                               : c.hud->Confirm("UIIT_STT_CONFIRM_BOX", lines, std::move(answer));
+    // taller for their lines (ours: the original's boxes are wider, 359 pixels of text; ours wraps the success's five
+    // lines into eight).
+    if (box != nullptr) GrowConfirm(*box, complete ? 84.0f : 32.0f);
+    return box;
 }
 
 std::vector<GuildNpcRowInfo> GuildNpcRows(const HudContext& c) {
