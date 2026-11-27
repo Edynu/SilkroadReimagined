@@ -711,9 +711,10 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             }
             if (page_ == "worldmap" || page_.rfind("worldmap:", 0) == 0) {
                 hudContext_.worldMap = host_.data().WorldMap();
-                // Jangan held by a sample guild: its crest box on the world.
+                // Jangan held by a sample guild (the Wolves, in the sample union: its barricades shown on worldmap:1001): its
+                // crest box on the world.
                 game::proto::FortressList forts;
-                forts.fortresses = {{1, "SN_FORTRESS_JANGAN", 7, "Wolves", 0, {}, 10, false, {}, "Wulf", "The wolves keep the gate."}};
+                forts.fortresses = {{1, "SN_FORTRESS_JANGAN", 2, "Wolves", 0, {}, 10, false, {}, "Wulf", "The wolves keep the gate."}};
                 sampleFortress_.Apply(game::proto::FortressEvent{forts});
                 if (page_ == "worldmap") {
                     hud_.Show(hud::kWorldMap);
@@ -1690,16 +1691,19 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 if (s.name.find("STRUCTURE_POS_JA_") == std::string::npos) continue;
                 proto::FortressStructureRecord r;
                 const bool heart = s.name.find("FORT_STONE") != std::string::npos, tower = s.name.find("GUARD_TOWER") != std::string::npos;
-                const bool gate = s.name.find("GATE") != std::string::npos;
-                if (!heart && !tower && !gate) continue;
+                const bool gate = s.name.find("GATE") != std::string::npos, barricade = s.name.find("BARRICADE") != std::string::npos;
+                if (!heart && !tower && !gate && !barricade) continue;
+                if (barricade && page_ == "fortress-map") continue;
                 r.zone = zone++;
                 r.region = s.region;
                 r.x = s.x;
                 r.z = s.z;
-                r.refObjId = heart ? 19538 : tower ? 19521 : 19504;
-                r.kind = std::uint8_t(heart ? game::StructureKind::Heart : tower ? game::StructureKind::GuardTower : game::StructureKind::Gate);
+                r.refObjId = heart ? 19538 : tower ? 19521 : barricade ? 19550 : 19504;
+                r.kind = std::uint8_t(heart ? game::StructureKind::Heart : tower ? game::StructureKind::GuardTower
+                                      : barricade                                ? game::StructureKind::Barricade
+                                                                                 : game::StructureKind::Gate);
                 r.maxHp = 5000;
-                r.hp = r.zone == 86 ? 3100 : r.zone == 89 ? 0 : 5000;
+                r.hp = r.zone == 86 ? 3100 : r.zone == 89 || (barricade && s.name.ends_with("_03")) ? 0 : 5000;
                 r.state = r.hp == 0 ? 1 : 0;
                 r.repairCost = r.maxHp - r.hp;
                 list.structures.push_back(r);

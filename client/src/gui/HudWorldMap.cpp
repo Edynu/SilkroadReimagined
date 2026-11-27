@@ -345,14 +345,36 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
     view_.Draw(frame.paint, at);
     view_.DrawLabels(frame.paint, at, [this](const std::string& key) { return c_.Text(key); });
     frame.paint.PushClip(at);
-    // A fortress's own map (1001..1999, as 1.188's): every structure but the barricades at its place, its icon
-    // (whole, _r damaged, _d destroyed) as the battle aide's map, 24 x 24.
+    // A fortress's own map (1001..1999, as 1.188's): every structure at its place, its icon (whole, _r damaged, _d
+    // destroyed) as the battle aide's map, 24 x 24. The barricades only to the fortress's guild and its union: a
+    // standing one gate_ani.ddj's two frames (17 x 16 each, 500 ms apart), a broken one gate.ddj (its 16 x 16).
     if (view_.Id() > 1000 && view_.Id() < 2000 && c_.fortress != nullptr && c_.characters != nullptr) {
+        const std::uint32_t shown = view_.Id() == 1001 ? 1 : view_.Id() == 1002 ? 6 : view_.Id() == 1003 ? 3 : 0;
+        bool ours = false;
+        if (c_.guild != nullptr && c_.guild->InGuild()) {
+            for (const proto::FortressRecord& f : c_.fortress->Fortresses()) {
+                if (f.id != shown || f.owner == 0) continue;
+                ours = f.owner == c_.guild->Guild().id;
+                for (const proto::UnionGuildRecord& g : c_.guild->Union().guilds) ours = ours || g.id == f.owner;
+            }
+        }
         for (const proto::FortressStructureRecord& r : c_.fortress->StructureList().structures) {
             const assets::ObjectRow* row = c_.characters->Find(r.refObjId);
-            if (row != nullptr && row->codename.find("BARRICADE") != std::string::npos) continue;
             const auto p = view_.Pixel(r.region, r.x, r.z);
             if (!p) continue;
+            if (row != nullptr && row->codename.find("BARRICADE") != std::string::npos) {
+                if (!ours) continue;
+                const ui::Vec2 s = view_.ToScreen(*p, at);
+                if (r.hp == 0) {
+                    frame.paint.Image("interface\\worldmap\\map\\gate.ddj", {std::floor(s.x - 8.0f), std::floor(s.y - 8.0f), 16.0f, 16.0f},
+                                      {0.0f, 0.0f}, {0.8f, 1.0f});
+                } else {
+                    const float u = (static_cast<long long>(frame.time * 2.0) % 2) * 0.265625f;
+                    frame.paint.Image("interface\\worldmap\\map\\gate_ani.ddj", {std::floor(s.x - 8.5f), std::floor(s.y - 8.0f), 17.0f, 16.0f},
+                                      {u, 0.0f}, {u + 0.265625f, 0.5f});
+                }
+                continue;
+            }
             const std::string icon = FortressStructureIcon(c_, r);
             if (icon.empty()) continue;
             const ui::Vec2 s = view_.ToScreen(*p, at);
