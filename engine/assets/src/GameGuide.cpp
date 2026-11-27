@@ -3,6 +3,7 @@
 #include <cstdlib>
 
 #include "sr/assets/FileSystem.h"
+#include "sr/assets/GameData.h"
 #include "sr/core/Text.h"
 
 namespace sr::assets {
@@ -74,8 +75,16 @@ bool LoadGameGuide(const FileSystem& files, GameGuideData& out, std::string& err
         error = "gameguidedata.txt or eventguidedata.txt missing";
         return false;
     }
-    return DecodeGameGuide(core::DecodeTextFile(topics->Bytes()), out.topics, error) &&
-           DecodeEventGuide(core::DecodeTextFile(events->Bytes()), out.events, error);
+    if (!DecodeGameGuide(core::DecodeTextFile(topics->Bytes()), out.topics, error) ||
+        !DecodeEventGuide(core::DecodeTextFile(events->Bytes()), out.events, error)) {
+        return false;
+    }
+    out.questLevels.clear();
+    if (QuestTable quests; quests.Load(files, error)) {
+        for (const QuestRow& q : quests.Rows()) out.questLevels[q.codename] = q.level;
+    }
+    error.clear();
+    return true;
 }
 
 } // namespace sr::assets

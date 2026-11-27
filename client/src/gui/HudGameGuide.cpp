@@ -167,13 +167,23 @@ private:
         if (data == nullptr) return;
         const auto inTab = [&](std::uint32_t id) { return tab_ == 0 ? id < 50000 : tab_ == 1 ? id >= 50000 && id < 100000 : id >= 100000; };
         const std::set<std::uint32_t> met = tab_ == 1 ? EventsMet(*data) : std::set<std::uint32_t>{};
+        // The quest guide: the quests up to the player's level + 10 (1.188's 0x7678D0, from its quest table: a topic whose
+        // quest is not in questdata.txt never comes), a topic's quest named by its page (SN_PAYCON_<codename>).
+        const int most = (c_.state != nullptr ? int(c_.state->self.level) : 1) + 10;
+        const auto tooHigh = [&](const assets::GameGuideRow& r) {
+            constexpr std::string_view kPay = "SN_PAYCON_";
+            if (tab_ != 2 || r.level != 1 || !r.pageKey.starts_with(kPay)) return false;
+            const auto it = data->questLevels.find(r.pageKey.substr(kPay.size()));
+            return it == data->questLevels.end() || it->second > most;
+        };
         for (const assets::GameGuideRow& r : data->topics) {
             if (!r.inService || !inTab(r.id)) continue;
             if (tab_ == 1 && r.level == 1 && !met.contains(r.id)) continue;
+            if (tooHigh(r)) continue;
             rows_.push_back(&r);
         }
-        // An event heading with none of its topics met stays out.
-        if (tab_ == 1) {
+        // An event heading with none of its topics met stays out; a quest heading with none of its quests in reach too.
+        if (tab_ == 1 || tab_ == 2) {
             std::erase_if(rows_, [&](const assets::GameGuideRow* h) {
                 return h->level == 0 && std::none_of(rows_.begin(), rows_.end(), [&](const assets::GameGuideRow* t) { return t->level == 1 && t->parent == h->id; });
             });

@@ -17,6 +17,7 @@
 // The ids from 100000 are the quest guide's: its headings and the quests' pages (SN_PAYCON_*).
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,8 +47,10 @@ bool DecodeEventGuide(std::string_view utf8Text, std::vector<EventGuideRow>& out
 struct GameGuideData {
     std::vector<GameGuideRow> topics;
     std::vector<EventGuideRow> events;
+    // questdata.txt's levels by codename (the quest guide lists the quests up to the player's level + 10).
+    std::map<std::string, int> questLevels;
 };
-// Both tables from the game's files.
+// The tables from the game's files.
 bool LoadGameGuide(const FileSystem& files, GameGuideData& out, std::string& error);
 
 } // namespace sr::assets
