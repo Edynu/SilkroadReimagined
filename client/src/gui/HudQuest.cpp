@@ -362,20 +362,31 @@ public:
         for (; g < golds_.size(); ++g) golds_[g]->visible = false;
         // The gold window only for a reward with numbers, the item window only for one with items (the original's fill).
         if (goldWindow_ != nullptr) goldWindow_->visible = std::any_of(golds_.begin(), golds_.end(), [](const ui::Widget* w) { return w->visible; });
-        if (itemWindow_ != nullptr) itemWindow_->visible = !q->reward.items.empty();
+        // The items the player may get: a reward by country (_RefQuestReward.IsCheckCountry) lists only those whose country
+        // is the character's (1.188's list: the item's Country against the character's race; its gender test is set on
+        // no quest).
+        shown_.clear();
+        const int race = c_.state != nullptr ? int(c_.state->self.race) : 0;
+        for (std::size_t i = 0; i < q->reward.items.size(); ++i) {
+            const assets::ItemRow* row = c_.items != nullptr ? c_.items->Find(std::string_view(q->reward.items[i].item)) : nullptr;
+            if (q->reward.byCountry && row != nullptr && row->country != race) continue;
+            shown_.push_back(i);
+        }
+        if (itemWindow_ != nullptr) itemWindow_->visible = !shown_.empty();
         // The items.
         for (std::size_t i = 0; i < items_.size(); ++i) {
             ui::Slot* slot = items_[i].second;
-            const bool has = i < q->reward.items.size();
-            const assets::ItemRow* row = has && c_.items != nullptr ? c_.items->Find(std::string_view(q->reward.items[i].item)) : nullptr;
+            const bool has = i < shown_.size();
+            const std::size_t at = has ? shown_[i] : 0;
+            const assets::ItemRow* row = has && c_.items != nullptr ? c_.items->Find(std::string_view(q->reward.items[at].item)) : nullptr;
             slot->icon = row != nullptr ? "icon\\" + row->iconPath : std::string();
-            slot->count = has ? int(q->reward.items[i].count) : 0;
+            slot->count = has ? int(q->reward.items[at].count) : 0;
             slot->overlay.clear();
-            slot->tooltipLines = [this, row, i, q] {
+            slot->tooltipLines = [this, row, at, q] {
                 if (row == nullptr) return std::vector<ui::TooltipLine>{};
                 game::ItemInstance item;
                 item.refId = row->refObjId;
-                item.count = std::uint16_t(q->reward.items[i].count);
+                item.count = std::uint16_t(q->reward.items[at].count);
                 return ItemTooltip(*row, item, c_);
             };
         }
@@ -411,16 +422,17 @@ public:
             if (c_.systemLine) c_.systemLine(c_.Text(key));
         };
         for (std::size_t i = 0; i < items_.size(); ++i) {
-            if (n.source != items_[i].second || npc_ == 0 || q->reward.choose == 0 || i >= q->reward.items.size()) continue;
+            if (n.source != items_[i].second || npc_ == 0 || q->reward.choose == 0 || i >= shown_.size()) continue;
             // An item chosen or put back; no more than the quest lets choose.
-            const auto it = std::find(picked_.begin(), picked_.end(), std::uint8_t(i));
+            const std::uint8_t at = std::uint8_t(shown_[i]);
+            const auto it = std::find(picked_.begin(), picked_.end(), at);
             if (it != picked_.end()) {
                 picked_.erase(it);
                 items_[i].second->overlay.clear();
             } else if (picked_.size() >= q->reward.choose) {
                 line("UIIT_STT_QUESTREWARD_MSG03");
             } else {
-                picked_.push_back(std::uint8_t(i));
+                picked_.push_back(at);
                 items_[i].second->overlay = "interface\\ifcommon\\com_item_exchange.ddj";
             }
             return true;
@@ -473,6 +485,7 @@ private:
     std::vector<std::pair<int, ui::Slot*>> items_;
     std::uint32_t quest_ = 0, npc_ = 0;
     std::vector<std::uint8_t> picked_;
+    std::vector<std::size_t> shown_; // the reward's items listed (by country), by slot
 };
 
 // --- The reward's confirm ---------------------------------------------------------------------------------------
