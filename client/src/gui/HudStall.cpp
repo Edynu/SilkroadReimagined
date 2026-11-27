@@ -446,7 +446,11 @@ public:
             gold->SetText(GoldText(c_.state->inventory.gold));
             gold->textColor = GoldColor(c_.state->inventory.gold);
         }
-        if (ui::Widget* search = Child(kSearch)) search->enabled = c_.time >= searchAgain_;
+        if (ui::Widget* search = Child(kSearch)) {
+            search->enabled = c_.time >= searchAgain_;
+            // The search's help (1.188's network window sets it at its creation): ten seconds between searches.
+            if (frame.pointer.hovered == search) frame.interface.ShowTooltip(c_.Text("UIIT_MSG_WARENETWORK_SCAN_TOOLTIP"), search->ScreenRect());
+        }
         if (ui::Widget* hint = Child(kNameHint)) {
             const auto* e = ui::As<ui::Edit>(Child(kNameEdit));
             hint->visible = e != nullptr && e->text().empty() && (ui_ == nullptr || ui_->focus() != e);

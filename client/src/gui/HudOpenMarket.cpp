@@ -385,6 +385,11 @@ public:
 
     void Update(ui::Frame& frame) override {
         MainFrame::Update(frame);
+        // The page buttons' help (1.188's: Search, Register, Settle).
+        for (auto [id, key] : {std::pair{kSearchButton, "UIIT_STT_OPEN_MARKET_SEARCH"}, std::pair{kRegisterButton, "UIIT_STT_OPEN_MARKET_ENTER"},
+                               std::pair{kSettleButton, "UIIT_STT_OPEN_MARKET_CALCULATE"}}) {
+            if (ui::Widget* b = Child(id); b != nullptr && frame.pointer.hovered == b) frame.interface.ShowTooltip(c_.Text(key), b->ScreenRect());
+        }
         game::PlayerState* s = c_.state;
         if (s == nullptr) return;
         const std::uint64_t gold = s->inventory.gold;
@@ -522,13 +527,39 @@ public:
     }
     void CancelChosen() {
         game::PlayerState* s = c_.state;
-        if (s == nullptr || c_.hud == nullptr || chosen_ < 0) return;
+        if (s == nullptr || c_.hud == nullptr) return;
         const auto rows = RegisterRows(*s);
+        HudContext* c = &c_;
+        if (chosen_ < 0) {
+            // None chosen: the page's rows all at once (1.188's Cancel): any of them still pending, "remove all items from
+            // the registration pending list?" (those taken off it); else "cancel the registration for all items?".
+            std::vector<std::uint8_t> pending;
+            std::vector<std::uint32_t> listed;
+            for (std::size_t i = 0; i < std::size_t(om::kPageRows); ++i) {
+                const std::size_t at = std::size_t(shownPage_) * om::kPageRows + i;
+                if (at >= rows.size()) break;
+                if (rows[at].pending) pending.push_back(rows[at].place);
+                else listed.push_back(rows[at].listing);
+            }
+            if (!pending.empty()) {
+                c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c_.Text("UIIT_STT_OPEN_MARKET_TEMP_ENTER_CANCEL_ALL")}, [c, pending](bool yes) {
+                    if (!yes || c->state == nullptr) return;
+                    std::erase_if(c->state->openMarket.pending, [&](const game::OpenMarketView::Pending& p) {
+                        return std::find(pending.begin(), pending.end(), p.place) != pending.end();
+                    });
+                    ++c->state->openMarket.version;
+                });
+            } else if (!listed.empty()) {
+                c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {c_.Text("UIIT_STT_OPEN_MARKET_ENTER_CANCEL_ALL")}, [c, listed](bool yes) {
+                    if (yes) Send(*c, proto::OpenMarketTakeBack{listed});
+                });
+            }
+            return;
+        }
         const std::size_t at = std::size_t(shownPage_) * om::kPageRows + std::size_t(chosen_);
         if (at >= rows.size()) return;
         const RegisterRow r = rows[at];
         const std::string name = ItemName(r.refId);
-        HudContext* c = &c_;
         if (r.pending) {
             // Off the pending list (UIIT_STT_OPEN_MARKET_TEMP_ENTER_CANCEL "remove [%s] from the registration list?").
             c_.hud->Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(c_.Text("UIIT_STT_OPEN_MARKET_TEMP_ENTER_CANCEL"), {name})}, [c, place = r.place](bool yes) {
