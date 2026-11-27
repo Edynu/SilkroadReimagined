@@ -574,6 +574,8 @@ private:
     void HandleAcademy(ScreenContext& context, const game::proto::AcademyEvent& event);
     bool AcademyScriptStep(const std::string& verb, const std::string& arg);
     bool academyAskOpen_ = false;
+    ConfirmBox* academyJoinBox_ = nullptr; // a join request's box to the guardian (closed at academyJoinUntil_)
+    double academyJoinUntil_ = 0.0;
     // The Open Market (PlayOpenMarket.cpp): its events into player_.openMarket, their lines,
     // the window opened and closed with the market, the test steps (om-*).
     void HandleOpenMarket(ScreenContext& context, const game::proto::OpenMarketEvent& event);

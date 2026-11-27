@@ -43,6 +43,10 @@ std::string PartyItemText(const HudContext& context, std::uint8_t settings);
 // A party invitation's box, the original's message box kind 6: who asks, the question, the two settings in black boxes,
 // "anyone may invite" when set, Accept / Refuse.
 ConfirmBox* OpenPartyInviteBox(HudContext& context, const std::string& from, std::uint8_t settings, std::function<void(bool yes)> answer);
+// An academy join request to its guardian, the original's message box kind 0x0E: the request, the applicant's level
+// (and highest) and race in black boxes.
+ConfirmBox* OpenAcademyJoinBox(HudContext& context, const std::string& from, int level, int maxLevel, std::uint8_t race,
+                               std::function<void(bool yes)> answer);
 // A purpose's name (Hunting, Quest, Trade Union, Thief Union).
 std::string PartyPurposeText(const HudContext& context, std::uint8_t purpose);
 

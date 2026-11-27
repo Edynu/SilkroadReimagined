@@ -47,7 +47,8 @@ using MessageId = std::uint16_t;
 // 6: a quest instance's members asked first (QuestEnterAsk, QuestEnterReply).
 // 7: the casting gauge's kind (ReturnStarted.kind, .quest; CancelCasting).
 // 8: the guild's mercenaries (GuildInfo.mercenaryAttr, .mercenaries; GuildMercenaryAbility).
-inline constexpr std::uint32_t kProtocolVersion = 8;
+// 9: an academy join request's highest level and race (AcademyAsk.maxLevel, .race).
+inline constexpr std::uint32_t kProtocolVersion = 9;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

@@ -220,11 +220,14 @@ struct AcademyAsk {
     static constexpr MessageId kId = 0x1441;
     std::string from;
     std::uint8_t join = 0, level = 0;
+    std::uint8_t maxLevel = 0, race = 0; // a join request's: the highest level reached ("%d(%d)"), 0 China / 1 Europe
     template <typename V>
     void Visit(V& v) {
         v("from", from, 32);
         v("join", join);
         v("level", level);
+        v("maxLevel", maxLevel);
+        v("race", race);
     }
 };
 // A request refused: the request's id and the original's code (academy::code), the seconds a wait has left.

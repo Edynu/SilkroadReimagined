@@ -48,7 +48,7 @@ struct Envelope {
     std::uint8_t kind = 0;
     std::uint32_t academy = 0;
     std::int64_t character = 0;
-    std::uint8_t a = 0, b = 0;
+    std::uint8_t a = 0, b = 0, race = 0;
     std::string name, text;
     template <typename V>
     void Visit(V& v) {
@@ -58,6 +58,7 @@ struct Envelope {
         v("character", character);
         v("a", a);
         v("b", b);
+        v("race", race);
         v("name", name, 32);
         v("text", text, 512);
     }
@@ -1039,10 +1040,11 @@ struct Academies::State {
         const std::uint64_t peer = a.peer;
         const std::string name = a.name;
         const int level = a.level, maxLevel = a.maxLevel;
+        const std::uint8_t race = a.race;
         joinsOut[character] = {0, now + std::chrono::seconds(academy::kInviteSeconds + 5)};
         auto found = std::make_shared<std::optional<AcademyMatchEntry>>();
         host.AcademySubmit([entry, found](Database& db) { *found = FindAcademyMatch(db, entry); },
-                           [this, character, peer, name, level, maxLevel, cls, found] {
+                           [this, character, peer, name, level, maxLevel, race, cls, found] {
                                const auto out = joinsOut.find(character);
                                if (out == joinsOut.end()) return;
                                if (!*found) {
@@ -1058,24 +1060,26 @@ struct Academies::State {
                                }
                                out->second.academy = e.academy;
                                Send(peer, proto::AcademyMatchProgress{1});
-                               if (online.contains(e.guardianCharacter)) return AskGuardian(e.guardianCharacter, e.academy, character, name, level, maxLevel, 0);
+                               if (online.contains(e.guardianCharacter)) return AskGuardian(e.guardianCharacter, e.academy, character, name, level, maxLevel, race, 0);
                                Envelope env;
                                env.kind = kBusJoinAsk;
                                env.academy = e.academy;
                                env.character = character;
                                env.a = std::uint8_t(std::clamp(level, 0, 255));
                                env.b = std::uint8_t(std::clamp(maxLevel, 0, 255));
+                               env.race = race;
                                env.name = name;
                                env.text = std::to_string(e.guardianCharacter);
                                Publish(std::move(env));
                            });
     }
     // The guardian (on this server) asked "[%s] has requested for Academy registration".
-    void AskGuardian(std::int64_t guardian, std::uint32_t id, std::int64_t applicant, const std::string& name, int level, int maxLevel, std::uint16_t from) {
+    void AskGuardian(std::int64_t guardian, std::uint32_t id, std::int64_t applicant, const std::string& name, int level, int maxLevel,
+                     std::uint8_t race, std::uint16_t from) {
         Online* g = Find(guardian);
         if (g == nullptr || joinsIn.contains(guardian)) return JoinDone(from, id, applicant, 0, 0);
         joinsIn[guardian] = {id, applicant, name, level, maxLevel, from, Clock::now() + std::chrono::seconds(academy::kInviteSeconds)};
-        Send(g->peer, proto::AcademyAsk{name, 1, std::uint8_t(std::clamp(level, 0, 255))});
+        Send(g->peer, proto::AcademyAsk{name, 1, std::uint8_t(std::clamp(level, 0, 255)), std::uint8_t(std::clamp(maxLevel, 0, 255)), race});
     }
     // A join request's end for the applicant, here or on its server (`how`: 1 joined, 0 refused, 2 no reply).
     void JoinDone(std::uint16_t server, std::uint32_t id, std::int64_t applicant, std::uint8_t how, std::uint16_t refusal) {
@@ -1209,7 +1213,7 @@ void Academies::BusMessage(const std::string& text) {
     case kBusJoinAsk: {
         // A join request for a guardian playing here.
         const std::int64_t guardian = std::strtoll(e.text.c_str(), nullptr, 10);
-        if (s.online.contains(guardian)) s.AskGuardian(guardian, e.academy, e.character, e.name, e.a, e.b, e.from);
+        if (s.online.contains(guardian)) s.AskGuardian(guardian, e.academy, e.character, e.name, e.a, e.b, e.race, e.from);
         return;
     }
     case kBusJoinDone:

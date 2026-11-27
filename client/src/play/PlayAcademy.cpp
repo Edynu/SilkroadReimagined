@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "gui/Hud.h"
+#include "gui/HudParty.h"
 #include "gui/HudWindows.h"
 #include "play/PlayScreen.h"
 #include "sr/core/Log.h"
@@ -40,6 +41,7 @@ void PlayScreen::HandleAcademy(ScreenContext& context, const proto::AcademyEvent
     // An invitation's answer, or the guardian's to a join request from the matching list.
     const bool join = ask->join != 0;
     const auto answered = [this, join](bool yes) {
+        academyJoinBox_ = nullptr; // closed by its own answer
         if (!academyAskOpen_) return;
         academyAskOpen_ = false;
         if (replay_) return;
@@ -48,6 +50,13 @@ void PlayScreen::HandleAcademy(ScreenContext& context, const proto::AcademyEvent
     };
     academyAskOpen_ = true;
     if (guildAnswer_ != 0) return answered(guildAnswer_ > 0);
+    if (join) {
+        // The guardian's: the original's box kind 0x0E (the applicant's level and race), closed unanswered after its own
+        // 15 seconds (the original's timer; the server then lets the request lapse).
+        academyJoinBox_ = OpenAcademyJoinBox(hudContext_, ask->from, ask->level, ask->maxLevel, ask->race, answered);
+        academyJoinUntil_ = context.time + 15.0;
+        return;
+    }
     hud_.Confirm("UIIT_STT_CONFIRM_BOX", {FormatText(gui_.data().Text("UIIT_STT_TC_JOIN_REQUEST"), {ask->from})}, answered);
 }
 

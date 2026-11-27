@@ -987,6 +987,42 @@ private:
     HudContext& context_;
 };
 
+// A simple box made to the size of one of the original's kinds (centred again): its text hidden (the kind's own lines are
+// placed), the frame's pieces and background tile reaching the right or the bottom edge following it, the close button
+// with the right edge, Yes and No at their places.
+void ShapeBox(ConfirmBox& box, float width, float height, float yesX, float noX, float buttonsY) {
+    const float oldW = box.rect.w, oldH = box.rect.h, dw = width - oldW, dh = height - oldH;
+    box.rect.x += std::floor(-dw / 2.0f);
+    box.rect.y += std::floor(-dh / 2.0f);
+    box.rect.w = width;
+    box.rect.h = height;
+    for (const auto& child : box.children()) {
+        const int id = child->id();
+        if (id == 251) {
+            child->visible = false;
+        } else if (id == 2) {
+            child->rect.x += dw;
+        } else if (id == 252 || id == 253) {
+            child->rect.x = id == 252 ? yesX : noX;
+            child->rect.y = buttonsY;
+        } else {
+            if (child->rect.x + child->rect.w >= oldW - 40.0f) child->rect.w += dw;
+            if (child->rect.y + child->rect.h >= oldH - 40.0f) child->rect.h += dh;
+        }
+    }
+}
+
+// A line of the box (a static; `ddj` its picture behind, a black box), its text aligned (0 left, 1 centre).
+void PutLine(ui::Interface& ui, ConfirmBox& box, const std::string& text, float x, float y, float w, float h, const char* ddj, int align) {
+    assets::UiLayoutNode n;
+    n.type = "CIFStatic";
+    n.name = "GDR_MSGBOX_LINE";
+    if (ddj != nullptr) n.ddj = ddj;
+    n.hAlign = align;
+    n.rect = {x, y, w, h};
+    if (ui::Widget* line = box.Add(ui.Make(n))) line->SetText(text);
+}
+
 } // namespace
 
 ConfirmBox* OpenPartyInviteBox(HudContext& c, const std::string& from, std::uint8_t settings, std::function<void(bool yes)> answer) {
@@ -997,46 +1033,46 @@ ConfirmBox* OpenPartyInviteBox(HudContext& c, const std::string& from, std::uint
     // The original's kind 6 (8 the same): 300 x 176, the lines at 16, 48 and 16, 64, the settings in two black boxes
     // (msgbox_blackbox.ddj, 100 x 24) at 44, 93 and 156, 93, "anyone may invite" at 6, 121, Accept and Refuse at
     // 72, 139 and 152, 139.
-    const float oldW = box->rect.w, oldH = box->rect.h, dw = 300.0f - oldW, dh = 176.0f - oldH;
-    box->rect.x += std::floor(-dw / 2.0f);
-    box->rect.y += std::floor(-dh / 2.0f);
-    box->rect.w = 300.0f;
-    box->rect.h = 176.0f;
-    for (const auto& child : box->children()) {
-        const int id = child->id();
-        if (id == 251) child->visible = false; // the simple box's text: ours are placed below
-        if (id == 2) {
-            child->rect.x += dw; // the close button keeps to the right edge
-        } else if (id != 251 && id != 252 && id != 253) {
-            // The frame's pieces and the background tile: those reaching the right or the bottom edge follow it.
-            if (child->rect.x + child->rect.w >= oldW - 40.0f) child->rect.w += dw;
-            if (child->rect.y + child->rect.h >= oldH - 40.0f) child->rect.h += dh;
-        }
-        if (child->id() == 252) {
-            child->rect.x = 72.0f;
-            child->rect.y = 139.0f;
-            child->SetText(c.Text("UIIT_STT_ACCEPT"));
-        }
-        if (child->id() == 253) {
-            child->rect.x = 152.0f;
-            child->rect.y = 139.0f;
-            child->SetText(c.Text("UIIT_STT_REFUSE"));
-        }
-    }
+    ShapeBox(*box, 300.0f, 176.0f, 72.0f, 152.0f, 139.0f);
+    if (ui::Widget* yes = box->Child(252)) yes->SetText(c.Text("UIIT_STT_ACCEPT"));
+    if (ui::Widget* no = box->Child(253)) no->SetText(c.Text("UIIT_STT_REFUSE"));
     const auto put = [&](const std::string& text, float x, float y, float w, float h, const char* ddj, int align) {
-        assets::UiLayoutNode n;
-        n.type = "CIFStatic";
-        n.name = "GDR_MSGBOX_PARTY_LINE";
-        if (ddj != nullptr) n.ddj = ddj;
-        n.hAlign = align;
-        n.rect = {x, y, w, h};
-        if (ui::Widget* w = box->Add(ui.Make(n))) w->SetText(text);
+        PutLine(ui, *box, text, x, y, w, h, ddj, align);
     };
     put(FormatText(c.Text("UIIT_STT_PARTY_SOMEUSER"), {from}), 16.0f, 48.0f, 268.0f, 16.0f, nullptr, 0);
     put(c.Text("UIIT_STT_PARTY_PROPOSAL_ASK"), 16.0f, 64.0f, 268.0f, 16.0f, nullptr, 0);
     put(PartyExpText(c, settings), 44.0f, 93.0f, 100.0f, 24.0f, "interface\\messagebox\\msgbox_blackbox.ddj", 1);
     put(PartyItemText(c, settings), 156.0f, 93.0f, 100.0f, 24.0f, "interface\\messagebox\\msgbox_blackbox.ddj", 1);
     if ((settings & game::kPartyAnyoneInvites) != 0) put(c.Text("UIIT_STT_PARTY_JOIN_ANYONE"), 6.0f, 121.0f, 288.0f, 16.0f, nullptr, 1);
+    return box;
+}
+
+ConfirmBox* OpenAcademyJoinBox(HudContext& c, const std::string& from, int level, int maxLevel, std::uint8_t race, std::function<void(bool yes)> answer) {
+    if (c.hud == nullptr || c.hud->interface() == nullptr) return nullptr;
+    ui::Interface& ui = *c.hud->interface();
+    ConfirmBox* box = c.hud->Confirm("UIIT_PAG_PARTYMATCH_JOINREQUEST", {}, std::move(answer));
+    if (box == nullptr) return nullptr;
+    // The original's kind 0x0E: 360 x 215, the request at 14, 59 (300 wide), "Level" at 15, 121 and "Race" at 181, 121
+    // (58 x 11), their values in black boxes (58 x 20) at 98, 121 and 264, 121 ("%d(%d)": the level and the highest),
+    // the buttons at 101, 174 and 189, 174. Ours: the request's markup as plain lines (its name's colour not kept).
+    ShapeBox(*box, 360.0f, 215.0f, 101.0f, 189.0f, 174.0f);
+    std::string text = FormatText(c.Text("UIIT_STT_TC_JOIN_REQUEST"), {from});
+    std::vector<std::string> lines(1);
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] != '<') {
+            lines.back() += text[i++];
+            continue;
+        }
+        const std::size_t end = text.find('>', i);
+        if (end == std::string::npos) break;
+        if (text.compare(i, end - i + 1, "<br>") == 0) lines.emplace_back();
+        i = end + 1;
+    }
+    for (std::size_t k = 0; k < lines.size(); ++k) PutLine(ui, *box, lines[k], 14.0f, 59.0f + 16.0f * float(k), 300.0f, 16.0f, nullptr, 0);
+    PutLine(ui, *box, c.Text("UIIT_CTL_WARENETWORK_RESULT_LEVEL"), 15.0f, 121.0f, 58.0f, 20.0f, nullptr, 0);
+    PutLine(ui, *box, c.Text("UIIT_CTL_PARTYMATCH_PSEARCH_LIST_RACE"), 181.0f, 121.0f, 58.0f, 20.0f, nullptr, 0);
+    PutLine(ui, *box, std::to_string(level) + "(" + std::to_string(maxLevel) + ")", 98.0f, 121.0f, 58.0f, 20.0f, "interface\\messagebox\\msgbox_blackbox.ddj", 1);
+    PutLine(ui, *box, RaceText(c, race), 264.0f, 121.0f, 58.0f, 20.0f, "interface\\messagebox\\msgbox_blackbox.ddj", 1);
     return box;
 }
 

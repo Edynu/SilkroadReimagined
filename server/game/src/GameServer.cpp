@@ -6009,6 +6009,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         a.model = player.model;
         a.level = player.level;
         a.maxLevel = std::max(player.maxLevel, player.level);
+        a.race = std::uint8_t(player.wearer.country);
         a.dead = player.dead;
         a.gold = player.inventory.gold;
         a.busy = player.entity != 0 && ((exchanges && exchanges->Busy(player.entity)) || (stalls && (stalls->Owner(player.entity) || stalls->Visiting(player.entity))));

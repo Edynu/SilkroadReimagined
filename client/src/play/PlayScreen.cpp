@@ -2657,6 +2657,14 @@ void PlayScreen::HandleInput(ScreenContext& context) {
         if (ui::Interface* ui = gui_.interface()) ui->Close(recallBox_);
         recallBox_ = nullptr;
     }
+    // An academy join request unanswered after the original's 15 seconds: its box closes, no answer sent (PlayAcademy.cpp).
+    if (academyJoinBox_ != nullptr && context.time >= academyJoinUntil_) {
+        if (academyAskOpen_) {
+            academyAskOpen_ = false;
+            if (ui::Interface* ui = gui_.interface()) ui->Close(academyJoinBox_);
+        }
+        academyJoinBox_ = nullptr;
+    }
     // A quest instance's entry unanswered when its time ran out: its box closes (the server forgets it: PlayQuest.cpp).
     if (questEnterBox_ != nullptr && context.time >= questEnterUntil_) {
         if (ui::Interface* ui = gui_.interface()) ui->Close(questEnterBox_);

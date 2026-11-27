@@ -35,6 +35,7 @@ struct AcademyActor {
     std::string name;
     std::uint32_t model = 0;
     int level = 1, maxLevel = 1;
+    std::uint8_t race = 0; // 0 China, 1 Europe (the guardian's join request box shows it)
     bool dead = false;
     std::uint64_t gold = 0;
     bool busy = false;      // in an exchange or at a stall 
