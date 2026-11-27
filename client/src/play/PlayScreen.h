@@ -926,6 +926,7 @@ private:
         ui::Color colour = 0;
         double born = 0;
         bool blocked = false; // the "blocking" mark alone, no number (the original's hit kind 2)
+        bool resisted = false; // the "resist" mark alone (the original's hit kind 3: flag 0x10, no damage)
     };
     std::vector<DamageText> damageTexts_;
     // Effects (V1; play/PlayEffects.cpp): a skill's stages on its caster and target (with its arrows

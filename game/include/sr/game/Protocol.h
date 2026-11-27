@@ -49,7 +49,8 @@ using MessageId = std::uint16_t;
 // 8: the guild's mercenaries (GuildInfo.mercenaryAttr, .mercenaries; GuildMercenaryAbility).
 // 9: an academy join request's highest level and race (AcademyAsk.maxLevel, .race).
 // 10: a member's fortress war position to those around (EntityGuild.fortressRole).
-inline constexpr std::uint32_t kProtocolVersion = 10;
+// 11: a states-only skill's hit told (EntityDamaged with kDamageResist, damage 0).
+inline constexpr std::uint32_t kProtocolVersion = 11;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

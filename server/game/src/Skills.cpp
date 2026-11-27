@@ -2589,6 +2589,8 @@ void Skills::LandHits(SkillCaster& caster, Clock::time_point now) {
             }
         }
         if (statusOnly) {
+            // Told as a hit of no damage with the original's flag 0x10 (its client's "resist" mark).
+            host_.ToObservers(hit.target, proto::EntityDamaged{hit.target, caster.entity, 0, d.hp, proto::kDamageResist, 0, hit.strike});
             if (d.statesChanged) host_.ToObservers(hit.target, proto::EntityStates{hit.target, host_.MonsterStates(hit.target, now)});
             continue;
         }

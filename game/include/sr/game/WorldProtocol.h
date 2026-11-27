@@ -1216,10 +1216,12 @@ struct EntityBlink {
 // strike that is no swing's (an aura's pulse, a skill object's; the original's B0BC forms 2 and 3),
 // `imbue` then its skill: shown at once, its S_RETURN stages on the target. kDamageBurst: a time bomb
 // going off on its holder (the original's B0BC form 4), `imbue` its
-// skill: its S_RETURN stages that play at the source play on the holder (the 1.188 client's case 4).
+// skill: its S_RETURN stages that play at the source play on the holder (the 1.188 client's case 4). kDamageResist: a
+// skill of states alone (no damage of its own) on its target, damage 0: the original's hit flag 0x10 (its server sets it
+// on such a hit), which its client shows as the "resist" mark.
 enum DamageFlags : std::uint8_t {
     kDamageCritical = 1, kDamageKilled = 2, kDamageBlocked = 4, kDamageState = 8, kDamageCompanion = 16, kDamageReturn = 32,
-    kDamageBurst = 64
+    kDamageBurst = 64, kDamageResist = 128
 };
 struct EntityDamaged {
     static constexpr MessageId kId = 0x10B2;
