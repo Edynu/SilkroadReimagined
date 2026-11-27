@@ -321,7 +321,7 @@ void GalleryScreen::Enter(ScreenContext& context) {
             assets::DecodeMasteryCosts(core::DecodeTextFile(file->Bytes()), masteryCosts_, error);
         }
     }
-    if (page_ == "fortress-map") {
+    if (page_ == "fortress-map" || page_ == "worldmap:1001") {
         std::string error;
         if (const auto file = context.files.Read("navmesh\\objectstring.ifo"); !file || !assets::DecodeObjectStrings(file->Bytes(), spots_, error)) {
             core::LogWarning("gallery: objectstring.ifo: {}", error);
@@ -1540,7 +1540,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         }
         // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
         // (one goal met: "Completed" in its colour).
-        if ((page_ == "quest-list" || page_ == "quest-track") && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+        if ((page_ == "quest-list" || page_ == "quest-track" || page_ == "quest-track-map") && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
             hud_.Created()) {
             questListShown_ = true;
             namespace proto = game::proto;
@@ -1558,8 +1558,9 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             core::LogInfo("gallery: quest-list: {} definitions, {} under way", sampleQuests_.Defs().size(), sampleQuests_.Active().size());
             ToggleQuestWindow(hudContext_);
             // --page quest-track: the first quest chosen by its map button: its points on the minimap, one 300 east of
-            // the sample character (its sign) and one 1,270 north-west (the arrow on the edge).
-            if (page_ == "quest-track") {
+            // the sample character (its sign) and one 1,270 north-west (the arrow on the edge); quest-track-map: the world
+            // map (M) open on them, the quest window shut.
+            if (page_ == "quest-track" || page_ == "quest-track-map") {
                 hudContext_.trackedQuest = 90002;
                 hudContext_.questPlaces = [this](std::uint32_t) {
                     std::vector<proto::WorldPosition> out;
@@ -1572,6 +1573,11 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                     }
                     return out;
                 };
+                if (page_ == "quest-track-map") {
+                    ToggleQuestWindow(hudContext_);
+                    hudContext_.worldMap = host_.data().WorldMap();
+                    hud_.Show(hud::kWorldMap);
+                }
             }
         }
         // --page quest-talk[:N]: a finisher's talk of several pages with the player's rows under them (the White Viper's
@@ -1670,7 +1676,8 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         if (page_.starts_with("arena-") && !arenaShown_) context.holdCapture = true;
         // --page fortress-map: the battle aide's structure map on Jangan's places of
         // objectstring.ifo (the heart, its towers and gates; one tower damaged, one gate destroyed), once the tables are in.
-        if (page_ == "fortress-map" && !fortressMapShown_ && interface_ != nullptr && tables_ && tables_->Ready()) {
+        // (worldmap:1001 too: Jangan's fortress map on the world map with the same structures.)
+        if ((page_ == "fortress-map" || page_ == "worldmap:1001") && !fortressMapShown_ && interface_ != nullptr && tables_ && tables_->Ready()) {
             fortressMapShown_ = true;
             namespace proto = game::proto;
             hudContext_.characters = tables_->Usable() ? &tables_->characters : nullptr;
@@ -1698,7 +1705,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 list.structures.push_back(r);
             }
             sampleFortress_.Apply(proto::FortressEvent{list});
-            OpenFortressMap(hudContext_);
+            if (page_ == "fortress-map") OpenFortressMap(hudContext_);
         }
         if (page_ == "fortress-map" && !fortressMapShown_) context.holdCapture = true;
         // The fortress manager's and the forges' windows (HudFortressWork.cpp), Jangan held by

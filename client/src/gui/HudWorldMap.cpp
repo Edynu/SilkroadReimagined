@@ -345,6 +345,30 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
     view_.Draw(frame.paint, at);
     view_.DrawLabels(frame.paint, at, [this](const std::string& key) { return c_.Text(key); });
     frame.paint.PushClip(at);
+    // A fortress's own map (1001..1999, as 1.188's): every structure but the barricades at its place, its icon
+    // (whole, _r damaged, _d destroyed) as the battle aide's map, 24 x 24.
+    if (view_.Id() > 1000 && view_.Id() < 2000 && c_.fortress != nullptr && c_.characters != nullptr) {
+        for (const proto::FortressStructureRecord& r : c_.fortress->StructureList().structures) {
+            const assets::ObjectRow* row = c_.characters->Find(r.refObjId);
+            if (row != nullptr && row->codename.find("BARRICADE") != std::string::npos) continue;
+            const auto p = view_.Pixel(r.region, r.x, r.z);
+            if (!p) continue;
+            const std::string icon = FortressStructureIcon(c_, r);
+            if (icon.empty()) continue;
+            const ui::Vec2 s = view_.ToScreen(*p, at);
+            frame.paint.Image(icon, {std::floor(s.x - 12.0f), std::floor(s.y - 12.0f), 24.0f, 24.0f});
+        }
+    }
+    // The chosen quest's NPCs (its row's map button, HudContext::trackedQuest), as 1.188 draws them: wmap_sign_questnpc,
+    // 16 x 16 on each place.
+    if (c_.trackedQuest != 0 && c_.questPlaces) {
+        for (const proto::WorldPosition& where : c_.questPlaces(c_.trackedQuest)) {
+            const auto p = view_.Pixel(where.region, where.x, where.z);
+            if (!p) continue;
+            const ui::Vec2 s = view_.ToScreen(*p, at);
+            frame.paint.Image("interface\\worldmap\\wmap_sign_questnpc.ddj", {std::floor(s.x - 8.0f), std::floor(s.y - 8.0f), 16.0f, 16.0f});
+        }
+    }
     // The fortresses' crest boxes on the world: at siegefortressreward.txt's place, 32 pixels to a
     // region, the holding guild's emblem in fort_worldmap_iconbox1.ddj (28 x 32; the union's beside it in iconbox2 is
     // not drawn yet); hovered, the fortress, its guild, master and introduction.

@@ -592,6 +592,8 @@ void ChooseReturnPoint(HudContext& context, std::function<void(std::uint32_t)> c
 // The battle aide's structure map (CIFFortressMap, 301) and its upgrade-type window (CIFCheckConfirmWnd, 101): HudFortressMap.cpp.
 void RegisterFortressMapWindows(ui::Interface& ui, HudContext& context);
 void OpenFortressMap(HudContext& context);
+// icon\ + a fortress structure's icon: whole, _r damaged, _d destroyed (HudFortressMap.cpp).
+std::string FortressStructureIcon(const HudContext& context, const game::proto::FortressStructureRecord& record);
 void OpenFortressApply(HudContext& context);
 bool PressFortressApply(HudContext& context, std::uint32_t fortress);
 // The fortress manager's tax management (CIFTaxManagement, 300; HudFortress.cpp): opened

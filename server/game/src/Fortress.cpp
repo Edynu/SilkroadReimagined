@@ -2307,6 +2307,19 @@ void Fortresses::Load(FortressState state) {
 void Fortresses::Entered(const FortressActor& actor) {
     State& s = *s_;
     s.host.FortressSend(actor.peer, proto::FortressList::kId, Bytes(s.List()));
+    // In a fortress's area: its every structure (the original's 0x385F 0x0F on entering a fortress's world, its
+    // CGameWorld_Siege_SendStructAllInfoToPC): the world map's fortress map shows them.
+    if (const auto at = s.host.FortressEntityPosition(actor.entity)) {
+        for (const State::Fortress& f : s.forts) {
+            if (!f.spec.local || std::find(f.spec.regions.begin(), f.spec.regions.end(), at->region) == f.spec.regions.end()) continue;
+            proto::FortressStructureList list;
+            list.fortress = f.spec.id;
+            for (const State::Structure& st : f.structures) {
+                if (s.Reference(st.refObjId) != nullptr) list.structures.push_back(s.Record(f, st));
+            }
+            s.host.FortressSend(actor.peer, proto::FortressStructureList::kId, Bytes(list));
+        }
+    }
     // The holder's members are told its hired NPCs (0x385F 0x12 on entering).
     if (const std::optional<FortressGuild> g = s.host.FortressGuildOf(actor.character)) {
         for (const State::Fortress& f : s.forts) {

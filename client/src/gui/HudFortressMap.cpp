@@ -21,6 +21,19 @@ namespace sr::client {
 
 namespace proto = game::proto;
 
+// icon\ + a structure's icon: whole as it is, _r damaged, _d destroyed (the battle aide's map and the world map's
+// fortress maps, as 1.188's).
+std::string FortressStructureIcon(const HudContext& c, const proto::FortressStructureRecord& r) {
+    const assets::ObjectRow* row = c.characters != nullptr ? c.characters->Find(r.refObjId) : nullptr;
+    if (row == nullptr || row->iconPath.empty()) return {};
+    std::string path = "icon\\" + row->iconPath;
+    if (r.hp < r.maxHp && r.maxHp > 0) {
+        const std::size_t dot = path.rfind('.');
+        path.insert(dot == std::string::npos ? path.size() : dot, (r.state & 1) != 0 || r.hp == 0 ? "_d" : "_r");
+    }
+    return path;
+}
+
 namespace {
 
 constexpr int kMapWindow = 301, kTypeWindow = 101;
@@ -214,17 +227,7 @@ private:
     const assets::ObjectRow* Row(const proto::FortressStructureRecord& r) const {
         return c_.characters != nullptr ? c_.characters->Find(r.refObjId) : nullptr;
     }
-    // icon\ + the structure's icon: whole as it is, _r damaged, _d destroyed.
-    std::string Icon(const proto::FortressStructureRecord& r) const {
-        const assets::ObjectRow* row = Row(r);
-        if (row == nullptr || row->iconPath.empty()) return {};
-        std::string path = "icon\\" + row->iconPath;
-        if (r.hp < r.maxHp && r.maxHp > 0) {
-            const std::size_t dot = path.rfind('.');
-            path.insert(dot == std::string::npos ? path.size() : dot, (r.state & 1) != 0 || r.hp == 0 ? "_d" : "_r");
-        }
-        return path;
-    }
+    std::string Icon(const proto::FortressStructureRecord& r) const { return FortressStructureIcon(c_, r); }
     const proto::FortressStructureRecord* Selected() const {
         if (c_.fortress == nullptr) return nullptr;
         for (const proto::FortressStructureRecord& r : c_.fortress->StructureList().structures) {
