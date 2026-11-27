@@ -4942,6 +4942,7 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     // speech the interface lays over the scene project with the same camera the scene renders with.
     StepQuestScene(context);
     StepQuestTimers(context);
+    StepTempleNotices(context);
     CameraInput(context);
     FollowCamera();
     if (shown_) Interface(context, snapshot);

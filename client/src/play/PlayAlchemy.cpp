@@ -21,7 +21,7 @@ std::pair<std::string, int> CodeAndNumber(const std::string& arg) {
 } // namespace
 
 bool PlayScreen::AlchemyScriptStep(const std::string& verb, const std::string& arg) {
-    if (verb.starts_with("socket-") || verb == "alchemy-page") return SocketScriptStep(verb, arg);
+    if (verb.starts_with("socket-") || verb == "alchemy-page" || verb == "wear") return SocketScriptStep(verb, arg);
     if (verb.starts_with("pop-")) return PopScriptStep(verb, arg); // Magic POP's (PlayMagicPop.cpp)
     if (MallScriptStep(verb, arg)) return true;                    // the item mall's (PlayMall.cpp)
     if (verb != "alchemy" && verb != "alchemy-tab" && verb != "alchemy-put" && verb != "alchemy-go" && verb != "alchemy-yes" && verb != "alchemy-no") {
@@ -79,6 +79,16 @@ bool PlayScreen::SocketScriptStep(const std::string& verb, const std::string& ar
         AlchemySocketErase(hudContext_, std::atoi(arg.c_str()));
     } else if (verb == "socket-cancel") {
         AlchemySocketCancel(hudContext_);
+    } else if (verb == "wear") {
+        // wear:CODE: the bag's first of it dropped on its equipment place, through the HUD's own request (as a drag: the
+        // equipment's checks and warnings, e.g. a PvP suit with a growth pet out).
+        const int place = BagPlaceOf(arg);
+        const assets::ItemRow* row = tables_ && tables_->Usable() ? tables_->items.Find(std::string_view(arg)) : nullptr;
+        const int wornAt = row != nullptr ? game::EquipPlaceFor(*row, player_.inventory.At(game::slot::kRingLeft) != nullptr,
+                                                                player_.inventory.At(game::slot::kRingRight) != nullptr)
+                                          : -1;
+        if (place < 0 || wornAt < 0) core::LogWarning("game: wear: no {} to wear", arg);
+        else hud_.Request({HudRequest::Kind::MoveItem, place, {}, {}, wornAt});
     } else if (verb == "socket-wear") {
         // The bag's first of it worn, as dropped on the equipment (the alchemy window closed first: it holds the bag).
         const int place = BagPlaceOf(arg);

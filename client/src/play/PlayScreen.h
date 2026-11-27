@@ -605,6 +605,17 @@ private:
     std::map<std::uint32_t, double> questEnds_;      // a timed quest's end (screen time)
     std::map<std::uint32_t, int> questTimerSaid_;    // the last second its line was posted
     void StepQuestTimers(ScreenContext& context);
+    // The job temples' news (PlayInstance.cpp): a pair's first notice held for its partner's (one line for both).
+    struct TempleWaiting {
+        game::proto::TempleNotice notice;
+        double at = 0;
+    };
+    std::map<int, std::optional<TempleWaiting>> templeWaiting_;
+    int TemplePair(std::uint16_t region) const;
+    int TempleOrder(std::uint16_t region) const;
+    std::string TempleName(std::uint16_t region);
+    void StepTempleNotices(ScreenContext& context);
+    void PostTemple(ScreenContext& context, const game::proto::TempleNotice& notice, const std::string& names);
     std::set<std::uint32_t> book_;
     game::proto::SummonList summonList_;
     std::uint32_t hoveredGap_ = 0; // the gap under the mouse (its tooltip)

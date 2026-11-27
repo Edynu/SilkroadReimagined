@@ -122,6 +122,84 @@ bool PlayScreen::UseTalisman(std::uint8_t place) {
     return true;
 }
 
+// The job temples' names in their news, 1.188's (Msg_300C 0xC17 / 0xC18): each temple's sanctum
+// (SN_ZONE_21835_3 Selkis's Sanctum of Restriction, _21835_5 Neith's Blue Eye, _21837_2 Anubis's Punishment, _21836_2 Isis's
+// Atonement, _21836_4 Haroeris's Immortality, _21836_5 Seth's Dark), by its dungeon region; the pairs that open together
+// (Selkis and Neith, Anubis and Isis) named in one line.
+namespace {
+struct TempleRow {
+    std::uint16_t region;
+    const char* key;
+    int pair, order;
+};
+constexpr TempleRow kTemples[] = {{0x800A, "SN_ZONE_21835_3", 0, 0}, {0x800B, "SN_ZONE_21835_5", 0, 1}, {0x800C, "SN_ZONE_21837_2", 1, 0},
+                                  {0x800D, "SN_ZONE_21836_2", 1, 1},  {0x800E, "SN_ZONE_21836_4", -1, 0}, {0x800F, "SN_ZONE_21836_5", -1, 0}};
+const TempleRow* TempleOf(std::uint16_t region) {
+    for (const TempleRow& t : kTemples)
+        if (t.region == region) return &t;
+    return nullptr;
+}
+} // namespace
+
+int PlayScreen::TemplePair(std::uint16_t region) const {
+    const TempleRow* t = TempleOf(region);
+    return t != nullptr ? t->pair : -1;
+}
+
+int PlayScreen::TempleOrder(std::uint16_t region) const {
+    const TempleRow* t = TempleOf(region);
+    return t != nullptr ? t->order : 0;
+}
+
+std::string PlayScreen::TempleName(std::uint16_t region) {
+    const TempleRow* t = TempleOf(region);
+    return t != nullptr ? gui_.data().Text(t->key) : gui_.data().Text(gui_.data().RegionKey(region));
+}
+
+// A pair's notice its partner's never joined within a second: said alone.
+void PlayScreen::StepTempleNotices(ScreenContext& context) {
+    for (auto& [pair, waiting] : templeWaiting_) {
+        if (!waiting || context.time < waiting->at + 1.0) continue;
+        PostTemple(context, waiting->notice, TempleName(waiting->notice.region));
+        waiting.reset();
+    }
+}
+
+// The news line for `names` (one temple, or a pair's "A]/[B"), in the chat and on the warning banner.
+void PlayScreen::PostTemple(ScreenContext& context, const proto::TempleNotice& notice, const std::string& names) {
+    const auto text = [this](const std::string& key) { return gui_.data().Text(key); };
+    const auto fill = [](std::string line, const std::vector<std::string>& args) {
+        for (const std::string& a : args) {
+            const std::size_t s = line.find("%s"), d = line.find("%d");
+            const std::size_t at = std::min(s, d);
+            if (at == std::string::npos) break;
+            line.replace(at, 2, a);
+        }
+        return line;
+    };
+    std::string line;
+    if (notice.kind == proto::TempleNotice::kBefore) {
+        line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_ALARM"), {names, std::to_string(notice.minutes)});
+    } else if (notice.kind == proto::TempleNotice::kOpened) {
+        const std::string who = notice.allowed == proto::TempleNotice::kTraderHunter
+                                    ? text("UIIT_PAG_COMPANY_MERCHANT") + ", " + text("UIIT_PAG_COMPANY_HENTER")
+                                    : notice.allowed == proto::TempleNotice::kThief ? text("UIIT_PAG_COMPANY_THIEF")
+                                                                                    : text("UIIT_STT_EGYPT_SHRINE_ENTRANCE_UNION_ALL");
+        if (notice.allowed == proto::TempleNotice::kNobody) {
+            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_04"), {who, names});
+        } else if (notice.allowed == proto::TempleNotice::kEveryone) {
+            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_03"), {names});
+        } else {
+            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_01"), {who, names});
+        }
+    }
+    if (!line.empty()) {
+        player_.Post(game::GameMessage::Kind::General, line, context.time);
+        player_.Notify(game::Banner::Kind::Warning, line, context.time);
+    }
+    core::LogInfo("game: temple {} ({:#06x}): {}", int(notice.kind), notice.region, line);
+}
+
 void PlayScreen::HandleInstance(ScreenContext& context, const proto::InstanceEvent& event) {
     const UiData& data = gui_.data();
     const auto text = [&](const std::string& key) { return data.HasText(key) ? data.Text(key) : key; };
@@ -210,39 +288,24 @@ void PlayScreen::HandleInstance(ScreenContext& context, const proto::InstanceEve
         post(line);
         player_.Notify(game::Banner::Kind::Warning, line, context.time);
     } else if (const auto* temple = std::get_if<proto::TempleNotice>(&event)) {
-        // The job temples' news (0x300C 0x0C17 / 0x0C18): the temple named by its dungeon's zone, the
-        // alliance by its guild's name (the traders' and the hunters' together), a line and the warning banner.
-        const std::string name = text(data.RegionKey(temple->region));
-        const auto fill = [](std::string line, const std::vector<std::string>& args) {
-            for (const std::string& a : args) {
-                const std::size_t s = line.find("%s"), d = line.find("%d");
-                const std::size_t at = std::min(s, d);
-                if (at == std::string::npos) break;
-                line.replace(at, 2, a);
-            }
-            return line;
-        };
-        std::string line;
-        if (temple->kind == proto::TempleNotice::kBefore) {
-            line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_ALARM"), {name, std::to_string(temple->minutes)});
-        } else if (temple->kind == proto::TempleNotice::kOpened) {
-            const std::string who = temple->allowed == proto::TempleNotice::kTraderHunter
-                                        ? text("UIIT_PAG_COMPANY_MERCHANT") + ", " + text("UIIT_PAG_COMPANY_HENTER")
-                                        : temple->allowed == proto::TempleNotice::kThief ? text("UIIT_PAG_COMPANY_THIEF")
-                                                                                         : text("UIIT_STT_EGYPT_SHRINE_ENTRANCE_UNION_ALL");
-            if (temple->allowed == proto::TempleNotice::kNobody) {
-                line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_04"), {who, name});
-            } else if (temple->allowed == proto::TempleNotice::kEveryone) {
-                line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_03"), {name});
+        // The job temples' news (0x300C 0x0C17 / 0x0C18). 1.188 names a pair opened or closed together in one line
+        // ("[Sanctum of Restriction]/[Sanctum of Blue Eye]"): a pair's first notice waits for its partner's (StepTempleNotices).
+        const int pair = TemplePair(temple->region);
+        if (pair >= 0) {
+            auto& waiting = templeWaiting_[pair];
+            if (waiting && waiting->notice.kind == temple->kind && waiting->notice.region != temple->region) {
+                const bool first = TempleOrder(waiting->notice.region) < TempleOrder(temple->region);
+                const proto::TempleNotice& a = first ? waiting->notice : *temple;
+                const proto::TempleNotice& b = first ? *temple : waiting->notice;
+                PostTemple(context, a, TempleName(a.region) + "]/[" + TempleName(b.region));
+                waiting.reset();
             } else {
-                line = fill(text("UIIT_MSG_EGYPT_SHRINE_ENTRANCE_UNION_ALARM_01"), {who, name});
+                if (waiting) PostTemple(context, waiting->notice, TempleName(waiting->notice.region));
+                waiting = TempleWaiting{*temple, context.time};
             }
+        } else {
+            PostTemple(context, *temple, TempleName(temple->region));
         }
-        if (!line.empty()) {
-            post(line);
-            player_.Notify(game::Banner::Kind::Warning, line, context.time);
-        }
-        core::LogInfo("game: temple {} ({:#06x}): {}", int(temple->kind), temple->region, line);
     } else if (const auto* board = std::get_if<proto::TempleReputation>(&event)) {
         // "Temple area Point"'s answer (0xB4DF): the board, or for code 1 alone (the other alliance's NPC)
         // 0x1C26 "Only members are able to use this."; the other codes say nothing.
