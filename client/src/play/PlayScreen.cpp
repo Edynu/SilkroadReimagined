@@ -4900,6 +4900,7 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     // The camera once a frame, final before anything is drawn against it: the names, hit numbers and
     // speech the interface lays over the scene project with the same camera the scene renders with.
     StepQuestScene(context);
+    StepQuestTimers(context);
     CameraInput(context);
     FollowCamera();
     if (shown_) Interface(context, snapshot);

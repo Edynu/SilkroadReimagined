@@ -602,6 +602,9 @@ private:
     std::unordered_map<std::uint32_t, game::proto::GapInfo> gaps_;
     std::set<std::uint32_t> gapsAsked_;
     game::proto::InstanceState instance_;
+    std::map<std::uint32_t, double> questEnds_;      // a timed quest's end (screen time)
+    std::map<std::uint32_t, int> questTimerSaid_;    // the last second its line was posted
+    void StepQuestTimers(ScreenContext& context);
     std::set<std::uint32_t> book_;
     game::proto::SummonList summonList_;
     std::uint32_t hoveredGap_ = 0; // the gap under the mouse (its tooltip)

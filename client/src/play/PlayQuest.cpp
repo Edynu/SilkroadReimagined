@@ -21,11 +21,40 @@ std::string TextOf(const UiData& data, const game::QuestText& t) {
 
 } // namespace
 
+// A timed quest's last minute inside an instance: "After %d seconds, the quest will complete and you will be returned ..."
+// at every tenth second and each of the last ten (the 1.188 quest window's timer, CNIFQuest's).
+void PlayScreen::StepQuestTimers(ScreenContext& context) {
+    if (instance_.world == 0 || questEnds_.empty()) return;
+    for (const auto& [quest, ends] : questEnds_) {
+        const int left = int(std::ceil(ends - context.time));
+        if (left <= 0 || left >= 60 || !(left % 10 == 0 || left <= 10)) continue;
+        if (int& said = questTimerSaid_[quest]; said != left) {
+            said = left;
+            std::string line = gui_.data().Text("UIIT_MSG_QUEST_INS_TIMEOUT");
+            if (const std::size_t at = line.find("%d"); at != std::string::npos) line.replace(at, 2, std::to_string(left));
+            player_.Post(game::GameMessage::Kind::General, line, context.time);
+        }
+    }
+}
+
 void PlayScreen::HandleQuest(ScreenContext& context, const proto::QuestEvent& event) {
     const UiData& data = gui_.data();
     const auto post = [&](const std::string& line) { player_.Post(game::GameMessage::Kind::General, line, context.time); };
     const auto banner = [&](const std::string& line) { player_.Notify(game::Banner::Kind::Quest, line, context.time); };
     lastTime_ = context.time;
+    // The timed quests' ends (for the instance's last-minute lines, StepQuestTimers).
+    const auto timer = [&](const proto::QuestState& s) {
+        if (s.secondsLeft > 0) questEnds_[s.quest] = context.time + double(s.secondsLeft);
+        else questEnds_.erase(s.quest);
+    };
+    if (const auto* list = std::get_if<proto::QuestList>(&event)) {
+        questEnds_.clear();
+        for (const proto::QuestState& s : list->active) timer(s);
+    } else if (const auto* changed = std::get_if<proto::QuestChanged>(&event)) {
+        timer(changed->state);
+    } else if (const auto* gone = std::get_if<proto::QuestGone>(&event)) {
+        questEnds_.erase(gone->quest);
+    }
     // The party's master opened the quest's instance: "For this quest, you will teleport. Continue?" (the original's
     // invitation kind 7, a Confirm box), the answer sent; --guild-accept / --party-accept answer it yes.
     if (const auto* ask = std::get_if<proto::QuestEnterAsk>(&event)) {
