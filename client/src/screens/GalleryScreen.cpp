@@ -781,13 +781,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                     sample_.Apply(game::TitleEvent{proto::PartyMatchJoinRequest{3, 105, "Delta", 12, 1}});
                     hud_.Show(131);
                 }
-                if (page_ == "party-invite") {
-                    UiData& d = host_.data();
-                    hud_.Confirm("UIIT_STT_CONFIRM_BOX",
-                                 {FormatText(d.Text("UIIT_STT_PARTY_SOMEUSER"), {"Ann"}), PartyExpText(hudContext_, 3) + ", " + PartyItemText(hudContext_, 3),
-                                  d.Text("UIIT_STT_PARTY_PROPOSAL_ASK")},
-                                 [](bool) {});
-                }
+                if (page_ == "party-invite") OpenPartyInviteBox(hudContext_, "Ann", 3 | game::kPartyAnyoneInvites, [](bool) {});
                 if (page_ == "target-menu") {
                     sample_.target = {};
                     sample_.target.entity = 11;

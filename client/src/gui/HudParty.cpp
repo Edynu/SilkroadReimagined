@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <cmath>
 #include <format>
+#include <functional>
 
 #include "gui/Hud.h"
 #include "gui/PortraitTexture.h"
@@ -986,6 +988,49 @@ private:
 };
 
 } // namespace
+
+ConfirmBox* OpenPartyInviteBox(HudContext& c, const std::string& from, std::uint8_t settings, std::function<void(bool yes)> answer) {
+    if (c.hud == nullptr || c.hud->interface() == nullptr) return nullptr;
+    ui::Interface& ui = *c.hud->interface();
+    ConfirmBox* box = c.hud->Confirm("UIIT_STT_CONFIRM_BOX", {}, std::move(answer));
+    if (box == nullptr) return nullptr;
+    // The original's kind 6 (8 the same): 300 x 176, the lines at 16, 48 and 16, 64, the settings in two black boxes
+    // (msgbox_blackbox.ddj, 100 x 24) at 44, 93 and 156, 93, "anyone may invite" at 6, 121, Accept and Refuse at
+    // 72, 139 and 152, 139.
+    box->rect.x += std::floor((box->rect.w - 300.0f) / 2.0f);
+    box->rect.y += std::floor((box->rect.h - 176.0f) / 2.0f);
+    box->rect.w = 300.0f;
+    box->rect.h = 176.0f;
+    for (const auto& child : box->children()) {
+        if (child->id() == 251) child->visible = false;
+        if (child->id() == 252) {
+            child->rect.x = 72.0f;
+            child->rect.y = 139.0f;
+            child->SetText(c.Text("UIIT_STT_ACCEPT"));
+        }
+        if (child->id() == 253) {
+            child->rect.x = 152.0f;
+            child->rect.y = 139.0f;
+            child->SetText(c.Text("UIIT_STT_REFUSE"));
+        }
+        if (child->id() != 2 && child->id() < 250 && child->rect.y > 30.0f) child->visible = false; // the simple box's text tile
+    }
+    const auto put = [&](const std::string& text, float x, float y, float w, float h, const char* ddj, int align) {
+        assets::UiLayoutNode n;
+        n.type = "CIFStatic";
+        n.name = "GDR_MSGBOX_PARTY_LINE";
+        if (ddj != nullptr) n.ddj = ddj;
+        n.hAlign = align;
+        n.rect = {x, y, w, h};
+        if (ui::Widget* w = box->Add(ui.Make(n))) w->SetText(text);
+    };
+    put(FormatText(c.Text("UIIT_STT_PARTY_SOMEUSER"), {from}), 16.0f, 48.0f, 268.0f, 16.0f, nullptr, 0);
+    put(c.Text("UIIT_STT_PARTY_PROPOSAL_ASK"), 16.0f, 64.0f, 268.0f, 16.0f, nullptr, 0);
+    put(PartyExpText(c, settings), 44.0f, 93.0f, 100.0f, 24.0f, "interface\\messagebox\\msgbox_blackbox.ddj", 1);
+    put(PartyItemText(c, settings), 156.0f, 93.0f, 100.0f, 24.0f, "interface\\messagebox\\msgbox_blackbox.ddj", 1);
+    if ((settings & game::kPartyAnyoneInvites) != 0) put(c.Text("UIIT_STT_PARTY_JOIN_ANYONE"), 6.0f, 121.0f, 288.0f, 16.0f, nullptr, 1);
+    return box;
+}
 
 std::string PartyExpText(const HudContext& context, std::uint8_t settings) {
     return context.Text((settings & game::kPartyExpShare) != 0 ? "UIIT_STT_PARTY_EXP_SHARE" : "UIIT_STT_PARTY_EXP_SELF");

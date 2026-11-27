@@ -99,14 +99,9 @@ void PlayScreen::PartyFrame(ScreenContext& context) {
     }
     if (party.invitation && !partyAsking_) {
         const proto::PartyInvited& asked = *party.invitation;
-        UiData& d = gui_.data();
-        std::vector<std::string> lines{FormatText(d.Text("UIIT_STT_PARTY_SOMEUSER"), {asked.name}),
-                                       PartyExpText(hudContext_, asked.settings) + ", " + PartyItemText(hudContext_, asked.settings)};
-        if ((asked.settings & game::kPartyAnyoneInvites) != 0) lines.push_back(d.Text("UIIT_STT_PARTY_JOIN_ANYONE"));
-        lines.push_back(d.Text("UIIT_STT_PARTY_PROPOSAL_ASK"));
         partyAsking_ = true;
         partyAskDropped_ = false;
-        hud_.Confirm("UIIT_STT_CONFIRM_BOX", lines, [this](bool yes) {
+        OpenPartyInviteBox(hudContext_, asked.name, asked.settings, [this](bool yes) {
             partyAsking_ = false;
             if (partyAskDropped_ || replay_) return;
             player_.party.invitation.reset();

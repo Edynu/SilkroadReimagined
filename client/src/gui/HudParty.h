@@ -40,6 +40,9 @@ void SyncAcademyProgress(ui::Interface& ui, HudContext& context);
 // The settings as the windows write them ("Exp Auto Share" / "Exp Free-For-All" and the items').
 std::string PartyExpText(const HudContext& context, std::uint8_t settings);
 std::string PartyItemText(const HudContext& context, std::uint8_t settings);
+// A party invitation's box, the original's message box kind 6: who asks, the question, the two settings in black boxes,
+// "anyone may invite" when set, Accept / Refuse.
+ConfirmBox* OpenPartyInviteBox(HudContext& context, const std::string& from, std::uint8_t settings, std::function<void(bool yes)> answer);
 // A purpose's name (Hunting, Quest, Trade Union, Thief Union).
 std::string PartyPurposeText(const HudContext& context, std::uint8_t purpose);
 
