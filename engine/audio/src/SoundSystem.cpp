@@ -77,7 +77,7 @@ struct SoundSystem::Pending {
     float volume = 1.0f;
     bool positional = false;
     Vec3 position;
-    bool muffled = false;
+    float muffle = 0.0f; // 0 .. 1 (occluded)
     std::uint32_t loop = 0;
     double asked = 0.0;
 };
@@ -242,7 +242,7 @@ void SoundSystem::Preload(std::string_view path) {
 void SoundSystem::Play(std::string_view path, Channel channel, float volume) {
     if (!device_.IsOpen() || path.empty()) return;
     Clip& clip = Request(path);
-    Pending p{clip.path, channel, volume, false, {}, false, 0, now_};
+    Pending p{clip.path, channel, volume, false, {}, 0.0f, 0, now_};
     if (clip.state == Clip::State::Ready) Start(p, clip);
     else if (clip.state == Clip::State::Loading) pending_.push_back(std::move(p));
 }
@@ -250,12 +250,10 @@ void SoundSystem::Play(std::string_view path, Channel channel, float volume) {
 void SoundSystem::PlayAt(std::string_view path, Channel channel, Vec3 position, float volume) {
     if (!device_.IsOpen() || path.empty()) return;
     Clip& clip = Request(path);
-    Pending p{clip.path, channel, volume, true, position, false, 0, now_};
+    Pending p{clip.path, channel, volume, true, position, 0.0f, 0, now_};
     ++positionalPlayed;
-    if (occluded && occluded(listener_, position)) {
-        p.muffled = true;
-        ++muffled;
-    }
+    if (occluded) p.muffle = std::clamp(occluded(listener_, position), 0.0f, 1.0f);
+    if (p.muffle > 0.0f) ++muffled;
     if (clip.state == Clip::State::Ready) Start(p, clip);
     else if (clip.state == Clip::State::Loading) pending_.push_back(std::move(p));
 }
@@ -264,7 +262,7 @@ std::uint32_t SoundSystem::StartLoop(std::string_view path, Channel channel, flo
     if (!device_.IsOpen() || path.empty()) return 0;
     Clip& clip = Request(path);
     const std::uint32_t id = nextLoop_++;
-    Pending p{clip.path, channel, volume, false, {}, false, id, now_};
+    Pending p{clip.path, channel, volume, false, {}, 0.0f, id, now_};
     if (clip.state == Clip::State::Ready) Start(p, clip);
     else if (clip.state == Clip::State::Loading) pending_.push_back(std::move(p));
     return id;
@@ -313,7 +311,15 @@ void SoundSystem::Start(const Pending& p, Clip& clip) {
     alSourcei(source, AL_BUFFER, ALint(clip.buffer));
     alSourcei(source, AL_LOOPING, p.loop != 0 ? AL_TRUE : AL_FALSE);
     alSourcef(source, AL_GAIN, VoiceGain(*v));
-    if (efx_) alSourcei(source, AL_DIRECT_FILTER, p.positional && p.muffled && v->filter != 0 ? ALint(v->filter) : AL_FILTER_NULL);
+    if (efx_) {
+        if (p.positional && p.muffle > 0.0f && v->filter != 0) {
+            filterf(v->filter, AL_LOWPASS_GAIN, 1.0f + (kMuffledGain - 1.0f) * p.muffle);
+            filterf(v->filter, AL_LOWPASS_GAINHF, 1.0f + (kMuffledGainHf - 1.0f) * p.muffle);
+            alSourcei(source, AL_DIRECT_FILTER, ALint(v->filter));
+        } else {
+            alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+        }
+    }
     if (p.positional) {
         ALfloat at[3];
         Flip(p.position, at);

@@ -596,6 +596,21 @@ private:
     game::QuestView quests_;
     double lastTime_ = 0.0; // the clock's second of the last quest message (the windows' own lines)
     void HandleQuest(ScreenContext& context, const game::proto::QuestEvent& event);
+    // The Beta page's muffled sounds (ours, experimental; SR_AUDIO_OCCLUSION): how much the world stands between the ear
+    // and a sound, 0..1, by the depth cube and the terrain's heights.
+    float SoundOcclusion(glm::vec3 ear, glm::vec3 at) const;
+    std::shared_ptr<const AudioCube> audioCube_; // the latest read back (FeedbackChannel::LatestAudioCube)
+    std::string audioCubeDump_;                   // --audio-cube-dump: the muffling cubes' pictures
+    // The developer's /createsound N V (SR_DEV_TOOLS): a sound of ten at the player's place, V % loud, again every 2 s
+    // (the sound tries: walk behind a wall and listen); /createsound 0 takes them away.
+    struct SoundEmitter {
+        glm::vec3 at{0.0f};
+        int sound = 1;
+        float volume = 1.0f;
+        double next = 0.0;
+    };
+    std::vector<SoundEmitter> emitters_;
+    bool CreateSoundCommand(const std::string& text, double now);
     // A set of the entity's became whole (true) or broke: its effect and sound (PlayEffects.cpp).
     void SetLookChanged(std::uint32_t entity, bool whole, GameAudio* audio);
     std::unordered_map<std::uint32_t, std::vector<int>> setsWhole_; // the sets whole in each entity's look as last dressed

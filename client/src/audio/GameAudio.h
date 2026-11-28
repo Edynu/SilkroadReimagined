@@ -46,7 +46,7 @@ public:
     const audio::SoundSystem& engine() const { return sound_; }
     // The Beta page's muffled sounds behind walls (ours): the test of the world between the ear and a sound (the play
     // screen's ray); null: off.
-    void SetOcclusion(std::function<bool(glm::vec3 ear, glm::vec3 sound)> occluded);
+    void SetOcclusion(std::function<float(glm::vec3 ear, glm::vec3 sound)> occluded);
     bool Occluding() const { return bool(sound_.occluded); }
 
     // The Audio page's three levels and mutes, applied at once (the Options window calls it on every
@@ -84,7 +84,7 @@ public:
     // original's moment is not traced).
     void SecondSwing(std::string_view skill, glm::vec3 at);
     // A skill stage's sound (skilleffect.txt's SndBegin / SndEnd: a prim\snd\ path) at a place (K8).
-    void PlayEffect(std::string_view path, glm::vec3 at);
+    void PlayEffect(std::string_view path, glm::vec3 at, float volume = 1.0f);
     // One of its hits landed there (SND_DMG of the attacker's last skill; a critical one prefers the
     // CRITYCAL rows). A critical sounds SND_CRIDMG first, as the original's: the skill's own rows, else a player's
     // (`player`) PLAYER rows tied to no skill (batCriHit; in berserk, `berserk`, the HWAN row's batHwanCriHit).

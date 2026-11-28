@@ -137,6 +137,7 @@ void FrameRenderer::Render(const FrameSnapshot& snapshot) {
     }
     feedback_.Put(feedback);
     feedback_.PutProbe(scene_.Probe()); // the scene's depth under the mouse (the clicks' occlusion)
+    if (std::shared_ptr<const AudioCube> cube = scene_.TakeAudioCube()) feedback_.PutAudioCube(std::move(cube));
 
     pacer_.Wait();
     const auto presented = Clock::now();

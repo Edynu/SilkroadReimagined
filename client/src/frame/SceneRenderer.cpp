@@ -13,6 +13,10 @@
 #include "kBlitPixelShader.spv.h"
 #include "kBlitVertexShader.spv.h"
 #include "kDepthProbeComputeShader.spv.h"
+#include "sr/core/Log.h"
+#ifdef SR_AUDIO_OCCLUSION
+#include "kAudioCubeComputeShader.spv.h"
+#endif
 #include "sr/core/Trace.h"
 
 namespace sr::client {
@@ -200,6 +204,14 @@ void SceneRenderer::Shutdown() {
     overlayPass_.Shutdown();
     shadowPass_.Shutdown();
     staticShadowPass_.Shutdown();
+    if (audioReady_) {
+        audioPass_[0].Shutdown();
+        audioPass_[1].Shutdown();
+        device_->DestroyTexture(audioAtlas_);
+        device_->DestroyBuffer(audioBuffer_);
+        device_->DestroyPipeline(audioReadPipeline_);
+        audioReady_ = false;
+    }
     device_->DestroyTexture(shadowAtlas_);
     device_->DestroyTexture(staticAtlas_);
     device_->DestroyPipeline(blitOver_);
@@ -511,6 +523,7 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
                       },
                       [this, &view](rhi::CommandList& cmd, const gfx::RenderGraph&) { DrawShadows(cmd, view); });
     }
+    AddAudioCube(graph, worldInstances, meshes, geometry, view);
     // The overlay (the character windows' characters): culled, skinned and drawn on its own, into
     // its own target, under the same camera and light.
     overlayResult_ = 0;
@@ -696,6 +709,139 @@ void SceneRenderer::AddProbe(gfx::RenderGraph& graph, gfx::RenderGraph::Resource
                       cmd.PushConstants(&push, sizeof(push));
                       cmd.Dispatch(1, 1, 1);
                   });
+}
+
+void SceneRenderer::AddAudioCube(gfx::RenderGraph& graph, gfx::RenderGraph::Resource instances, gfx::RenderGraph::Resource meshes,
+                                 gfx::RenderGraph::Resource geometry, const SceneView& view) {
+#ifdef SR_AUDIO_OCCLUSION
+    constexpr std::uint32_t W = AudioCube::kWidth, H = AudioCube::kHeight;
+    constexpr float kNear = 2.0f, kFar = 1500.0f;
+    // The slots whose frames have finished: the newest handed back.
+    if (audioReady_) {
+        const auto* mapped = static_cast<const std::byte*>(device_->MappedMemory(audioBuffer_));
+        const std::uint64_t completed = device_->CompletedFrame();
+        std::uint64_t newest = 0;
+        for (std::uint32_t s = 0; s < kAudioSlots && mapped != nullptr; ++s) {
+            AudioAsk& ask = audioAsks_[s];
+            if (ask.frame == 0 || ask.frame > completed) continue;
+            if (ask.frame > newest) {
+                newest = ask.frame;
+                auto cube = std::make_shared<AudioCube>();
+                cube->eye = ask.eye;
+                cube->viewProj = ask.viewProj;
+                cube->nearZ = kNear;
+                cube->farZ = kFar;
+                cube->frame = ask.frame;
+                cube->depth.resize(std::size_t(W) * H);
+                std::memcpy(cube->depth.data(), mapped + std::size_t(s) * W * H * 4, cube->depth.size() * 4);
+                audioCubeReady_ = std::move(cube);
+            }
+            ask.frame = 0;
+        }
+    }
+    if (!view.audioCube || world_.Live() == 0) return;
+    if (!audioReady_) {
+        // Made on first use: two depth-only world passes of three views each, the atlas, the copy's pipeline and slots.
+        std::string error;
+        gfx::WorldPass::Limits limits;
+        limits.maxDraws = 1u << 13;
+        limits.arenaVertices = 1024;
+        limits.maxSkinJobs = 64;
+        limits.depthOnly = true;
+        limits.views = 3;
+        rhi::TextureDesc desc;
+        desc.width = W;
+        desc.height = H;
+        desc.format = rhi::Format::D32Float;
+        desc.usage = rhi::TextureUsage::ShadowMap;
+        desc.debugName = "audio cube";
+        rhi::ComputePipelineDesc read;
+        read.shader = Spirv(kAudioCubeComputeShader);
+        read.entry = "CSMain";
+        read.debugName = "audio cube readback";
+        rhi::BufferDesc slots;
+        slots.size = std::size_t(kAudioSlots) * W * H * 4;
+        slots.usage = rhi::BufferUsage::Storage;
+        slots.cpuVisible = true;
+        slots.debugName = "audio cube slots";
+        if (!audioPass_[0].Init(*device_, rhi::Format::Unknown, rhi::Format::D32Float, limits, error) ||
+            !audioPass_[1].Init(*device_, rhi::Format::Unknown, rhi::Format::D32Float, limits, error)) {
+            core::LogWarning("render: the audio cube: {}", error);
+            return;
+        }
+        audioAtlas_ = device_->CreateTexture(desc);
+        audioReadPipeline_ = device_->CreateComputePipeline(read);
+        audioBuffer_ = device_->CreateBuffer(slots);
+        audioReady_ = true;
+        core::LogInfo("render: the audio cube made ({} x {}, faces of {})", W, H, AudioCube::kFace);
+    }
+    const std::uint64_t frame = device_->RecordingFrame();
+    const std::uint32_t slot = std::uint32_t(frame % kAudioSlots);
+    if (audioAsks_[slot].frame != 0) return; // its last copy not read yet: skip a frame
+    // The six faces round the player's head: +x, -x, +y, -y, +z, -z, each 90 degrees square, y flipped as the camera's
+    // (Vulkan's y points down: the triangles keep their winding for the back-face culling).
+    static const glm::vec3 kDirs[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, kNear, kFar);
+    projection[1][1] *= -1.0f;
+    const glm::vec3 eye(view.audioEye[0], view.audioEye[1], view.audioEye[2]);
+    for (int i = 0; i < 6; ++i) {
+        const glm::vec3 up = (i == 2 || i == 3) ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+        audioViewProj_[std::size_t(i)] = projection * glm::lookAt(eye, eye + kDirs[i], up);
+    }
+    // What stops a sound: the buildings, walls and rocks; not what is a few units across, nor the plants' swaying parts.
+    const std::array<float, 3> minRadius = {6.0f, 6.0f, 6.0f};
+    for (int k = 0; k < 2; ++k) {
+        audioLists_[k] = audioPass_[k].AddCulling(graph, instances, meshes, world_, assets_->Meshes(),
+                                                  std::span<const glm::mat4>(audioViewProj_.data() + 3 * k, 3), false, -1.0e30f,
+                                                  std::span<const float>(minRadius.data(), 3), 0, 3, 0);
+    }
+    const auto atlas = graph.ImportTexture(audioAtlas_, "audio cube");
+    graph.AddPass("audio cube", gfx::PassKind::Graphics,
+                  [&](gfx::RenderGraph::Builder& b) {
+                      for (int k = 0; k < 2; ++k) {
+                          b.Read(audioLists_[k].commands, gfx::Use::IndirectRead)
+                              .Read(audioLists_[k].counts, gfx::Use::IndirectRead)
+                              .Read(audioLists_[k].draws, gfx::Use::VertexRead);
+                      }
+                      b.Read(instances, gfx::Use::VertexRead)
+                          .Read(meshes, gfx::Use::VertexRead)
+                          .Read(geometry, gfx::Use::VertexRead)
+                          .Read(geometry, gfx::Use::FragmentRead)
+                          .Read(geometry, gfx::Use::IndexRead)
+                          .Write(atlas, gfx::Use::DepthWrite);
+                  },
+                  [this](rhi::CommandList& cmd, const gfx::RenderGraph&) { DrawAudioCube(cmd); });
+    struct Push {
+        std::uint64_t output;
+        std::uint32_t depth, width, height;
+    };
+    const Push push{device_->BufferAddress(audioBuffer_) + std::uint64_t(slot) * W * H * 4, device_->BindlessIndex(audioAtlas_), W, H};
+    // (Its output is a mapped buffer the graph does not know: kept as a side effect, not culled.)
+    graph.AddPass("audio cube readback", gfx::PassKind::Compute, [&](gfx::RenderGraph::Builder& b) { b.Read(atlas, gfx::Use::Sampled).SideEffect(); },
+                  [this, push](rhi::CommandList& cmd, const gfx::RenderGraph&) {
+                      cmd.BindComputePipeline(audioReadPipeline_);
+                      cmd.PushConstants(&push, sizeof(push));
+                      cmd.Dispatch((W + 7) / 8, (H + 7) / 8, 1);
+                  });
+    audioAsks_[slot] = {frame, eye, audioViewProj_};
+#else
+    (void)graph, (void)instances, (void)meshes, (void)geometry, (void)view;
+#endif
+}
+
+void SceneRenderer::DrawAudioCube(rhi::CommandList& cmd) {
+    SR_ZONE("render: audio cube");
+    rhi::RenderPassDesc pass;
+    pass.depth = audioAtlas_; // cleared to 1
+    cmd.BeginRenderPass(pass);
+    constexpr std::uint32_t F = AudioCube::kFace;
+    for (std::uint32_t i = 0; i < 6; ++i) {
+        const std::uint32_t x = (i % 3) * F, y = (i / 3) * F;
+        cmd.SetViewport({float(x), float(y), float(F), float(F)});
+        cmd.SetScissor({std::int32_t(x), std::int32_t(y), F, F});
+        audioPass_[i / 3].DrawDepth(cmd, audioViewProj_[i], assets_->Geometry(), world_, assets_->Meshes(), 0, i % 3);
+    }
+    cmd.EndPass();
 }
 
 void SceneRenderer::PrepareShadows(const SceneView& view, int quality) {

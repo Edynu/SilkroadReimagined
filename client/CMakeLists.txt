@@ -124,6 +124,9 @@ sr_add_shader(SroReimagined SOURCE shaders/Crowd.hlsl ENTRY PSMain PROFILE ps_6_
 sr_add_shader(SroReimagined SOURCE shaders/Blit.hlsl ENTRY VSMain PROFILE vs_6_0 NAME kBlitVertexShader)
 sr_add_shader(SroReimagined SOURCE shaders/Blit.hlsl ENTRY PSMain PROFILE ps_6_0 NAME kBlitPixelShader)
 sr_add_shader(SroReimagined SOURCE shaders/DepthProbe.hlsl ENTRY CSMain PROFILE cs_6_0 NAME kDepthProbeComputeShader)
+if(SR_AUDIO_OCCLUSION)
+    sr_add_shader(SroReimagined SOURCE shaders/AudioCube.hlsl ENTRY CSMain PROFILE cs_6_0 NAME kAudioCubeComputeShader)
+endif()
 
 if(SR_DEV_TOOLS)
     target_sources(SroReimagined PRIVATE src/devtools/EngineWindow.cpp)
@@ -137,6 +140,10 @@ endif()
 set(SR_CLIENT_VERSION "${PROJECT_VERSION}")
 target_compile_definitions(SroReimagined PRIVATE SR_CLIENT_VERSION="${SR_CLIENT_VERSION}")
 
+# The sound occlusion's depth cube (the root's SR_AUDIO_OCCLUSION, experimental).
+if(SR_AUDIO_OCCLUSION)
+    target_compile_definitions(SroReimagined PRIVATE SR_AUDIO_OCCLUSION=1)
+endif()
 # The players' bug reports (the root's SR_BUG_REPORTS): the HUD's button and window.
 if(SR_BUG_REPORTS)
     target_sources(SroReimagined PRIVATE src/gui/HudBugReport.cpp src/play/PlayBugReport.cpp)

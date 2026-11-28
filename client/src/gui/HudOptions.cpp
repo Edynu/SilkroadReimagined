@@ -422,10 +422,12 @@ void OptionWindow::BuildBeta(ui::Interface& ui) {
         radio->SetUnits(ui, {"The original's: within 300, and the one under the mouse", "Ours: players' names at any distance"});
         betaNames_ = radio;
     }
+#ifdef SR_AUDIO_OCCLUSION
     betaOcclusion_ = ui::As<ui::CheckBox>(MakeNode(ui, *page, "CIFCheckBox", 50, {18.0f, 244.0f, 16.0f, 16.0f}, "interface\\ifcommon\\com_checkbutton_off.ddj"));
     ui::Widget* occlusion = MakeNode(ui, *page, "CIFStatic", 51, {40.0f, 246.0f, 300.0f, 12.0f});
     occlusion->SetText("Sounds behind walls muffled (experimental)");
     if (auto* s = ui::As<ui::Static>(occlusion)) s->textColor = ui::kWhite;
+#endif
 }
 
 int OptionWindow::OnlineMax(int kind) const {

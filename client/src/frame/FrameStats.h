@@ -4,10 +4,14 @@
 // latest frame's statistics for the developer tools, and every frame's timings for benchmark
 // summaries (--run-seconds).
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#include <glm/glm.hpp>
 
 #include "sr/rhi/Rhi.h"
 
@@ -33,6 +37,18 @@ struct DepthProbe {
     std::uint64_t frame = 0;    // the rendered frame it was read in
 };
 
+// The sound occlusion's depth cube (ours, experimental): six square faces round the camera's eye, side by side in an atlas
+// of 3 x 2 faces, each a 90-degree view (viewProj; GLM's left-handed 0..1 depth), the static world's depth in each texel
+// (1: nothing within `farZ`). Read back a few frames late.
+struct AudioCube {
+    static constexpr int kFace = 64, kWidth = 3 * kFace, kHeight = 2 * kFace;
+    glm::vec3 eye{0.0f};
+    std::array<glm::mat4, 6> viewProj{};
+    float nearZ = 2.0f, farZ = 1500.0f;
+    std::vector<float> depth; // kWidth x kHeight, row by row
+    std::uint64_t frame = 0;
+};
+
 class FeedbackChannel {
 public:
     void Put(const RenderFeedback& feedback) {
@@ -52,11 +68,20 @@ public:
         std::lock_guard lock(mutex_);
         return probe_;
     }
+    void PutAudioCube(std::shared_ptr<const AudioCube> cube) {
+        std::lock_guard lock(mutex_);
+        audioCube_ = std::move(cube);
+    }
+    std::shared_ptr<const AudioCube> LatestAudioCube() const {
+        std::lock_guard lock(mutex_);
+        return audioCube_;
+    }
 
 private:
     mutable std::mutex mutex_;
     RenderFeedback value_;
     DepthProbe probe_;
+    std::shared_ptr<const AudioCube> audioCube_;
 };
 
 class FrameRecorder {

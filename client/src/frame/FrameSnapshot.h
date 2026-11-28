@@ -96,6 +96,10 @@ struct SceneView {
     // The pixel (swapchain pixels; x < 0: none) whose scene depth the renderer reads back (FeedbackChannel::Probe): the
     // mouse's, for the clicks' occlusion.
     float probeX = -1.0f, probeY = -1.0f;
+    // The sound occlusion's depth cube round the player's head (FeedbackChannel::LatestAudioCube; SR_AUDIO_OCCLUSION):
+    // drawn and read back while set, centred on `audioEye` (the scene's coordinates).
+    bool audioCube = false;
+    std::array<float, 3> audioEye{};
     float frameSeconds = 0.0f;    // since the last game frame
     double seconds = 0;                             // game time, for animated textures
 };
@@ -171,6 +175,7 @@ struct FrameSnapshot {
         // own camera to the next screen's overlay (the create screen's character went there after a Restart, unseen).
         scene.overlayOwnCamera = false;
         scene.probeX = scene.probeY = -1.0f;
+        scene.audioCube = false;
         worldCommands.clear();
         portraits.clear();
         uiUnder.Clear();

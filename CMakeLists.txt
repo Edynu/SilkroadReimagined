@@ -56,6 +56,9 @@ option(SR_DEV_COMMANDS "Developer commands in the game server (OFF for a public 
 # interface): the client's button and window, the game server's taking them into the website's support tickets
 # (sr_support_tickets, the screenshot in sr_support_files). OFF: neither side has them (the server refuses the messages).
 option(SR_BUG_REPORTS "In-game bug reports (client button and window, game server into the support tickets)" ON)
+# Ours, experimental: sounds behind walls muffled by a small depth cube around the camera (the render thread draws the world's
+# static objects into six 64 x 64 faces and reads them back; the Option window's Beta page turns it on). OFF: none of it.
+option(SR_AUDIO_OCCLUSION "Sound occlusion by a depth cube around the listener (experimental, the Beta page's option)" ON)
 if(NOT SR_DEV_COMMANDS AND SR_BUILD_TESTS)
     message(STATUS "SR_DEV_COMMANDS is OFF: the tests are not built (they use the developer commands)")
     set(SR_BUILD_TESTS OFF CACHE BOOL "Build the unit and integration tests" FORCE)

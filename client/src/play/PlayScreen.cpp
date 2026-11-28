@@ -1,4 +1,6 @@
 #include "play/PlayScreen.h"
+
+#include <stb_image_write.h>
 #include "gui/ErrorTexts.h"
 #include "sr/game/BetaQuests.h"
 #include "sr/game/TimedServices.h"
@@ -2054,6 +2056,133 @@ void PlayScreen::Sounds(ScreenContext& context, const game::TitleEvent& event) {
     }
 }
 
+namespace {
+// /createsound's ten: a tiger's moan, a wolf, a fire hit, a blood explosion, a swish of wind, a horse falling, a step in
+// water, gold, a sword, a socket's magic.
+constexpr const char* kTestSounds[10] = {
+    "prim\\snd\\monster\\cm_Tiger_moan1_a.wav",     "prim\\snd\\COS\\COS_Wolf_01_Stand1.wav",
+    "prim\\snd\\skill\\csk_fire_gigong_hit.wav",    "prim\\snd\\Skill2\\usk_warlock_blood_explosion_bomb.wav",
+    "prim\\snd\\Mob_SD\\Windpriest\\windpriest_swish.wav", "prim\\snd\\COS\\COS_Horse_Thud.wav",
+    "prim\\snd\\player\\mvWalkWater.wav",           "prim\\snd\\ui\\itGold.wav",
+    "prim\\snd\\ui\\itSword.wav",                  "prim\\snd\\ui\\socket_magic.wav"};
+} // namespace
+
+bool PlayScreen::CreateSoundCommand(const std::string& text, double now) {
+#ifdef SR_DEV_TOOLS
+    if (!text.starts_with("/createsound")) return false;
+    int sound = -1, volume = 100;
+    const int read = std::sscanf(text.c_str() + 12, "%d %d", &sound, &volume);
+    if (read >= 1 && sound == 0) {
+        player_.Post(game::GameMessage::Kind::General, std::format("Sound emitters removed ({})", emitters_.size()), now);
+        emitters_.clear();
+        return true;
+    }
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (read < 1 || sound < 1 || sound > 10 || volume < 1 || volume > 100 || self == nullptr || !world_) {
+        player_.Post(game::GameMessage::Kind::General, "/createsound 1-10 1-100 (sound, volume %); /createsound 0 removes them", now);
+        return true;
+    }
+    emitters_.push_back({world_->OriginRelative(self->position), sound, float(volume) / 100.0f, now});
+    player_.Post(game::GameMessage::Kind::General, std::format("Sound {} placed here at {} % (again every 2 s)", sound, volume), now);
+    core::LogInfo("game: /createsound {} {} at {:.0f},{:.0f},{:.0f}", sound, volume, emitters_.back().at.x, emitters_.back().at.y,
+                  emitters_.back().at.z);
+    return true;
+#else
+    (void)text, (void)now;
+    return false;
+#endif
+}
+
+float PlayScreen::SoundOcclusion(glm::vec3 ear, glm::vec3 at) const {
+#ifdef SR_AUDIO_OCCLUSION
+    // From the player's head (the cube's eye; the camera's `ear` only without a cube) to the sound a little off the ground
+    // (its body's height, not its feet).
+    if (audioCube_) ear = audioCube_->eye;
+    const glm::vec3 to = at + glm::vec3(0.0f, 10.0f, 0.0f);
+    if (glm::length(to - ear) < 20.0f) return 0.0f;
+    float muffle = 0.0f;
+    // The cube: the face the sound is seen in, its texel and the 3 x 3 round it; a texel whose surface stands nearer than
+    // the sound (by 15) is a share of the way blocked.
+    if (const AudioCube* cube = audioCube_.get(); cube != nullptr && cube->depth.size() == std::size_t(AudioCube::kWidth) * AudioCube::kHeight) {
+        const glm::vec3 rel = to - cube->eye;
+        const glm::vec3 a = glm::abs(rel);
+        const int face = a.x >= a.y && a.x >= a.z ? (rel.x > 0 ? 0 : 1) : a.y >= a.z ? (rel.y > 0 ? 2 : 3) : (rel.z > 0 ? 4 : 5);
+        const glm::vec4 clip = cube->viewProj[std::size_t(face)] * glm::vec4(to, 1.0f);
+        if (clip.w > 0.0f) {
+            const float soundDepth = clip.w;
+            constexpr int F = AudioCube::kFace;
+            const int tx = std::clamp(int((clip.x / clip.w * 0.5f + 0.5f) * float(F)), 0, F - 1);
+            const int ty = std::clamp(int((clip.y / clip.w * 0.5f + 0.5f) * float(F)), 0, F - 1);
+            const float n = cube->nearZ, f = cube->farZ;
+            int blocked = 0;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const int x = std::clamp(tx + dx, 0, F - 1), y = std::clamp(ty + dy, 0, F - 1);
+                    const float d = cube->depth[std::size_t((face / 3) * F + y) * AudioCube::kWidth + std::size_t((face % 3) * F + x)];
+                    if (d >= 0.9999f) continue; // nothing there
+                    const float z = n * f / (f - d * (f - n));
+                    if (z < soundDepth - 15.0f) ++blocked;
+                }
+            }
+            muffle = float(blocked) / 9.0f;
+        }
+    }
+    // The terrain (a hill between): its heights at eight points along the way, outdoors.
+    if (muffle < 1.0f && world_) {
+        if (const game::WorldView::Entity* self = view_.Find(view_.Self()); self != nullptr && (self->position.region & 0x8000) == 0) {
+            const std::uint16_t home = self->position.region;
+            const glm::vec3 base = world_->OriginRelative({home, 0.0f, 0.0f, 0.0f});
+            for (int i = 1; i <= 8; ++i) {
+                const glm::vec3 p = ear + (to - ear) * (float(i) / 9.0f) - base;
+                const int ox = int(std::floor(p.x / assets::kRegionSize)), oz = int(std::floor(p.z / assets::kRegionSize));
+                const int rx = (home & 0xFF) + ox, rz = ((home >> 8) & 0x7F) + oz;
+                if (rx < 0 || rx > 0xFF || rz < 0 || rz > 0x7F) continue;
+                float ground = 0.0f;
+                if (world_->Navigation().TerrainHeight(std::uint16_t((rz << 8) | rx), p.x - float(ox) * assets::kRegionSize,
+                                                       p.z - float(oz) * assets::kRegionSize, ground) &&
+                    p.y < ground - 5.0f) {
+                    muffle = 1.0f;
+                    break;
+                }
+            }
+        }
+    }
+    static int told = 0;
+    if (muffle > 0.0f && told < 20) {
+        ++told;
+        core::LogInfo("audio: a sound {:.0f} away muffled {:.0f} % (cube of frame {}; eye {:.0f},{:.0f},{:.0f}, sound {:.0f},{:.0f},{:.0f})",
+                      glm::length(to - ear), muffle * 100.0f, audioCube_ ? audioCube_->frame : 0, ear.x, ear.y, ear.z, to.x, to.y, to.z);
+        // --audio-cube-dump FILE: the first three muffling cubes as pictures (FILE_1.png ..; near white, far dark, nothing
+        // black; the sound's texel red).
+        if (const AudioCube* cube = audioCube_.get(); cube != nullptr && !audioCubeDump_.empty() && told <= 3) {
+            std::vector<std::uint8_t> rgba(cube->depth.size() * 4, 255);
+            for (std::size_t i = 0; i < cube->depth.size(); ++i) {
+                const float d = cube->depth[i];
+                const float z = d >= 0.9999f ? cube->farZ : cube->nearZ * cube->farZ / (cube->farZ - d * (cube->farZ - cube->nearZ));
+                const auto g = std::uint8_t(d >= 0.9999f ? 0.0f : 255.0f * (1.0f - std::clamp(z / 600.0f, 0.0f, 0.9f)));
+                rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = g;
+            }
+            const glm::vec3 rel = to - cube->eye, ab = glm::abs(rel);
+            const int face = ab.x >= ab.y && ab.x >= ab.z ? (rel.x > 0 ? 0 : 1) : ab.y >= ab.z ? (rel.y > 0 ? 2 : 3) : (rel.z > 0 ? 4 : 5);
+            const glm::vec4 clip = cube->viewProj[std::size_t(face)] * glm::vec4(to, 1.0f);
+            if (clip.w > 0.0f) {
+                constexpr int F = AudioCube::kFace;
+                const int tx = std::clamp(int((clip.x / clip.w * 0.5f + 0.5f) * float(F)), 0, F - 1);
+                const int ty = std::clamp(int((clip.y / clip.w * 0.5f + 0.5f) * float(F)), 0, F - 1);
+                const std::size_t at = (std::size_t((face / 3) * F + ty) * AudioCube::kWidth + std::size_t((face % 3) * F + tx)) * 4;
+                rgba[at] = 255, rgba[at + 1] = 0, rgba[at + 2] = 0;
+            }
+            const std::string path = std::format("{}_{}.png", audioCubeDump_, told);
+            stbi_write_png(path.c_str(), AudioCube::kWidth, AudioCube::kHeight, 4, rgba.data(), AudioCube::kWidth * 4);
+        }
+    }
+    return muffle;
+#else
+    (void)ear, (void)at;
+    return 0.0f;
+#endif
+}
+
 void PlayScreen::Listen(ScreenContext& context) {
     GameAudio* audio = context.audio;
     if (audio == nullptr || !world_ || !shown_) return;
@@ -2063,36 +2192,32 @@ void PlayScreen::Listen(ScreenContext& context) {
     const glm::vec3 target(c.targetX, c.targetY, c.targetZ);
     const glm::vec3 dir(std::cos(c.pitch) * std::sin(c.yaw), std::sin(c.pitch), std::cos(c.pitch) * std::cos(c.yaw));
     audio->SetListener(c.fly ? target : target + dir * c.distance, c.fly ? dir : -dir, glm::vec3(0.0f, 1.0f, 0.0f));
-    // The Beta page's muffled sounds (ours): one ray on the navigation from the ear to the sound (raised 10 off the
-    // ground, stopping 8 short of it) when a sound starts; anything it meets (the terrain, a building's or a wall's
-    // triangles, a dungeon's floors) muffles it.
+    // The developer's sound emitters (/createsound), each again every 2 s.
+    for (SoundEmitter& e : emitters_) {
+        if (context.time < e.next) continue;
+        e.next = context.time + 2.0;
+        audio->PlayEffect(kTestSounds[std::clamp(e.sound, 1, 10) - 1], e.at, e.volume);
+    }
+#ifdef SR_AUDIO_OCCLUSION
+    // The Beta page's muffled sounds (ours, experimental): the render thread's depth cube round the camera's eye (the
+    // static world's objects, read back a few frames late) and the terrain's heights along the way, asked when a sound
+    // starts (SoundOcclusion).
     const bool occlusion = context.options != nullptr && context.options->beta.soundOcclusion;
+    if (occlusion && context.feedback != nullptr) {
+        if (std::shared_ptr<const AudioCube> cube = context.feedback->LatestAudioCube()) {
+            audioCubeDump_ = context.config.GetString("audio-cube-dump", "");
+            audioCube_ = std::move(cube);
+        }
+    }
     if (occlusion != audio->Occluding()) {
         if (!occlusion) {
             audio->SetOcclusion(nullptr);
+            audioCube_.reset();
         } else {
-            audio->SetOcclusion([this](glm::vec3 ear, glm::vec3 at) {
-                const game::WorldView::Entity* self = world_ ? view_.Find(view_.Self()) : nullptr;
-                if (self == nullptr) return false;
-                const std::uint16_t region = self->position.region;
-                const glm::vec3 base = world_->OriginRelative({region, 0.0f, 0.0f, 0.0f});
-                const glm::vec3 to = at + glm::vec3(0.0f, 10.0f, 0.0f);
-                glm::vec3 d = to - ear;
-                const float length = glm::length(d);
-                if (length < 20.0f) return false;
-                d /= length;
-                const float origin[3] = {ear.x - base.x, ear.y - base.y, ear.z - base.z}, direction[3] = {d.x, d.y, d.z};
-                game::NavHit hit;
-                const bool blocked = world_->Navigation().Ray(region, origin, direction, length - 8.0f, hit);
-                static int told = 0;
-                if (blocked && told < 20) {
-                    ++told;
-                    core::LogInfo("audio: a sound {:.0f} away muffled (the world {:.0f} along the way)", length, hit.distance);
-                }
-                return blocked;
-            });
+            audio->SetOcclusion([this](glm::vec3 ear, glm::vec3 at) { return SoundOcclusion(ear, at); });
         }
     }
+#endif
     // The music and ambience of the area the character stands in; night from 18:00 to 6:00 (ours).
     if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
         const float t = world_->TimeOfDay();
@@ -3562,6 +3687,7 @@ void PlayScreen::HudRequests(ScreenContext& context) {
         case HudRequest::Kind::Chat: {
             // Numbered and kept until the server's answer prints it.
             if (replay_) break;
+            if (CreateSoundCommand(r.text, context.time)) break; // the developer's, ours: never sent
             proto::ChatSend line;
             line.kind = proto::ChatKind(r.value);
             line.target = r.target;
@@ -5010,6 +5136,18 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     CameraInput(context);
     FollowCamera();
     if (shown_) Interface(context, snapshot);
+#ifdef SR_AUDIO_OCCLUSION
+    // The depth cube round the player's head (whom the walls stand between; the camera, far behind or over a roof, would
+    // hear its own character through them).
+    snapshot.scene.audioCube = false;
+    if (shown_ && world_ && context.options != nullptr && context.options->beta.soundOcclusion) {
+        if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
+            const glm::vec3 head = world_->OriginRelative(self->position) + glm::vec3(0.0f, 15.0f, 0.0f);
+            snapshot.scene.audioCube = true;
+            snapshot.scene.audioEye = {head.x, head.y, head.z};
+        }
+    }
+#endif
     if (shown_) PickCursor(context);
     HandleInput(context);
     if (shown_) Script(context);

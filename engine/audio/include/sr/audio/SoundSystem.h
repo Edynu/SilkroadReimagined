@@ -76,9 +76,10 @@ public:
     // original's DirectSound inverse falloff; its buffers never set their distances, so they keep falling: our
     // `farthest` far away), constant past `farthest`. The reference is ours (the original's unit not found).
     void SetDistances(float reference, float farthest);
-    // Ours, experimental: asked when a positional sound starts (listener, sound): true when the world stands between
-    // them; such a sound plays muffled (a low-pass filter: kMuffledGain, kMuffledGainHf). Null: never.
-    std::function<bool(Vec3 listener, Vec3 sound)> occluded;
+    // Ours, experimental: asked when a positional sound starts (listener, sound): how much the world stands between them,
+    // 0 nothing .. 1 wholly; such a sound plays muffled that much (a low-pass filter towards kMuffledGain,
+    // kMuffledGainHf). Null: never.
+    std::function<float(Vec3 listener, Vec3 sound)> occluded;
     static constexpr float kMuffledGain = 0.6f, kMuffledGainHf = 0.12f;
     // Sounds muffled and played since the start (the tests' and the log's).
     int muffled = 0, positionalPlayed = 0;

@@ -67,6 +67,8 @@ public:
 
     // The scene's depth last read back at the pixel a snapshot asked for (SceneView::probeX / probeY).
     const DepthProbe& Probe() const { return probe_; }
+    // The sound occlusion's depth cube last read back (SceneView::audioCube; SR_AUDIO_OCCLUSION), once.
+    std::shared_ptr<const AudioCube> TakeAudioCube() { return std::move(audioCubeReady_); }
 
     std::uint32_t DrawnModels() const { return drawn_; }
     std::uint32_t WorldInstances() const { return world_.Live(); }
@@ -81,6 +83,27 @@ private:
     // The sun's cascaded shadows (G1): the light, the cascades and the atlas for this frame.
     void PrepareShadows(const SceneView& view, int quality);
     void DrawShadows(rhi::CommandList& cmd, const SceneView& view);
+    // The sound occlusion's depth cube (ours, experimental; SR_AUDIO_OCCLUSION): the static world's objects culled for six
+    // faces round the eye (two depth-only passes of three views; no characters, no swaying parts, nothing under a few
+    // units), drawn into the 3 x 2 atlas, copied into a mapped slot and handed back once its frame is done.
+    void AddAudioCube(gfx::RenderGraph& graph, gfx::RenderGraph::Resource instances, gfx::RenderGraph::Resource meshes,
+                      gfx::RenderGraph::Resource geometry, const SceneView& view);
+    void DrawAudioCube(rhi::CommandList& cmd);
+    static constexpr std::uint32_t kAudioSlots = 3;
+    struct AudioAsk {
+        std::uint64_t frame = 0;
+        glm::vec3 eye{0.0f};
+        std::array<glm::mat4, 6> viewProj{};
+    };
+    bool audioReady_ = false; // its passes and targets made (on first use)
+    gfx::WorldPass audioPass_[2];
+    gfx::WorldPass::Lists audioLists_[2];
+    rhi::TextureHandle audioAtlas_;
+    rhi::PipelineHandle audioReadPipeline_;
+    rhi::BufferHandle audioBuffer_;
+    std::array<AudioAsk, kAudioSlots> audioAsks_{};
+    std::array<glm::mat4, 6> audioViewProj_{};
+    std::shared_ptr<const AudioCube> audioCubeReady_;
 
     rhi::Device* device_ = nullptr;
     gfx::AssetStore* assets_ = nullptr;
