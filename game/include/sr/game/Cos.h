@@ -38,6 +38,9 @@ CosKind CosKindOf(const assets::ObjectRow& row);
 
 // A ride's or a transport's scroll (itemdata TID 3/3/3/2).
 bool IsCosScroll(const assets::ItemRow& row);
+// A stable keeper (the NPC function 0xB: its store buys a transport back), by a part of its codename as the original's
+// server gives it: NPC_CH_HORSE, NPC_WC_HORSE, NPC_KT_HORSE, NPC_EU_HORSE, NPC_CA_HORSE, NPC_SD_M_AREA_HORSE.
+bool IsStableNpc(std::string_view codename);
 
 // The codename of the COS a scroll summons for a summoner of `level` (none: not a scroll, or the summoner is below
 // its ladder's first level).

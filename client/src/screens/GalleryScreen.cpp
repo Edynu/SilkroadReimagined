@@ -855,7 +855,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             if (++clickStep_ == 10) clickStep_ = 2, dragsTo_[clickIndex_].reset(), clicks_[clickIndex_] = *to;
         } else if (clickStep_ < 3 && (clickStep_ > 0 || (host_.Settled() && (page_ != "fortress-map" || fortressMapShown_) &&
                                                          ((page_ != "inventory-full" && !EquipmentPage(page_)) || autoPotionShown_) &&
-                                                         ((page_ != "cos" && page_ != "cos-two" && page_ != "cos-pets") || cosShown_) &&
+                                                         ((page_ != "cos" && page_ != "cos-two" && page_ != "cos-pets" && page_ != "cos-sell") || cosShown_) &&
                                                          ((!page_.starts_with("exchange") && !page_.starts_with("stall") && !page_.starts_with("open-market")) || exchangeFrames_ >= 10)))) {
             ui::InputEvent e;
             e.position = at;
@@ -1333,7 +1333,8 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         // --page cos | cos-two | cos-pets: the COS manager (HudCos.cpp) on a ridden horse (its status
         // icon, the command bar: Info, Dismount, Terminate); cos-two adds a transport left standing beside it (two icons,
         // one outlined); cos-pets an attack pet (picked: its taller frame with the HGP gauge, its six commands) and a grab pet.
-        const bool cosPage = page_ == "cos" || page_ == "cos-two" || page_ == "cos-pets";
+        // cos-sell: a transport standing and a stable keeper's store open (its status icon dragged onto it: the sale).
+        const bool cosPage = page_ == "cos" || page_ == "cos-two" || page_ == "cos-pets" || page_ == "cos-sell";
         if (cosPage && !cosShown_ && interface_ != nullptr && tables_ && tables_->Ready()) {
             cosShown_ = true;
             hudContext_.characters = tables_->Usable() ? &tables_->characters : nullptr;
@@ -1345,8 +1346,19 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 hudContext_.coses.push_back({entity, row->refObjId, kind, hp, row->maxHp, ridden, std::move(name), std::uint8_t(row->level), hgp});
                 return &hudContext_.coses.back();
             };
-            add("COS_C_HORSE1", 901, 1, 700, page_ != "cos-pets");
-            if (page_ == "cos-two") add("COS_T_CAMEL1", 902, 2, 5000, false);
+            if (page_ != "cos-sell") add("COS_C_HORSE1", 901, 1, 700, page_ != "cos-pets");
+            if (page_ == "cos-two" || page_ == "cos-sell") add("COS_T_CAMEL1", 902, 2, 5000, false);
+            if (page_ == "cos-sell" && tables_->Usable()) {
+                hudContext_.cosSelected = 902;
+                const assets::ObjectRow* keeper = tables_->characters.Find(std::string_view("NPC_CH_HORSE"));
+                const assets::NpcShop* shop = tables_->shops.Find("NPC_CH_HORSE");
+                if (keeper != nullptr && shop != nullptr) {
+                    if (auto* store = dynamic_cast<StoreWindow*>(hud_.Show(hud::kStore))) {
+                        store->Open(905, *shop, 0, host_.data().Text(keeper->nameKey), keeper->codename);
+                        sample_.shopNpc = 905; // the player at its shop (the sale's box stays while it is)
+                    }
+                }
+            }
             if (page_ == "cos-pets") {
                 // The wolf at level 6 (the sample's level table ends at 8), its EXP a third of the way; the rabbit's
                 // rental 27 days and some hours left.

@@ -82,6 +82,7 @@ struct HudRequest {
         ShopBuy,           // value: the tab | the good's slot << 8, extra: the count
         ShopSell,          // value: the inventory place, extra: the count (0: all)
         ShopBuyback,       // value: the buy-back entry
+        CosSell,           // value: the stable keeper whose store bought the transport (its status icon dropped on it)
         DropItem,          // value: the inventory place let go over the world (asks first)
         DropGold,          // text: the amount
         RaiseStat,         // the character page's +: value 0 strength, 1 intelligence

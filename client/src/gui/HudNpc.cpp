@@ -367,6 +367,12 @@ void NpcWindow::ShowNpc(std::uint32_t entity, const std::string& codename, const
         AddChoice(context_.Text("UIIT_CTL_TELEPORT_TO_RESURRECT_POS"), {Choice::Kind::Destination, proto::kGateReturnDestination});
     }
     if ((services & proto::kGateTeleport) != 0) AddChoice(context_.Text("UIIT_CTL_TELEPORT_TARGET"), {Choice::Kind::Destinations, 0});
+    // The beginners' return (NPC function 0x1E, row 0x2B twice, after the teleport's rows): "Move to the last recall point."
+    // and "Move to the place where you died.", each a trip at once.
+    if ((services & proto::kNpcBeginnerReturn) != 0) {
+        AddChoice(context_.Text("UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_LAST_RETURN"), {Choice::Kind::Destination, proto::kGateBeginnerRecall});
+        AddChoice(context_.Text("UIIT_MSG_ITEM_USE_REVERSE_PORTAL_RETRUN_TO_LAST_DEATH"), {Choice::Kind::Destination, proto::kGateBeginnerDeath});
+    }
     // Event So-Ok's registration row after the NPC's ordinary rows, by the state her desk told: 1 "Capture the Flag
     // Match Registration", 2 its cancel, 0 none; drawing it sets which answer is expected. Its colours are the rows'
     // (0xFFEFDAA4, 0xFFFF8A00 under the mouse).

@@ -2355,6 +2355,86 @@ TEST_CASE("Game server: the thieves' town scroll: a thief's only, with his trans
     s.game.Stop();
 }
 
+TEST_CASE("Game server: the beginners' return at Soldier Choiyoung: to the last recall point or the place of death, up to level 20; "
+          "Gisaeng Yumi's den link closed (game files)") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    const char* dirEnv = std::getenv("SR_GAME_DIR");
+    if (dirEnv == nullptr || *dirEnv == 0) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    std::string error;
+    assets::FileSystem fs;
+    REQUIRE_MESSAGE(assets::MountGameArchives(fs, dirEnv, error), error);
+    auto teleports = std::make_shared<assets::TeleportTable>();
+    REQUIRE_MESSAGE(teleports->Load(fs, error), error);
+    constexpr std::uint32_t kSoldier = 2031; // NPC_CH_SOLDIER_EM1, the owner of teleport point 42
+    REQUIRE(teleports->PointOf(kSoldier) != nullptr);
+    CosServer s(t);
+    s.config.teleports = teleports;
+    const std::uint16_t jangan = assets::RegionId(168, 97), field = assets::RegionId(168, 96);
+    constexpr std::uint32_t kGisaeng = 2046; // NPC_CH_KISAENG6: point 7, its one link to the thieves' den
+    s.config.npcs.push_back({kSoldier, "NPC_CH_SOLDIER_EM1", {jangan, 1050.0f, 0.0f, 1000.0f}, 0.0f});
+    s.config.npcs.push_back({kGisaeng, "NPC_CH_KISAENG6", {jangan, 1050.0f, 0.0f, 1040.0f}, 0.0f});
+    REQUIRE_MESSAGE(s.game.Start(s.config, s.error), s.error);
+    std::uint32_t gisaeng = 0;
+    const auto soldierOf = [&](CosServer::Player& p) {
+        for (;;) {
+            const auto m = Next<proto::EntityAppeared>(p);
+            if (m.character.model == kGisaeng) gisaeng = m.entity;
+            if (m.character.model == kSoldier && gisaeng != 0) return m.entity;
+            if (m.character.model == kSoldier) {
+                const std::uint32_t soldier = m.entity;
+                while (gisaeng == 0) {
+                    const auto n = Next<proto::EntityAppeared>(p);
+                    if (n.character.model == kGisaeng) gisaeng = n.entity;
+                }
+                return soldier;
+            }
+        }
+    };
+    const auto keep = [&](bool recall, float x) {
+        return [&t, recall, x, field](std::int64_t character) {
+            const server::CharacterRow::Spot spot{field, x, 0.0f, 900.0f};
+            REQUIRE((recall ? server::SaveRecallSpot(t.Db(), character, spot) : server::SaveDeathSpot(t.Db(), character, spot)));
+        };
+    };
+    auto novice = s.Make("Novice", 1000, {Stored(kHorseScroll, 1)}, 10);
+    auto veteran = s.Make("Veteran", 1010, {}, 30, 0, 0, 1000, keep(true, 500.0f));
+    auto fallen = s.Make("Fallen", 1020, {}, 15, 0, 0, 1000, keep(false, 700.0f));
+    const std::uint32_t soldier = soldierOf(novice);
+    // Its menu has the two rows.
+    novice.client->Send(proto::NpcTalk{soldier});
+    CHECK((Next<proto::NpcMenu>(novice).services & proto::kNpcBeginnerReturn) != 0);
+    // Nothing kept (0x1C21); with a transport out, that first (0x1C10).
+    novice.client->Send(proto::UseGate{soldier, proto::kGateBeginnerRecall});
+    CHECK(Next<proto::GateRefused>(novice).status == proto::GateStatus::BeginnerNone);
+    novice.client->Send(proto::UseItem{PlaceOf(novice.bag, kHorseScroll)}); // a ride is a transport too
+    Next<proto::CosSummoned>(novice);
+    novice.client->Send(proto::UseGate{soldier, proto::kGateBeginnerDeath});
+    CHECK(Next<proto::GateRefused>(novice).status == proto::GateStatus::Transport);
+    // Over level 20 (0x1C20), though a recall point is kept.
+    veteran.client->Send(proto::UseGate{soldier, proto::kGateBeginnerRecall});
+    CHECK(Next<proto::GateRefused>(veteran).status == proto::GateStatus::BeginnerLevel);
+    // To the place of death; its recall point is none.
+    fallen.client->Send(proto::UseGate{soldier, proto::kGateBeginnerRecall});
+    CHECK(Next<proto::GateRefused>(fallen).status == proto::GateStatus::BeginnerNone);
+    fallen.client->Send(proto::UseGate{soldier, proto::kGateBeginnerDeath});
+    proto::WorldEntered moved;
+    bool arrived = false;
+    for (int i = 0; i < 400 && !arrived; ++i) {
+        if (fallen.client->Expect(moved, 10ms)) arrived = moved.position.region == field && std::abs(moved.position.x - 700.0f) < 1.0f;
+    }
+    CHECK(arrived);
+    // Gisaeng Yumi: no teleport row, her link to the den refused.
+    novice.client->Send(proto::NpcTalk{gisaeng});
+    CHECK((Next<proto::NpcMenu>(novice).services & proto::kGateTeleport) == 0);
+    novice.client->Send(proto::UseGate{gisaeng, teleports->PointNamed("GATE_TD")->id});
+    CHECK(Next<proto::GateRefused>(novice).status == proto::GateStatus::NoSuchLink);
+    s.game.Stop();
+}
+
 TEST_CASE("The jobs' week: the thieves' pool shared by contribution, the rankings written, the contributions reset") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);

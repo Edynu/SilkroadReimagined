@@ -57,7 +57,8 @@ using MessageId = std::uint16_t;
 //     (kNpcDungeonExit).
 // 16: a Scorn's caster with its buff (BuffAdded.source).
 // 17: a fortress's controlling guild's union (FortressRecord.controllerUnion): the war's defenders.
-inline constexpr std::uint32_t kProtocolVersion = 17;
+// 18: the beginners' return (kNpcBeginnerReturn, UseGate to kGateBeginnerRecall / kGateBeginnerDeath, GateStatus 34, 35).
+inline constexpr std::uint32_t kProtocolVersion = 18;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

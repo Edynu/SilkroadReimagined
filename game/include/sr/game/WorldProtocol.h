@@ -471,6 +471,9 @@ enum class GateStatus : std::uint8_t {
     Returning = 31,  // 0x1C14 UIIT_MSG_INTERACTION_FAIL_TELESCROLL_ALREADY_WORKING: a return scroll counting down
     ThiefDen = 32,   // 0x1C18 UIIT_INTERACTION_FAIL_ONLY_ROBBER_CAN_TELEPORT_TO_THIEFDEN: a trader's or hunter's league
     Busy = 33,       // 0x1C0B UIIT_MSG_INTERACTION_FAIL_IM_BUSY: an exchange, a stall, an alchemy run (an NPC's talk)
+    // The beginners' return:
+    BeginnerLevel = 34, // 0x1C20 UIIT_MSG_NEWBIE_RETURN_LV20_OVER: the highest level reached over 20
+    BeginnerNone = 35,  // 0x1C21 UIIT_MSG_NEWBIE_RETURN_ERROR: no such place kept
 };
 
 // The world goes on on another game server of the shard: connect there and show
@@ -506,6 +509,12 @@ constexpr std::uint32_t kGateRecallPoint = 0x40, kGateTeleport = 0x80;
 // point"; the thieves' den's): UseGate with kGateReturnDestination asks for it (the original's 0x705A of kind 1).
 constexpr std::uint32_t kGateToReturn = 0x1000000;
 constexpr std::uint32_t kGateReturnDestination = 0xFFFFFFFFu;
+// The beginners' return (the original's NPC function 0x1E, given by codename to Soldier Choiyoung [Teleport] in Jangan
+// and Guide Riise in Constantinople; its two rows): UseGate at that NPC with kGateBeginnerRecall or kGateBeginnerDeath
+// (the original's 0x705A of kind 5) takes one whose highest level is 20 or less, free, to the last recall point or the
+// place of death (the reverse return scroll's two places).
+constexpr std::uint32_t kNpcBeginnerReturn = 0x4000000;
+constexpr std::uint32_t kGateBeginnerRecall = 0xFFFFFFFEu, kGateBeginnerDeath = 0xFFFFFFFDu;
 
 struct GateTalk {
     static constexpr MessageId kId = 0x1032;

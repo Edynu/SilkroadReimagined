@@ -1584,6 +1584,11 @@ void StoreWindow::Created(ui::Interface& ui) {
     }
     // An item of the bag dropped anywhere on the store: the sell box.
     onDrop = [this](ui::Widget* source, ui::Widget*) {
+        // A COS's status icon: its sale (a stable keeper's store only).
+        if (const std::uint32_t cos = DraggedCos(source); cos != 0) {
+            SellCos(cos);
+            return true;
+        }
         // A good of the transport's bag: the sale's window at a specialty NPC,
         // else the pets' "cannot trade here".
         if (const int cart = CosBagPlaceOf(source); cart >= 0) {
@@ -1632,8 +1637,9 @@ void StoreWindow::Created(ui::Interface& ui) {
     };
 }
 
-void StoreWindow::Open(std::uint32_t npc, const assets::NpcShop& shop, int group, const std::string& title) {
+void StoreWindow::Open(std::uint32_t npc, const assets::NpcShop& shop, int group, const std::string& title, const std::string& codename) {
     npc_ = npc;
+    codename_ = codename;
     group_ = group >= 0 && std::size_t(group) < shop.groups.size() ? &shop.groups[std::size_t(group)] : nullptr;
     if (ui::Widget* t = Child(0)) t->SetText(title);
     for (int t = 0; t < 4; ++t) {
@@ -1703,6 +1709,35 @@ void StoreWindow::Update(ui::Frame&) {
         seen_ = context_.state->inventoryVersion;
         Refresh();
     }
+}
+
+void StoreWindow::SellCos(std::uint32_t entity) {
+    // The 1.188 store's checks in their order, each a line of the error table: a store not of a stable keeper 0x1845;
+    // riding 0x4409; goods aboard 0x440B; then a COS its row lets be sold the box with its icon, name and price, else
+    // 0x440A.
+    const auto refuse = [&](std::uint16_t code) {
+        if (context_.state != nullptr) {
+            if (const char* key = OriginalErrorKey(code)) context_.state->Post(game::GameMessage::Kind::General, context_.Text(key), context_.time);
+        }
+    };
+    const HudContext::CosShown* cos = nullptr;
+    for (const HudContext::CosShown& s : context_.coses) {
+        if (s.entity == entity) cos = &s;
+    }
+    if (cos == nullptr || context_.hud == nullptr) return;
+    if (!game::IsStableNpc(codename_)) return refuse(0x1845);
+    if (std::any_of(context_.coses.begin(), context_.coses.end(), [](const HudContext::CosShown& s) { return s.ridden; })) return refuse(0x4409);
+    if (!cos->bag.empty()) return refuse(0x440B);
+    const assets::ObjectRow* row = context_.characters != nullptr ? context_.characters->Find(cos->model) : nullptr;
+    if (row == nullptr || !row->canSell) return refuse(0x440A);
+    DealBox::Deal deal;
+    deal.kind = DealBox::Deal::Kind::CosSell;
+    deal.icon = row->iconPath.empty() ? std::string("icon\\icon_default.ddj") : "icon\\" + row->iconPath;
+    deal.name = !cos->name.empty() ? cos->name : context_.Text(row->nameKey);
+    deal.unitPrice = std::uint64_t(std::clamp(row->sellPrice, 1, 10'000'000)); // as the server pays it
+    deal.count = deal.most = 1;
+    deal.npc = npc_;
+    context_.hud->Deal(deal);
 }
 
 bool StoreWindow::OnNotice(const ui::Notice& notice) {
@@ -1858,9 +1893,9 @@ void DealBox::Set(const Deal& deal) {
     if (!buy) {
         // A sale's button says Sell, a buy-back's Repurchase; a buy-back's count is the entry's.
         if (ui::Widget* ok = Named("GDR_MBS_CONFIRM_BTN_SELL")) {
-            ok->SetText(context_.Text(deal.kind == Deal::Kind::Sell ? "UIIT_STT_SELL" : "UIIT_STT_RE_BUY_OBJECT"));
+            ok->SetText(context_.Text(deal.kind == Deal::Kind::Sell || deal.kind == Deal::Kind::CosSell ? "UIIT_STT_SELL" : "UIIT_STT_RE_BUY_OBJECT"));
         }
-        if (deal.kind == Deal::Kind::Buyback || deal.kind == Deal::Kind::Deposit) {
+        if (deal.kind == Deal::Kind::Buyback || deal.kind == Deal::Kind::Deposit || deal.kind == Deal::Kind::CosSell) {
             for (const char* spin : {"GDR_MBS_CONFIRM_SPINBTN_UP", "GDR_MBS_CONFIRM_SPINBTN_DOWN"}) {
                 if (ui::Widget* w = Named(spin)) w->visible = false;
             }
@@ -1940,6 +1975,7 @@ bool DealBox::OnNotice(const ui::Notice& notice) {
             break;
         }
         case Deal::Kind::Buyback: context_.hud->Request({HudRequest::Kind::ShopBuyback, deal_.index}); break;
+        case Deal::Kind::CosSell: context_.hud->Request({HudRequest::Kind::CosSell, int(deal_.npc)}); break;
         case Deal::Kind::Deposit: context_.hud->Request({HudRequest::Kind::StorageMove, deal_.storageMove}); break;
         case Deal::Kind::StallBuy:
             if (context_.stallRequest) context_.stallRequest(proto::StallBuy::kId, proto::Encode(proto::StallBuy{std::uint8_t(deal_.stallSlot)}));

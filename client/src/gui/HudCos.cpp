@@ -66,6 +66,9 @@ ui::Rect NodeRect(const assets::UiLayout* layout, const char* name, ui::Rect fal
 
 class StatusIcon : public ui::Widget {
 public:
+    // What a drag of it carries: a hidden slot with the COS's icon (the original's icon control is a slot of drag kind
+    // 0x27, which a store takes: the transport's sale at a stable keeper).
+    ui::Slot* proxy = nullptr;
     StatusIcon(const assets::UiLayoutNode& node, HudContext& c, const assets::UiLayout* layout, std::uint32_t entity)
         : Widget(node), c_(c), entity_(entity) {
         icon_ = NodeRect(layout, "GDR_COSSTAT_ICON", {6, 7, 32, 32});
@@ -111,6 +114,15 @@ public:
             frame.interface.ShowTooltip(tip, ScreenRect());
         }
         if (frame.input.Released(ui::MouseButton::Left) && frame.pointer.hovered == this) c_.cosSelected = entity_;
+        // Dragged: picked up as its icon (ours: a drag picks it up, a click still picks the COS for the command bar).
+        const bool dragged = std::hypot(frame.pointer.position.x - frame.pointer.pressPosition.x, frame.pointer.position.y - frame.pointer.pressPosition.y) > 4.0f;
+        if (frame.pointer.held == this && dragged && frame.interface.picked() == nullptr && proxy != nullptr) {
+            const assets::ObjectRow* row = c_.characters != nullptr ? c_.characters->Find(cos->model) : nullptr;
+            if (row != nullptr && !row->iconPath.empty()) {
+                proxy->icon = "icon\\" + row->iconPath;
+                frame.interface.Pick(proxy, true);
+            }
+        }
     }
 
 private:
@@ -202,7 +214,13 @@ private:
             n.rect = {screen.x - kStatusRight - kStatusStep * float(i), kStatusTop, 44.0f, growth ? 68.0f : 56.0f};
             auto icon = std::make_unique<StatusIcon>(n, c_, status_, s.entity);
             icon->rect = {n.rect.x, n.rect.y, n.rect.w, n.rect.h};
-            Add(std::move(icon));
+            StatusIcon* added = static_cast<StatusIcon*>(Add(std::move(icon)));
+            assets::UiLayoutNode held;
+            held.type = "CIFSlotWithHelp";
+            held.id = 199;
+            held.rect = {0.0f, 0.0f, 32.0f, 32.0f};
+            added->proxy = ui::As<ui::Slot>(added->Add(frame.interface.Make(held)));
+            if (added->proxy != nullptr) added->proxy->visible = false;
         }
         const HudContext::CosShown* picked = nullptr;
         for (const HudContext::CosShown& s : c_.coses) {
@@ -673,6 +691,11 @@ private:
 };
 
 } // namespace
+
+std::uint32_t DraggedCos(const ui::Widget* slot) {
+    const auto* icon = slot != nullptr ? dynamic_cast<const StatusIcon*>(slot->parent()) : nullptr;
+    return icon != nullptr && icon->proxy == slot ? icon->entity() : 0;
+}
 
 int CosBagPlaceOf(const ui::Widget* slot) {
     for (const ui::Widget* w = slot; w != nullptr; w = w->parent()) {

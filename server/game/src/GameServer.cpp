@@ -782,6 +782,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (game::IsRepairNpc(codename)) services |= proto::kNpcRepair;  // the store's Repair and Repair all
         if (game::IsAvatarGrantNpc(codename)) services |= proto::kNpcAvatarGrant; // the avatars' blessing
         if (codename == "NPC_INS_EXIT_TELEPORT") services = proto::kNpcDungeonExit; // an instance's exit: its one row
+        // The beginners' return (function 0x1E, by a part of the codename as the original's server gives it).
+        if (codename.find("NPC_CH_SOLDIER_EM1") != std::string::npos || codename.find("NPC_EU_ADVICE3") != std::string::npos) {
+            services |= proto::kNpcBeginnerReturn;
+        }
         // A league's keeper (functions 0x14 / 0x15 / 0x16): its rows.
         switch (game::LeagueOfNpc(codename)) {
         case game::JobType::Trader: services |= proto::kNpcJobTrader; break;
@@ -8937,10 +8941,20 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         const assets::TeleportPoint* point = config.teleports ? config.teleports->PointOf(npcRefObjId) : nullptr;
         if (point == nullptr) return 0;
         std::uint32_t services = 0;
-        if (!config.teleports->LinksFrom(point->id).empty()) services |= proto::kGateTeleport;
+        if (!config.teleports->LinksFrom(point->id).empty() && !DenLinked(*point)) services |= proto::kGateTeleport;
         if (point->recall) services |= proto::kGateRecallPoint;
         if (point->toReturn) services |= proto::kGateToReturn;
         return services;
+    }
+
+    // An NPC's point with a link to the thieves' den (GATE_TD): the original's server takes the teleport service off such
+    // an NPC when it spawns (Gisaeng Yumi in Jangan, Soldier Kartino in Constantinople, whose one link it is), so they only
+    // talk and the den is reached by the thieves' town scroll.
+    bool DenLinked(const assets::TeleportPoint& point) const {
+        for (const assets::TeleportLink* link : config.teleports->LinksFrom(point.id)) {
+            if (const assets::TeleportPoint* to = config.teleports->Point(link->to); to != nullptr && to->codename == "GATE_TD") return true;
+        }
+        return false;
     }
 
     // The gate a traveller stands at and its point, or why not. `gateId` is a gate's reference id, or an
@@ -9873,6 +9887,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             TravelTo(peer.id, player, {to->region, to->x, to->y, to->z});
             return;
         }
+        // The beginners' return (the original's 0x705A kind 5) at an NPC with it: not with a transport out (0x1C10), only
+        // for one whose highest level reached is 20 or less (0x1C20), to the last recall point or the place of death as
+        // the reverse return scroll keeps them (none kept: 0x1C21); at once and free.
+        if (use.destination == proto::kGateBeginnerRecall || use.destination == proto::kGateBeginnerDeath) {
+            const auto npc = npcs.find(use.gate);
+            if (npc == npcs.end() || (NpcServices(npc->second->codename, npc->second->refObjId) & proto::kNpcBeginnerReturn) == 0) {
+                return refuse(proto::GateStatus::NoSuchLink);
+            }
+            if (TransportOut(player)) return refuse(proto::GateStatus::Transport);
+            if (std::max(player.level, player.maxLevel) > 20) return refuse(proto::GateStatus::BeginnerLevel);
+            const CharacterRow::Spot& spot = use.destination == proto::kGateBeginnerRecall ? player.recallSpot : player.deathSpot;
+            if (spot.region == 0) return refuse(proto::GateStatus::BeginnerNone);
+            if (!CanTravelTo(spot.region)) return refuse(proto::GateStatus::ServerDown);
+            core::LogInfo("{}: {} returns as a beginner to its {} ({},{})", config.name, player.name,
+                          use.destination == proto::kGateBeginnerRecall ? "recall point" : "place of death", spot.region & 0xFF, spot.region >> 8);
+            TravelTo(peer.id, player, {spot.region, spot.x, spot.y, spot.z});
+            return;
+        }
         // Through the snake gate into floor 5's copy (the link the tomb's opening gives it): no transport out (as the tomb's
         // other links), then the copy's admission.
         if (from->id == QinTomb::kSnakeGate && use.destination == QinTomb::kFloor5Gate) {
@@ -9882,6 +9914,8 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             core::LogInfo("{}: {} goes through the snake gate into the tomb's 5th floor", config.name, player.name);
             return;
         }
+        // An NPC whose point links to the thieves' den has no teleport service (DenLinked).
+        if (npcs.contains(use.gate) && DenLinked(*from)) return refuse(proto::GateStatus::NoSuchLink);
         const auto links = config.teleports->LinksFrom(from->id);
         const auto link = std::find_if(links.begin(), links.end(), [&](const assets::TeleportLink* l) { return l->to == use.destination; });
         if (link == links.end()) return refuse(proto::GateStatus::NoSuchLink);

@@ -97,8 +97,12 @@ public:
     // The widget the keyboard goes to (an edit); a press elsewhere takes it away.
     void Focus(Widget* widget) { focus_ = widget; }
     Widget* focus() const { return focus_; }
-    // The item picked up from a slot (the original's "focus"): dropped on the next left release.
-    void Pick(Widget* source) { picked_ = source; }
+    // The item picked up from a slot (the original's "focus"): dropped on the next left release. `byDrag`: picked while
+    // the button is held and the mouse moved (ours: a COS's status icon), dropped where that same button goes up.
+    void Pick(Widget* source, bool byDrag = false) {
+        picked_ = source;
+        pickedByDrag_ = byDrag;
+    }
     Widget* picked() const { return picked_; }
     // The deepest widget of any kind under the mouse this frame (null: the world, no window there):
     // where a held item was let go.
@@ -164,6 +168,7 @@ private:
     bool pickEnded_ = false;
     Widget* focus_ = nullptr;
     Widget* picked_ = nullptr;
+    bool pickedByDrag_ = false;
     Widget* popup_ = nullptr;
     Widget* popupOwner_ = nullptr;
     std::vector<Widget*> closing_;

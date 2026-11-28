@@ -381,6 +381,8 @@ void RegisterCosWindows(ui::Interface& ui, HudContext& context);
 // The place in the picked pet's bag a slot of the COS window stands for (-1: none): the inventory window takes drops
 // from it (a CosBagMove).
 int CosBagPlaceOf(const ui::Widget* slot);
+// The COS whose status icon a held slot is (its drag's proxy; 0: none): a store takes it as the transport's sale.
+std::uint32_t DraggedCos(const ui::Widget* slot);
 
 // A text key's text with printf-style numbers put in ("Lv %d"); the numbers come formatted.
 std::string FormatText(const std::string& format, std::initializer_list<std::string> args);
@@ -1344,8 +1346,8 @@ public:
     void Created(ui::Interface& ui) override;
     void Update(ui::Frame& frame) override;
     bool OnNotice(const ui::Notice& notice) override;
-    // The store of `npc`'s shop, tab group `group`, titled `title`.
-    void Open(std::uint32_t npc, const assets::NpcShop& shop, int group, const std::string& title);
+    // The store of `npc`'s shop (its codename `codename`), tab group `group`, titled `title`.
+    void Open(std::uint32_t npc, const assets::NpcShop& shop, int group, const std::string& title, const std::string& codename = {});
     // The good a slot of this window shows (null: none), and the buy-back index one stands for (-1).
     static const assets::ShopGood* GoodOf(const ui::Widget* slot, int* tabIndex = nullptr);
     static int SoldOf(const ui::Widget* slot);
@@ -1356,8 +1358,11 @@ private:
     void SelectTab(int tab);
     void Refresh();
     HudContext& context_;
+    // A COS's status icon dropped on the store: its sale at a stable keeper's (the original's drag kind 0x27).
+    void SellCos(std::uint32_t entity);
     const assets::ShopTabGroup* group_ = nullptr;
     std::uint32_t npc_ = 0;
+    std::string codename_;
     int tab_ = 0, page_ = 0;
     std::uint64_t seen_ = ~0ull;
 };
@@ -1368,7 +1373,7 @@ class DealBox : public ui::MainFrame {
 public:
     DealBox(const assets::UiLayoutNode& node, HudContext& context) : MainFrame(node), context_(context) {}
     struct Deal {
-        enum class Kind : std::uint8_t { Buy, Sell, Buyback, StallRegister, Deposit, StallBuy };
+        enum class Kind : std::uint8_t { Buy, Sell, Buyback, StallRegister, Deposit, StallBuy, CosSell };
         Kind kind = Kind::Buy;
         std::string icon, name;
         std::uint64_t unitPrice = 0; // a buy's per piece; a sale's per piece; a buy-back's total
@@ -1378,6 +1383,7 @@ public:
         int index = 0;               // a buy-back's entry
         int stallSlot = 0;           // a stall's register (`place` the bag's; 0 a price change) or buy: the stall's slot
         int storageMove = 0;         // a deposit's: its StorageMove request (`unitPrice` the whole fee)
+        std::uint32_t npc = 0;       // a COS's sale: the stable keeper
     };
     void Created(ui::Interface& ui) override;
     void Update(ui::Frame& frame) override;

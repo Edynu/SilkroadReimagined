@@ -427,7 +427,8 @@ void Interface::Frame(Context& context, float scale, double time, float dt) {
         } else if (input.Pressed(MouseButton::Left) && dynamic_cast<const Button*>(pointer_.hovered) == nullptr &&
                    dynamic_cast<const SelectableArea*>(pointer_.hovered) == nullptr) {
             swallowPress = true;
-        } else if (input.Released(MouseButton::Left) && pointer_.held == nullptr) {
+        } else if (input.Released(MouseButton::Left) && (pointer_.held == nullptr || pickedByDrag_)) {
+            pickedByDrag_ = false;
             Widget* taker = nullptr;
             for (Widget* w = under; w != nullptr; w = w->parent()) {
                 if (w->onDrop && w->onDrop(picked_, under)) {

@@ -17,6 +17,13 @@ CosKind CosKindOf(const assets::ObjectRow& row) {
     return row.typeId[3] >= 1 && row.typeId[3] <= 5 ? CosKind(row.typeId[3]) : CosKind::None;
 }
 
+bool IsStableNpc(std::string_view codename) {
+    for (const std::string_view part : {"NPC_CH_HORSE", "NPC_WC_HORSE", "NPC_KT_HORSE", "NPC_EU_HORSE", "NPC_CA_HORSE", "NPC_SD_M_AREA_HORSE"}) {
+        if (codename.find(part) != std::string_view::npos) return true;
+    }
+    return false;
+}
+
 bool IsCosScroll(const assets::ItemRow& row) { return row.typeId == std::array<int, 4>{3, 3, 3, 2}; }
 
 CosKind PetOfItem(const assets::ItemRow& row) {

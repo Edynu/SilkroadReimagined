@@ -662,6 +662,8 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
                           : refused->status == proto::GateStatus::Returning ? "UIIT_MSG_INTERACTION_FAIL_TELESCROLL_ALREADY_WORKING"
                           : refused->status == proto::GateStatus::ThiefDen  ? "UIIT_INTERACTION_FAIL_ONLY_ROBBER_CAN_TELEPORT_TO_THIEFDEN"
                           : refused->status == proto::GateStatus::Busy      ? "UIIT_MSG_INTERACTION_FAIL_IM_BUSY"
+                          : refused->status == proto::GateStatus::BeginnerLevel ? "UIIT_MSG_NEWBIE_RETURN_LV20_OVER"
+                          : refused->status == proto::GateStatus::BeginnerNone  ? "UIIT_MSG_NEWBIE_RETURN_ERROR"
                                                                            : "UIIT_MSG_STATE_TELEPORT_FAIL";
         if (!replay_ && refused->status == proto::GateStatus::Murderer) player_.Notify(game::Banner::Kind::Warning, gui_.data().Text(key), context.time);
         if (!replay_) player_.Post(game::GameMessage::Kind::General, gui_.data().Text(key), context.time);
@@ -3514,7 +3516,7 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
         const assets::ObjectRow* row = e != nullptr && tables_ && tables_->Usable() ? tables_->characters.Find(e->look.model) : nullptr;
         const assets::NpcShop* shop = row != nullptr ? tables_->shops.Find(row->codename) : nullptr;
         if (shop != nullptr) {
-            if (auto* store = dynamic_cast<StoreWindow*>(hud_.Show(hud::kStore))) store->Open(shopShow_, *shop, shopGroup_, gui_.data().Text(row->nameKey));
+            if (auto* store = dynamic_cast<StoreWindow*>(hud_.Show(hud::kStore))) store->Open(shopShow_, *shop, shopGroup_, gui_.data().Text(row->nameKey), row->codename);
             // A specialty NPC or the thieves' buyer: the transport's bag beside it, not the inventory.
             const bool specialty = game::IsSpecialtyNpc(row->codename) || game::IsStolenGoodsBuyer(row->codename);
             hudContext_.tradeNpc = specialty ? shopShow_ : 0;
@@ -3856,6 +3858,9 @@ void PlayScreen::HudRequests(ScreenContext& context) {
             break;
         case HudRequest::Kind::ShopBuyback:
             if (!replay_ && player_.shopNpc != 0) shared_->session->Shop(proto::ShopBuyback{player_.shopNpc, std::uint8_t(r.value)});
+            break;
+        case HudRequest::Kind::CosSell:
+            if (!replay_ && r.value != 0) shared_->session->SendGame(proto::CosSell::kId, proto::Encode(proto::CosSell{std::uint32_t(r.value)}));
             break;
         case HudRequest::Kind::StorageGold:
             if (!replay_) shared_->session->MoveStorageGold((r.value & 1) != 0, std::strtoull(r.text.c_str(), nullptr, 10), (r.value & 2) != 0);
