@@ -728,6 +728,7 @@ AmbientLook PartAmbientLook(const ResourceData& resource, int materialIndex) {
             if (!mine(e.material)) continue;
             look.envMap = true;
             look.envAlphaZero = look.envAlphaZero || (e.alphaFlags & 2u) != 0;
+            look.envHighlight = look.envHighlight || (e.words[1] >> 16) == 3u;
         }
         for (const ResourceData::MaterialModifier& m : set.materials) {
             if (!mine(m.material) || m.enables[1] == 0) continue;

@@ -112,6 +112,7 @@ SceneLighting EnvironmentState::Lighting() const {
     l.terrainLight = glm::vec3(5.0f, 1.0f, 0.0f); // the light travels along (-5, -1, 0)
     l.objectLight = glm::vec3(1.0f, 1.0f, 0.0f);  // and (-1, -1, 0) for objects
     l.diffuse = value(EnvironmentCurve::Diffuse) * (options_.glow ? 0.8f : 0.6f) * (options_.underWater ? 0.5f : 1.0f);
+    l.sunDiffuse = glm::clamp(value(EnvironmentCurve::Diffuse), glm::vec3(0.0f), glm::vec3(1.0f));
     l.terrainAmbient = value(EnvironmentCurve::TerrainAmbient);
     l.objectAmbient = value(EnvironmentCurve::ObjectAmbient);
     l.lift = value(EnvironmentCurve::Lift);

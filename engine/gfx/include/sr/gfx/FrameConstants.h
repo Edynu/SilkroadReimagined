@@ -22,6 +22,7 @@ struct SceneLighting {
     glm::vec3 terrainAmbient{0.25f};             // ambient while the terrain draws
     glm::vec3 objectAmbient{0.45f};              // ambient while objects draw
     glm::vec3 lift{0.3f};                        // added to the terrain lightmap before it multiplies
+    glm::vec3 sunDiffuse{0.3f};                  // the environment's diffuse curve as it is (the metal sheen's colour)
     bool lightmaps = true;
     bool fog = false;
     glm::vec3 fogColor{0.6f, 0.7f, 0.8f};        // everything but the near terrain
@@ -89,8 +90,15 @@ struct FrameConstants {
     // 720: the Modern weather (0 with the Original's): x the ground's wetness, y the snow lying, z the rain falling
     // now (each 0..1; the wetness and the snow build up and go slowly, WorldScreen's).
     glm::vec4 weather{0.0f};
+    // 736: the Metallic Sheen (kMaterialEnvMap): x spheremap_gray, y spheremap_highlight (bindless), z 0 off, 1 the
+    // original's, 2 modern. 752: its colour (the original's texture factor: the environment's diffuse curve).
+    glm::vec4 metal{0.0f};
+    glm::vec4 metalColour{0.0f};
+    // 768, 784: the camera's right and up (the original's camera-space normal, which picks the sphere map's texel).
+    glm::vec4 cameraRight{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec4 cameraUp{0.0f, 1.0f, 0.0f, 0.0f};
 };
-static_assert(sizeof(FrameConstants) == 736);
+static_assert(sizeof(FrameConstants) == 800);
 
 FrameConstants MakeFrameConstants(const glm::mat4& viewProj, const glm::vec3& camera, const SceneLighting& lighting, double seconds,
                                   std::size_t pointLights = 0);

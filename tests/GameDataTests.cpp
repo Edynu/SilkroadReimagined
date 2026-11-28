@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <unordered_set>
 
 #include <map>
 #include <set>
@@ -3101,4 +3102,39 @@ TEST_CASE("the player bodies' walk and run clips mark each foot's step (events o
             CHECK(steps[0].b + steps[1].b == 1); // one step a foot
         }
     }
+}
+
+TEST_CASE("the items' environment-map modifiers (the metallic sheen) name one of the two sphere maps") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    ItemTable items;
+    REQUIRE_MESSAGE(items.Load(fs, error), error);
+    std::unordered_set<std::string> done;
+    std::size_t modifiers = 0, highlights = 0, shiningParts = 0;
+    for (const auto& [code, row] : items.rows()) {
+        const std::string path = items.ResolveModel(fs, row);
+        if (path.empty() || !done.insert(path).second) continue;
+        auto file = fs.Read(path);
+        ResourceData resource;
+        if (!file || !DecodeBsr(file->Bytes(), resource, error)) continue;
+        for (const auto& set : resource.modifierSets) {
+            for (const auto& e : set.envMaps) {
+                ++modifiers;
+                const std::uint32_t kind = e.words[1] >> 16;
+                CHECK_MESSAGE((kind == 1 || kind == 3), path);
+                if (kind == 3) ++highlights;
+            }
+        }
+        for (int m = 0; m < 8; ++m) shiningParts += PartAmbientLook(resource, m).envMap ? 1 : 0;
+    }
+    MESSAGE(modifiers << " env-map modifiers in " << done.size() << " item models, " << highlights << " on the highlight; " << shiningParts << " shining materials");
+    CHECK(modifiers > 500);
+    CHECK(highlights > 0);
+    CHECK(shiningParts > 0);
 }

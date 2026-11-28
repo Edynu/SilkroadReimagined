@@ -135,6 +135,10 @@ private:
     gfx::WorldPass::Lists reflectionLists_;
     rhi::TextureHandle reflection_, reflectionDepth_;
     gfx::AssetId bumpTexture_;
+    // The Metallic Sheen's sphere maps (the original's object renderer's, prim\mtrl\etc\), and the camera's view
+    // (its right and up turn a normal into the sphere map's texel).
+    gfx::AssetId sphereGray_, sphereHighlight_;
+    glm::mat4 cameraView_{1.0f};
     glm::mat4 reflectViewProj_{1.0f}, reflectSkyViewProj_{1.0f};
     bool reflecting_ = false;
     void DrawReflection(rhi::CommandList& cmd, const SceneView& view);

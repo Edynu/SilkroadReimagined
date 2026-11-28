@@ -264,12 +264,39 @@ float3 ObjectColor(VSOutput input, float3 albedo, float3 normal, out float shado
     return color;
 }
 
+// The Metallic Sheen (gfx::kMaterialEnvMap: a model's environment-map modifier, 1.188's CRTModEnvMap::vf_010): the part's
+// texture alpha masks a shine added onto its colour before the light, as the original's stages: stage 0 the sphere map
+// (spheremap_gray, or spheremap_highlight with kMaterialEnvHighlight) at its texel for the camera-space normal (x 0.8 +
+// 0.5) times the texture factor (the environment's diffuse); stage 1 the part's texture plus its alpha times that, each
+// stage clamped. Ours (Modern): the sky and the sun reflected in its place, stronger at grazing angles.
+float3 MetalSheen(VSOutput input, float4 albedo, float3 normal) {
+    const float4 metal = FrameValue(pc.frame, kFrameMetal);
+    if ((input.material & (1u << 26)) == 0 || metal.z < 0.5) return albedo.rgb;
+    const float3 factor = FrameValue(pc.frame, kFrameMetalColour).rgb;
+    if (metal.z < 1.5) {
+        const float2 uv = float2(dot(normal, FrameValue(pc.frame, kFrameCameraRight).xyz), dot(normal, FrameValue(pc.frame, kFrameCameraUp).xyz)) * 0.8 + 0.5;
+        const uint map = uint((input.material & (1u << 27)) != 0 ? metal.y : metal.x);
+        const float3 shine = saturate(gTextures[NonUniformResourceIndex(map)].Sample(gSamplers[1], uv).rgb * factor);
+        return saturate(albedo.rgb + albedo.a * shine);
+    }
+    const float3 toEye = normalize(FrameValue(pc.frame, kFrameCamera).xyz - input.world);
+    const float3 r = reflect(-toEye, normal);
+    const float4 zenith = FrameValue(pc.frame, kFrameSkyZenith);
+    const float3 horizon = zenith.w > 0.5 ? FrameValue(pc.frame, kFrameSkyHorizon).rgb : FrameValue(pc.frame, kFrameFogColor).rgb;
+    const float3 sky = lerp(horizon * 0.6, zenith.w > 0.5 ? zenith.rgb : horizon, saturate(r.y * 1.4 + 0.3));
+    const float fresnel = 0.35 + 0.65 * pow(1.0 - saturate(dot(normal, toEye)), 3.0);
+    float3 shine = sky * factor * fresnel;
+    const float4 sun = FrameValue(pc.frame, kFrameSun);
+    if (sun.w > 0.0) shine += FrameValue(pc.frame, kFrameSunColour).rgb * (pow(saturate(dot(r, sun.xyz)), 120.0) * 1.5 + pow(saturate(dot(r, sun.xyz)), 12.0) * 0.15) * sun.w;
+    return saturate(albedo.rgb + albedo.a * shine);
+}
+
 float4 PSMain(VSOutput input) : SV_Target {
     const float4 albedo = gTextures[NonUniformResourceIndex(input.texture)].Sample(gSamplers[0], input.uv);
     const bool cut = ((input.material & 1) != 0 && albedo.a < AlphaReference(input.material)) || FadeCut(input);
     const float3 normal = normalize(input.normal);
     float shadow;
-    float3 color = ObjectColor(input, albedo.rgb, normal, shadow);
+    float3 color = ObjectColor(input, MetalSheen(input, albedo, normal), normal, shadow);
     if (cut) discard;
     if ((input.material & 64) != 0 && FrameValue(pc.frame, kFrameWaterCopy).w > 0.5) {
         color = ObjectWater(input, albedo.rgb, color, normal, shadow);

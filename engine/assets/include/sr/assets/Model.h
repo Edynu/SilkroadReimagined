@@ -187,8 +187,10 @@ struct ResourceData {
     // flag 2, testing only for alpha 0 (the reference 1, GREATEREQUAL), whatever the material's own flags say.
     struct EnvMapModifier {
         std::uint32_t flags = 0, material = 0xFFFFFFFF; // the modifier's base words 2 and 3 (0xFFFFFFFF: every material)
-        std::uint32_t alphaFlags = 0;                   // base word 5: 2 the alpha test at reference 1
-        std::uint32_t words[4]{};                       // its own 16 bytes (not read further yet)
+        std::uint32_t alphaFlags = 0;                   // base word 5: 1 the shine's colour the texture factor, 2 the alpha test at reference 1
+        // Its own 16 bytes: word 1 the sphere map's resource id (0x10000 or 0x30000 in the data: ours, spheremap_gray and
+        // spheremap_highlight), word 3 a mode (read only without alphaFlags bit 0: one file).
+        std::uint32_t words[4]{};
     };
     struct ParticleModifier {
         bool atRoot = false;
@@ -277,6 +279,7 @@ struct AmbientLook {
     // when the modifier asks for it (ALPHAREF 1).
     bool envMap = false;
     bool envAlphaZero = false;
+    bool envHighlight = false; // its sphere map the highlight (resource id 0x30000), else the gray one
 };
 // The ambient look of `materialIndex` (a part's place in its .bmt) under `resource`'s modifiers.
 AmbientLook PartAmbientLook(const ResourceData& resource, int materialIndex);

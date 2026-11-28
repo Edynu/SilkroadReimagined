@@ -122,6 +122,8 @@ bool SceneRenderer::Init(rhi::Device& device, gfx::AssetStore& assets, std::uint
     reflectionLimits.maxDraws = 1u << 15;
     if (!reflectionPass_.Init(device, kSceneColor, rhi::Format::D32Float, reflectionLimits, error)) return false;
     bumpTexture_ = assets.RequestTexture("skybox\\waterbump3.ddj");
+    sphereGray_ = assets.RequestTexture("prim\\mtrl\\etc\\spheremap_gray.ddj");
+    sphereHighlight_ = assets.RequestTexture("prim\\mtrl\\etc\\spheremap_highlight.ddj");
     gfx::WorldPass::Limits shadowLimits;
     shadowLimits.maxDraws = 1u << 16;
     shadowLimits.arenaVertices = skinVertices / 2;
@@ -254,6 +256,9 @@ void SceneRenderer::Shutdown() {
     reflectionPass_.Shutdown();
     assets_->Release(bumpTexture_);
     bumpTexture_ = {};
+    assets_->Release(sphereGray_);
+    assets_->Release(sphereHighlight_);
+    sphereGray_ = sphereHighlight_ = {};
     resolved_.clear();
     device_ = nullptr;
 }
@@ -415,6 +420,7 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
     ResolveWorld();
     glm::mat4 cameraView(1.0f), cameraProj(1.0f), cameraSkyProj(1.0f);
     viewProj_ = ViewProj(camera, static_cast<float>(width_) / static_cast<float>(height_), eye_, skyViewProj_, &cameraView, &cameraProj, &cameraSkyProj);
+    cameraView_ = cameraView;
     ResolveTerrain(view);
     // Levels of detail (ours): the terrain halves its detail past these distances and small objects
     // leave once a few pixels across, both further out with the detail row and the view distance.
@@ -1205,6 +1211,17 @@ void SceneRenderer::SelectLights(const SceneView& view, float lightReach, std::u
 
 std::uint64_t SceneRenderer::FrameConstants(const SceneView& view, bool shadows, bool waterCopy) const {
     gfx::FrameConstants constants = gfx::MakeFrameConstants(viewProj_, eye_, view.lighting, view.seconds, view.lights.size());
+    // The Metallic Sheen: the Video page's row 6 (the original's engine option 12) on or off, our row its look; its colour
+    // the environment's diffuse (the original's texture factor, set every frame from the world's colour).
+    {
+        const auto gray = assets_->Texture(sphereGray_), highlight = assets_->Texture(sphereHighlight_);
+        const float mode = video_.current()[6] == 0 ? 0.0f : video_.metalSheen != 0 ? 2.0f : 1.0f;
+        constants.metal = glm::vec4(gray ? float(gray->bindless) : 0.0f, highlight ? float(highlight->bindless) : 0.0f, gray ? mode : 0.0f, 0.0f);
+        constants.metalColour = glm::vec4(view.lighting.sunDiffuse, 1.0f);
+        // GLM's left-handed look-at: its rows are the camera's right, up and forward.
+        constants.cameraRight = glm::vec4(cameraView_[0][0], cameraView_[1][0], cameraView_[2][0], 0.0f);
+        constants.cameraUp = glm::vec4(cameraView_[0][1], cameraView_[1][1], cameraView_[2][1], 0.0f);
+    }
     static constexpr float kLightReach[3] = {800.0f, 1500.0f, 3000.0f};
     const float lightReach = kLightReach[std::clamp(video_.lightReach, 0, 2)];
     const std::uint32_t tilesX = (width_ + kLightTile - 1) / kLightTile, tilesY = (height_ + kLightTile - 1) / kLightTile;

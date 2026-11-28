@@ -430,6 +430,7 @@ void AssetStore::LoadModel(AssetId id, Record& r) {
             // Cut out: the material's 0x200 flag, unless an environment map covers it (worn items' shine: its alpha is
             // the shine's mask), which cuts out only alpha 0 when it says so.
             if (part.ambient.envMap) {
+                p.materialFlags |= kMaterialEnvMap | (part.ambient.envHighlight ? kMaterialEnvHighlight : 0u);
                 if (part.ambient.envAlphaZero) p.materialFlags |= kMaterialAlphaTest | kMaterialAlphaZero;
             } else if ((flags & 0x200u) != 0 && (flags & 0x30000000u) == 0) {
                 p.materialFlags |= kMaterialAlphaTest;

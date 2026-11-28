@@ -28,7 +28,11 @@ static const uint kFrameModern = 672;         // x character lighting, y foliage
 static const uint kFrameWaterCopy = 688;      // x the scene's copy (rgb colour, a view depth), y 1 with one
 static const uint kFrameLightTiles = 704;     // tiles across, tile size, the masks' offset, tiles down
 static const uint kFrameWeather = 720;        // Modern: x wetness, y snow lying, z rain now (0..1)
-static const uint kFramePointLights = 736;    // position, diffuse, ambient, attenuation (a0, a1, a2)
+static const uint kFrameMetal = 736;          // the metal sheen: x spheremap_gray, y spheremap_highlight, z 0 off, 1 original, 2 modern
+static const uint kFrameMetalColour = 752;    // its colour (the environment's diffuse)
+static const uint kFrameCameraRight = 768;    // the camera's right
+static const uint kFrameCameraUp = 784;       // and up
+static const uint kFramePointLights = 800;    // position, diffuse, ambient, attenuation (a0, a1, a2)
 
 float4 FrameValue(uint64_t frame, uint offset) { return vk::RawBufferLoad<float4>(frame + offset, 16); }
 

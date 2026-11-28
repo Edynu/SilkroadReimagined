@@ -89,6 +89,10 @@ constexpr std::uint32_t kMaterialEquipGlow = 1u << 24;
 // (a garment's hands, 2026-11-22: the forearm showed through in streaks).
 constexpr std::uint32_t kMaterialOverSkin = 1u << 25;
 constexpr float kOverSkinLift = 0.06f; // model units (a character stands about 18 tall); the shaders' copy
+// The Metallic Sheen (assets::AmbientLook::envMap: a model's environment-map modifier, 1.188's CRTModEnvMap): the part's
+// alpha masks a sphere map added onto its texture; with kMaterialEnvHighlight, spheremap_highlight, else spheremap_gray.
+constexpr std::uint32_t kMaterialEnvMap = 1u << 26;
+constexpr std::uint32_t kMaterialEnvHighlight = 1u << 27;
 // Blended parts: bits 8-11 the source factor, 12-15 the destination factor (D3DBLEND numbers),
 // 16-23 the tint x 100.
 constexpr std::uint32_t kMaterialBlendShift = 8;

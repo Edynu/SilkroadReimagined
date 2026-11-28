@@ -600,11 +600,16 @@ void PlayScreen::GuildScript(ScreenContext& context) {
     } else if (verb == "goto-mob") {
         // A developer's teleport to a nest of that monster (SroGame --dev-commands; the quests' hunts).
         session.SendGame(proto::DevGotoMonster::kId, proto::Encode(proto::DevGotoMonster{arg}));
+    } else if (verb == "zoom") {
+        // zoom:D: the follow camera's distance (as the wheel sets it; 10 .. its farthest), for close captures.
+        cameraDistance_ = std::clamp(float(std::atof(arg.c_str())), 10.0f, 300.0f);
     } else if (verb == "give") {
-        // give:ITEM,N: a developer's item into the bag (SroGame --dev-commands).
+        // give:ITEM,N[,wear]: a developer's item into the bag, or worn (SroGame --dev-commands).
         const std::size_t comma = arg.find(',');
         const std::uint32_t count = comma == std::string::npos ? 1u : std::uint32_t(std::strtoul(arg.c_str() + comma + 1, nullptr, 10));
-        session.SendGame(proto::DevGive::kId, proto::Encode(proto::DevGive{arg.substr(0, comma), count}));
+        proto::DevGive give{arg.substr(0, comma), std::max(1u, count)};
+        give.wear = arg.ends_with(",wear");
+        session.SendGame(proto::DevGive::kId, proto::Encode(give));
     } else if (verb == "hunt") {
         // hunt[:MOB]: fights the nearest monster (of that codename) one after another, until hunt-stop; round walls
         // (PlayRoute.cpp), leaving one it finds no way to.

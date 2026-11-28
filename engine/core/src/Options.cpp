@@ -182,6 +182,7 @@ void VideoOptions::ApplyLook(int look) {
     softParticles = q == 0 ? 0 : 1;
     foliageSway = q == 0 ? 0 : 1;
     characterLighting = q == 0 ? 0 : 1;
+    metalSheen = q == 0 ? 0 : 1;
     antiAliasing = q == 0 ? 0 : 1;
     viewDistance = q; // the original's, x2, x3, x4
     static constexpr int kShadowDistance[4] = {1, 1, 2, 3}; // Low medium, High far, Ultra very far
@@ -219,8 +220,8 @@ bool VideoOptions::Change(int slot, int value) {
     return true;
 }
 
-const std::array<VideoOptions::ExtraRow, 23>& VideoOptions::ExtraRows() {
-    static const std::array<ExtraRow, 23> kRows = {{
+const std::array<VideoOptions::ExtraRow, 24>& VideoOptions::ExtraRows() {
+    static const std::array<ExtraRow, 24> kRows = {{
         {"sunShadows", &VideoOptions::sunShadows, 4, 0},
         {"lightEffects", &VideoOptions::lightEffects, 2, 0},
         {"lensFlare", &VideoOptions::lensFlare, 2, 1},
@@ -244,6 +245,7 @@ const std::array<VideoOptions::ExtraRow, 23>& VideoOptions::ExtraRows() {
         {"effectGlow", &VideoOptions::effectGlow, 10, 10},
         {"smoothText", &VideoOptions::smoothText, 1, 0},
         {"sharpInterface", &VideoOptions::sharpInterface, 1, 0},
+        {"metalSheen", &VideoOptions::metalSheen, 1, 0},
     }};
     return kRows;
 }

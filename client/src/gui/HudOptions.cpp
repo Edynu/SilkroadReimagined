@@ -87,6 +87,7 @@ const std::vector<FieldRow>& FieldRows() {
         {&core::VideoOptions::softParticles, "Soft particles", {"Off", "On"}},
         {&core::VideoOptions::foliageSway, "Foliage sway", {"Off", "On"}},
         {&core::VideoOptions::characterLighting, "Character lighting", {"Original", "Modern"}},
+        {&core::VideoOptions::metalSheen, "Metal sheen", {"Original", "Modern"}},
         {&core::VideoOptions::smoothText, "Interface text", {"Original", "Smooth"}},
         {&core::VideoOptions::sharpInterface, "Interface scaling", {"Smooth", "Sharp"}},
     };
