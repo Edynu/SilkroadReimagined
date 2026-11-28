@@ -4,7 +4,7 @@
 // Upgrade buttons, each asking first. A level-1 guard tower's upgrade asks its element first (CIFCheckConfirmWnd,
 // ginterface.txt 101). The map is the world map's view (HudMapView.h; CIFFortressMapFrame is a CIFWorldMap): the
 // fortress's map of worldmap_mapinfo.txt with its labels, dragged with the left button to look around; a structure's
-// tooltip on hover. Ours: the structures' features (DefaultSkill_1) are not shown.
+// tooltip on hover.
 
 #include <algorithm>
 #include <cmath>
@@ -156,8 +156,8 @@ private:
     // The structure under the mouse in a tooltip, the 1.188 client's lines in its order: the name ((MAX) without a next
     // level), "Current status : ...", "Upgraded : N step", "Durability : hp/most", "Defense power : N"; with a next level
     // "Next level condition", "Required level N", "Upgrade cost N Gold", "Upgrading GP N GP" and, while it waits, "Allowed
-    // after H hours and M minutes". Ours: no features line (the structures' DefaultSkill_1 is not read), no installation
-    // guild (a camp's guild is not sent).
+    // after H hours and M minutes"; between them "Features:" and its skill's description (the structure's DefaultSkill_1:
+    // SN_SKILL_STRUCTURE_*_TT_DESC). Ours: no installation guild (a camp's guild is not sent).
     void Tooltip(ui::Frame& frame, const ui::Rect& view) {
         const ui::Vec2 mouse = frame.pointer.position;
         for (const proto::FortressStructureRecord& r : c_.fortress->StructureList().structures) {
@@ -183,6 +183,11 @@ private:
             }
             line(c_.Text("PARAM_DUR") + " : " + std::to_string(r.hp) + "/" + std::to_string(r.maxHp));
             line(c_.Text("UIIT_STT_FORT_BATTLEAIDE_DEFENSE") + " : " + std::to_string(int(row->phyDefence)));
+            if (const assets::SkillRow* skill = c_.skills != nullptr && row->skills[0] != 0 ? c_.skills->Find(row->skills[0]) : nullptr;
+                skill != nullptr && !skill->descKey.empty() && c_.hasText && c_.hasText(skill->descKey)) {
+                line(c_.Text("UIIT_STT_FORT_BATTLEAIDE_FEATURE"));
+                AddTooltipDescription(lines, c_.Text(skill->descKey));
+            }
             if (next && r.kind != std::uint8_t(game::StructureKind::Headquarters)) {
                 line(c_.Text("PARAM_CONDITION_OF_NEXT_LEVEL"));
                 if (r.upgradeLevel != 0) line(c_.Text("PARAM_REQ_LV") + " " + std::to_string(r.upgradeLevel));

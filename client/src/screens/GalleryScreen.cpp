@@ -1737,6 +1737,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             fortressMapShown_ = true;
             namespace proto = game::proto;
             hudContext_.characters = tables_->Usable() ? &tables_->characters : nullptr;
+            if (tables_->Usable()) hudContext_.skills = &tables_->skills; // the structures' features (their DefaultSkill_1)
             hudContext_.worldMap = host_.data().WorldMap();
             proto::FortressStructureList list;
             list.npc = 1;
