@@ -243,6 +243,7 @@ struct HudContext {
     std::function<const assets::GameGuideData*()> gameGuide;
     std::uint64_t eventGuides = 0;     // the event guide's pages met (proto::EventGuideState's mask)
     std::uint32_t eventGuidePage = 0;  // the page its side icon opens
+    std::function<void(int kind, const std::string& value)> guideEvent; // an event of the guide met (the screen's GuideEvent)
     // The premium package's entry (its item) used, as its chat command (the composite window's buttons).
     std::function<void(std::uint32_t item)> premiumUse;
     const game::WorldView* world = nullptr; // the minimap's dots (null: none)
@@ -1549,6 +1550,8 @@ void RegisterGameGuideWindows(ui::Interface& ui, HudContext& context);
 void OpenGameGuideAt(HudContext& context, std::uint32_t topic);
 // The event guide's side icon up for that page (snd_quest), its click opening the guide there.
 void ShowEventGuide(HudContext& context, std::uint32_t topic);
+// The academy's guide icon (CIFEventGuideSecond) up: a level gained under 40 outside an academy, as the original's.
+void ShowMentorGuide(HudContext& context);
 void ToggleQuestWindow(HudContext& context);
 // The level-up's quest guide: the rows kept, the side icon up (none: put away).
 void ShowQuestGuide(HudContext& context, std::vector<game::proto::QuestGuide::Row> rows);

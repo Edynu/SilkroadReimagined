@@ -3090,6 +3090,7 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     };
     hudContext_.layout2dt = [this](const std::string& path) { return gui_.data().Layout2dt(path); };
     hudContext_.gameGuide = [this] { return gui_.data().GameGuide(); };
+    hudContext_.guideEvent = [this](int kind, const std::string& value) { GuideEvent(kind, value); };
     hudContext_.premiumUse = [this](std::uint32_t item) { UsePremium(item); };
     hudContext_.world = &view_;
     hudContext_.hud = &hud_;

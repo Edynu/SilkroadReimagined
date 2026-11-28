@@ -217,7 +217,13 @@ private:
         // The bar by quests: as far as the last ones fill the rows.
         int extra = int(quests.size());
         for (int fit = 0; extra > 0 && fit + lines(*quests[std::size_t(extra - 1)]) <= int(rows_.size()); --extra) fit += lines(*quests[std::size_t(extra - 1)]);
-        if (bar_ != nullptr) bar_->SetRange(0, extra);
+        // The range given again only when it changes (SetRange starts the bar again at the top).
+        if (bar_ != nullptr && extra != barExtra_) {
+            const int kept = bar_->position();
+            barExtra_ = extra;
+            bar_->SetRange(0, extra);
+            bar_->SetPosition(std::min(kept, extra));
+        }
         scroll_ = bar_ != nullptr ? std::clamp(bar_->position(), 0, extra) : 0;
         const int level = c_.state != nullptr ? c_.state->self.level : 1;
         std::size_t i = 0;
@@ -293,7 +299,7 @@ private:
     std::vector<Row> rows_;
     ui::ScrollBar* bar_ = nullptr;
     std::uint32_t revision_ = ~0u;
-    int second_ = -1, scroll_ = 0;
+    int second_ = -1, scroll_ = 0, barExtra_ = -1;
     double stateTime_ = 0;
 };
 

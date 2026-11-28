@@ -76,6 +76,8 @@ void PlayScreen::StepEventGuides(ScreenContext&) {
         GuideEvent(9, "1"); // the first entry into the world
     }
     if (int(s.level) != w.level) {
+        // A level gained under 40 outside an academy: the academy's guide icon (the original's on its experience message).
+        if (w.level >= 0 && int(s.level) > w.level && s.level < 40 && !player_.academy.InAcademy()) ShowMentorGuide(hudContext_);
         w.level = s.level;
         GuideEvent(1, {});
     }

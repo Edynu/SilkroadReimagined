@@ -724,6 +724,12 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             }
             // The reverse return scroll: its box, or the world map's choosing mode
             // (reverse-map[:N]: marker N's destinations listed).
+            // (event-guides: the event guide's side icon for page 50005 and the academy's guide icon, side by side.)
+            if (page_ == "event-guides") {
+                hudContext_.eventGuidePage = 50005;
+                hud_.Show(hud::kEventGuide);
+                ShowMentorGuide(hudContext_);
+            }
             if (page_ == "reverse-return") hud_.ReverseReturn([](int result) { core::LogInfo("gallery: the reverse return box answers {}", result); });
             if (page_ == "reverse-map" || page_.rfind("reverse-map:", 0) == 0) {
                 hudContext_.worldMap = host_.data().WorldMap();

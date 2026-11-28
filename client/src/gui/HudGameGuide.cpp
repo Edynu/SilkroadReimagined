@@ -231,8 +231,9 @@ private:
         }
         if (bar_ != nullptr && list_ != nullptr) {
             const int visible = int(Rows().h / kRowHeight);
+            const int kept = bar_->position(); // SetRange starts the bar again at the top
             bar_->SetRange(0, std::max(0, int(shown_.size()) - visible));
-            bar_->SetPosition(std::min(bar_->position(), std::max(0, int(shown_.size()) - visible)));
+            bar_->SetPosition(std::min(kept, std::max(0, int(shown_.size()) - visible)));
         }
     }
 
@@ -273,6 +274,13 @@ public:
             pml->visible = false;
         }
         bar_ = ui::As<ui::ScrollBar>(Child(kPageBar));
+        // The page's bar in the guide's own art (gd_scroll_up, _down, _button), as the original sets it.
+        if (bar_ != nullptr) {
+            const char* art[] = {"interface\\guide\\gd_scroll_up.ddj", "interface\\guide\\gd_scroll_down.ddj", "interface\\guide\\gd_scroll_button.ddj"};
+            for (int i = 0; i < 3; ++i) {
+                if (auto* b = ui::As<ui::Button>(bar_->Child(i))) b->texture = art[i];
+            }
+        }
         if (auto* menu = dynamic_cast<GuideMenu*>(Child(kMenu))) {
             menu->onTopic = [this](const std::string& pageKey, const std::string& title) { Topic(pageKey, title); };
         }
@@ -283,7 +291,10 @@ public:
         ui::MainFrame::Update(frame);
         if (page_ == nullptr || bar_ == nullptr) return;
         const int most = std::max(0, int(page_->contentHeight - page_->rect.h));
-        bar_->SetRange(0, most, 18);
+        if (most != barMost_) {
+            barMost_ = most;
+            bar_->SetRange(0, most, 18);
+        }
         // The wheel over the page or its bar (the page itself takes no pointer: the window under it is the one hovered).
         const auto overThis = [&] {
             for (const ui::Widget* w = frame.pointer.hovered; w != nullptr; w = w->parent()) {
@@ -353,6 +364,7 @@ private:
     HudContext& c_;
     GuidePage* page_ = nullptr;
     ui::Rect pageRect_;
+    int barMost_ = -1; // the range last given to the bar (SetRange starts it again at the top)
     ui::ScrollBar* bar_ = nullptr;
     bool menuFolded_ = false;
 };
@@ -377,7 +389,35 @@ private:
     HudContext& c_;
 };
 
+// CIFEventGuideSecond (ginterface 30006): the academy's guide icon, wintereventguide_1 / _2 by turns every 500 ms; its click
+// opens the academy matching window (CIFMentorMatch 153) and is the event guide's kind 9 value 6.
+class MentorGuideIcon : public ui::Static {
+public:
+    MentorGuideIcon(const assets::UiLayoutNode& node, HudContext& c) : Static(node), c_(c) {}
+    void Created(ui::Interface& ui) override {
+        Static::Created(ui);
+        interactive = true;
+    }
+    void Update(ui::Frame&) override {
+        texture = int(c_.time * 2.0) % 2 != 0 ? "icon\\etc\\wintereventguide_2.ddj" : "icon\\etc\\wintereventguide_1.ddj";
+    }
+    void Mouse(ui::Frame& frame) override {
+        if (!frame.input.Released(ui::MouseButton::Left) || frame.pointer.hovered != this || c_.hud == nullptr) return;
+        c_.hud->Hide(hud::kEventGuideSecond);
+        constexpr int kMatchWindow = 153;
+        if (!c_.hud->Shown(kMatchWindow)) c_.hud->Show(kMatchWindow);
+        if (c_.guideEvent) c_.guideEvent(9, "6");
+    }
+
+private:
+    HudContext& c_;
+};
+
 } // namespace
+
+void ShowMentorGuide(HudContext& c) {
+    if (c.hud != nullptr && !c.hud->Shown(hud::kEventGuideSecond)) c.hud->Show(hud::kEventGuideSecond);
+}
 
 void OpenGameGuideAt(HudContext& c, std::uint32_t topic) {
     if (c.hud == nullptr) return;
@@ -389,12 +429,20 @@ void OpenGameGuideAt(HudContext& c, std::uint32_t topic) {
 void ShowEventGuide(HudContext& c, std::uint32_t topic) {
     c.eventGuidePage = topic;
     if (c.hud == nullptr || topic == 0) return;
+    // The Option window's Notice Window on (UIIT_STT_EVENTGUIDE_SIGN, "detailed description whenever there is an
+    // important check point"): the guide opens on the page at once, no icon, as the original's.
+    if (c.options != nullptr && c.options->game.Get("eventGuide")) {
+        c.hud->Hide(hud::kEventGuide);
+        OpenGameGuideAt(c, topic);
+        return;
+    }
     c.hud->Show(hud::kEventGuide);
     if (ui::Interface* ui = c.hud->interface()) ui->Sound("snd_quest");
 }
 
 void RegisterGameGuideWindows(ui::Interface& ui, HudContext& context) {
     ui.Register("CIFEventGuide", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<EventGuideIcon>(n, *c); });
+    ui.Register("CIFEventGuideSecond", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<MentorGuideIcon>(n, *c); });
     ui.Register("CIFGameGuide", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<GameGuideWindow>(n, *c); });
     ui.Register("CIFGGMenu", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<GuideMenu>(n, *c); });
     ui.Register("SRGuidePage", [](const assets::UiLayoutNode& n) { return std::make_unique<GuidePage>(n); });
