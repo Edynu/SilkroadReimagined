@@ -393,7 +393,8 @@ private:
 // high for one, 18 for more. `sign`: the item sign's texture (com_itemsign...) before the first
 // line, an item's name; empty: none.
 void DrawTooltip(Painter& paint, std::string_view text, Rect beside, Vec2 screen);
-void DrawTooltip(Painter& paint, const std::vector<TooltipLine>& lines, Rect beside, Vec2 screen, const std::string& sign = {});
+// Returns the box it drew (its text's rect, the 8-pixel frame outside it; empty when nothing was drawn).
+Rect DrawTooltip(Painter& paint, const std::vector<TooltipLine>& lines, Rect beside, Vec2 screen, const std::string& sign = {});
 
 // --- Text input and lists ---------------------------------------------------------------------
 

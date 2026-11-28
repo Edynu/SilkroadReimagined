@@ -664,6 +664,19 @@ void PlayScreen::ItemGlows(ScreenContext& context) {
     }
 }
 
+void PlayScreen::SetLookChanged(std::uint32_t entity, bool whole, GameAudio* audio) {
+    // As the 1.188 client on an equipment change: skilleffect.txt's ITEM_SETITEM_ACTIVE (avatar_nasrun01_equip01.efp on
+    // the spine) and effectsound's SND_SETITEM_ACTIVE when a set becomes whole, the _DEACTIVE pair when one breaks.
+    if (!world_ || !tables_ || !tables_->Usable()) return;
+    const char* key = whole ? "ITEM_SETITEM_ACTIVE" : "ITEM_SETITEM_DEACTIVE";
+    core::LogInfo("game: entity {}: a set {}", entity, whole ? "whole" : "broken");
+    if (audio != nullptr) audio->PlayUi(whole ? "SND_SETITEM_ACTIVE" : "SND_SETITEM_DEACTIVE");
+    const auto* stages = tables_->skillAnimations.Stages(key);
+    const std::size_t slot = SlotOf(entity);
+    if (stages == nullptr || slot == StageEffects::kNone) return;
+    for (const assets::SkillEffectStage& s : *stages) stageEffects_.Play(*world_, slot, s.object, s.start, gfx::EffectSystem::Kind::World);
+}
+
 void PlayScreen::LevelUpEffect(std::uint32_t entity, double now) {
     if (!world_ || !tables_ || !tables_->Usable()) return;
     // Once (the own player hears of it twice: its progress and the broadcast).

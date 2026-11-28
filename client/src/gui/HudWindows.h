@@ -26,6 +26,7 @@
 #include "sr/assets/UiLayout2dt.h"
 #include "sr/assets/WorldMap.h"
 #include "sr/game/Fortress.h"
+#include "sr/game/Sets.h"
 #include "sr/game/Community.h"
 #include "sr/game/AlchemyProtocol.h"
 #include "sr/game/Exchange.h"
@@ -278,6 +279,7 @@ struct HudContext {
     const assets::ItemTable* items = nullptr;
     const assets::CharacterTable* characters = nullptr; // characterdata (a fortress structure's name, icon, level)
     const std::vector<assets::MagicOptionRow>* magicOptions = nullptr;
+    const game::SetTable* sets = nullptr; // the item sets (the tooltip's set box; null: none)
     const game::SpiritTable* spirits = nullptr; // the Devil's Spirit's options by plus (its tooltip)
     // refmagicoptgroup.txt: the socket stones' skills by level (a stone's tooltip, the Socket page; null: not loaded yet).
     const std::vector<assets::MagicOptGroupRow>* magicOptGroups = nullptr;
@@ -1521,6 +1523,9 @@ struct MagicOptionNames {
     bool percent = false;
 };
 MagicOptionNames MagicOptionAlchemyNames(const HudContext& context, std::string_view optionName, std::uint32_t value);
+// The avatars' and the sets' options: their stat's key and the word after the value (PARAM_REINFORCE_ITEM_SET,
+// PARAM_REINFORCE); false for another option.
+bool MagicOptionStatKeys(std::string_view optionName, std::string& stat, std::string& suffix);
 // The live tests' steps: a tab shown (0 Disjoint, 1 Dismantle, 2 Manufacture, 3 Strengthen), the button pressed, the
 // alert box answered (false: none shown).
 void AlchemyShowTab(HudContext& context, int tab);

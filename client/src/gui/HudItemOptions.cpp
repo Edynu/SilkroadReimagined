@@ -166,6 +166,17 @@ MagicOptionText MagicOptionLine(const HudContext& c, const assets::ItemRow& item
     return out;
 }
 
+bool MagicOptionStatKeys(std::string_view optionName, std::string& stat, std::string& suffix) {
+    const std::string n = Bare(optionName);
+    for (const AvatarName& a : kAvatarNames) {
+        if (n != a.option) continue;
+        stat = a.stat;
+        suffix = a.suffix;
+        return true;
+    }
+    return false;
+}
+
 MagicOptionNames MagicOptionAlchemyNames(const HudContext& c, std::string_view optionName, std::uint32_t value) {
     MagicOptionNames out;
     const std::string n = Bare(optionName);

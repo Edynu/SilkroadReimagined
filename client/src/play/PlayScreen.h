@@ -596,6 +596,9 @@ private:
     game::QuestView quests_;
     double lastTime_ = 0.0; // the clock's second of the last quest message (the windows' own lines)
     void HandleQuest(ScreenContext& context, const game::proto::QuestEvent& event);
+    // A set of the entity's became whole (true) or broke: its effect and sound (PlayEffects.cpp).
+    void SetLookChanged(std::uint32_t entity, bool whole, GameAudio* audio);
+    std::unordered_map<std::uint32_t, std::vector<int>> setsWhole_; // the sets whole in each entity's look as last dressed
     // The event guide (eventguidedata.txt): an event of that kind met (1 a level: its value unused; 2 a quest taken, its
     // codename; 3 an NPC chosen, its codename; 4 an item got, 1 a piece to wear, 2 a ride; 5 a league joined, 1 trader,
     // 2 thief, 3 hunter; 6 a state, 1 the hwan gauge full, 2 HP at half or under, 3 a bad state, 4 skill points got; 7 an

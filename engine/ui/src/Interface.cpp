@@ -402,6 +402,7 @@ void Interface::Frame(Context& context, float scale, double time, float dt) {
         break;
     }
     tooltip_.clear();
+    sideTooltip_.clear();
 
     // An open pop-up holds the mouse: a press outside it and its owner only closes it.
     bool swallowPress = false;
@@ -537,7 +538,10 @@ void Interface::Frame(Context& context, float scale, double time, float dt) {
         context.BeginLayer("interface tooltip", LayerKind::Overlay);
         context.SetZ(1);
         Painter paint(context.draw(), resources_, scale);
-        DrawTooltip(paint, tooltip_, tooltipOwner_, {context.screen().x / scale, context.screen().y / scale}, tooltipSign_);
+        const Vec2 screen{context.screen().x / scale, context.screen().y / scale};
+        const Rect box = DrawTooltip(paint, tooltip_, tooltipOwner_, screen, tooltipSign_);
+        // The side box beside it (its frame 8 out of each): its top level with the first's.
+        if (!sideTooltip_.empty() && box.w > 0.0f) DrawTooltip(paint, sideTooltip_, {box.x - 8.0f, box.y - 8.0f, box.w + 16.0f, box.h + 16.0f}, screen);
         context.EndLayer();
     }
     // The held item over everything, the tooltip too: its slot drawn once more, centred on the

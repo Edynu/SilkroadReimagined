@@ -1292,6 +1292,7 @@ void PlayScreen::ForgetEntities() {
     prune(staged_);
     prune(looks_);
     prune(lookVersions_);
+    prune(setsWhole_);
     prune(structureStages_);
     prune(speech_);
     prune(gaps_);
@@ -3103,6 +3104,7 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
     hudContext_.characters = tables_ && tables_->Usable() ? &tables_->characters : nullptr;
     hudContext_.creation = tables_ && tables_->Usable() ? &tables_->rules.creation : nullptr;
     hudContext_.magicOptions = gui_.data().MagicOptions();
+    hudContext_.sets = gui_.data().Sets();
     hudContext_.spirits = gui_.data().Spirits();
     hudContext_.magicOptGroups = gui_.data().MagicOptGroups();
     hudContext_.magicOptionAssign = gui_.data().MagicOptionAssign();
@@ -4287,6 +4289,17 @@ const WorldScreen::StageLook* PlayScreen::LookOf(ScreenContext& context, const g
     for (const proto::EquippedItem& item : e.look.equipment) {
         worn.push_back(item.item);
         plus.push_back(item.plus);
+    }
+    // A set whole now and not before, or broken: its effect and sound (SetLookChanged); none at a first sight.
+    {
+        std::vector<int> whole = assets::WholeSets(tables_->items, worn);
+        if (const auto before = setsWhole_.find(e.id); before != setsWhole_.end()) {
+            const auto gained = std::any_of(whole.begin(), whole.end(), [&](int s) { return !std::binary_search(before->second.begin(), before->second.end(), s); });
+            const auto lost = std::any_of(before->second.begin(), before->second.end(), [&](int s) { return !std::binary_search(whole.begin(), whole.end(), s); });
+            if (gained) SetLookChanged(e.id, true, context.audio);
+            else if (lost) SetLookChanged(e.id, false, context.audio);
+        }
+        setsWhole_[e.id] = std::move(whole);
     }
     // The dress side's avatars, drawn over the armour their visuals cover (assets::AvatarSlot).
     for (const proto::EquippedItem& item : e.look.avatars) {

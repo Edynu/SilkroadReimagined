@@ -1,5 +1,6 @@
 #include "sr/assets/GameData.h"
 
+#include <bit>
 #include <cctype>
 #include <unordered_map>
 #include <set>
@@ -148,7 +149,11 @@ bool DecodeItemRows(std::string_view text, std::vector<ItemRow>& out, std::strin
         for (int i = 0; i < 4; ++i) row.typeId[static_cast<std::size_t>(i)] = Int(c[static_cast<std::size_t>(9 + i)]);
         row.country = Int(c[14]);
         const std::string_view model = c[52];
-        if (!model.empty() && model != "xxx" && model != "XXX") row.modelPath = std::string(model);
+        if (!model.empty() && model != "xxx" && model != "XXX") {
+            const std::size_t comma = model.find(',');
+            row.modelPath = std::string(model.substr(0, comma));
+            if (comma != std::string_view::npos) row.fullSetModelPath = std::string(model.substr(comma + 1, model.find(',', comma + 1) - comma - 1));
+        }
         const std::string_view drop = c[53];
         if (!drop.empty() && drop != "xxx" && drop != "XXX") row.dropModelPath = std::string(drop);
         row.sex = Int(c[58]);
@@ -510,6 +515,8 @@ bool DecodeMasteryCosts(std::string_view text, std::vector<std::uint32_t>& spByL
 bool ItemTable::Load(const FileSystem& fs, std::string& error) {
     byCode_.clear();
     byId_.clear();
+    setPlaces_.clear();
+    setPlacesBuilt_ = false;
     ForEachShard(fs, "itemdata", [&](const std::string& text) {
         std::vector<ItemRow> rows;
         std::string ignored;
@@ -525,6 +532,52 @@ bool ItemTable::Load(const FileSystem& fs, std::string& error) {
         return false;
     }
     return true;
+}
+
+int SetPlace(const ItemRow& row) {
+    const auto& t = row.typeId;
+    if (t[0] != 3 || t[1] != 1) return -1;
+    const int kind = t[2], part = t[3];
+    if ((kind >= 1 && kind <= 3) || (kind >= 9 && kind <= 11)) {
+        constexpr int kArmour[] = {-1, 0, 2, 1, 4, 3, 5}; // part 1 head, 2 shoulders, 3 chest, 4 legs, 5 hands, 6 feet
+        return part >= 1 && part <= 6 ? kArmour[part] : -1;
+    }
+    if (kind == 6) return 6;
+    if (kind == 4 && (part == 1 || part == 2)) return 7;
+    if (kind == 5 || kind == 12) return part == 1 ? 9 : part == 2 ? 10 : part == 3 ? 11 : -1;
+    return -1;
+}
+
+int ItemTable::SetPieces(int setId) const {
+    if (!setPlacesBuilt_) {
+        setPlacesBuilt_ = true;
+        // As the client's item rows are read: each piece's place a bit of its set's (a ring's place, over 10, also bit
+        // 12: the second ring).
+        for (const auto& [code, row] : byCode_) {
+            if (!row.inService || row.setId == 0) continue;
+            const int place = SetPlace(row);
+            if (place < 0) continue;
+            std::uint32_t& bits = setPlaces_[row.setId];
+            bits |= 1u << place;
+            if (place > 10) bits |= 0x1000u;
+        }
+    }
+    const auto it = setPlaces_.find(setId);
+    return it == setPlaces_.end() ? 0 : std::popcount(it->second);
+}
+
+std::vector<int> WholeSets(const ItemTable& items, std::span<const std::uint32_t> worn) {
+    std::unordered_map<int, int> count;
+    for (const std::uint32_t id : worn) {
+        const ItemRow* row = id != 0 ? items.Find(id) : nullptr;
+        if (row != nullptr && row->setId != 0 && SetPlace(*row) >= 0) ++count[row->setId];
+    }
+    std::vector<int> out;
+    for (const auto& [set, n] : count) {
+        if (n == items.SetPieces(set)) out.push_back(set);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 const ItemRow* ItemTable::Find(std::string_view codename) const {

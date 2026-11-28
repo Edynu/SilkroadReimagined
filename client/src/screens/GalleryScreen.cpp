@@ -884,6 +884,7 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             if (tables_->Usable()) {
                 hudContext_.items = &tables_->items;
                 hudContext_.magicOptions = host_.data().MagicOptions(); // the tooltips' blues and the stones' targets
+                hudContext_.sets = host_.data().Sets();
                 hudContext_.spirits = host_.data().Spirits();           // the Devil's Spirit's options by plus
                 hudContext_.characters = &tables_->characters;          // a ride's or a transport's scroll's animal
                 // --in-fortress N: the sample character's region in fortress N's area (the fortress items' place line, the

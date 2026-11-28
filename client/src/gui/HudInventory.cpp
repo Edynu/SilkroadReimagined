@@ -443,6 +443,72 @@ std::vector<ui::TooltipLine> ExpendableLines(const assets::ItemRow& row, const H
 
 namespace {
 std::vector<ui::TooltipLine> ItemTooltipBody(const assets::ItemRow& row, const game::ItemInstance& item, const HudContext& c);
+
+// A set item's side box (the 1.188 interface's side tooltip, only for a set of more than one place): "NAME (worn/all)"
+// in green; the set's pieces of the item's kind, white where the player wears that place, grey where not (a ring twice);
+// then up to three of its bonuses, each its "NAME(N)" and its options' "NAME : VALUE UNIT": the one below the worn
+// count's (grey), the worn count's (cyan), the next (grey).
+std::vector<ui::TooltipLine> SetTooltip(const assets::ItemRow& row, const HudContext& c) {
+    std::vector<ui::TooltipLine> out;
+    if (row.setId == 0 || row.rarity <= 2 || c.items == nullptr || c.sets == nullptr) return out;
+    const game::SetGroup* set = c.sets->Find(row.setId);
+    const int all = c.items->SetPieces(row.setId);
+    if (set == nullptr || all <= 1) return out;
+    // The places the player wears of this set.
+    std::uint32_t wornPlaces = 0;
+    int worn = 0;
+    for (std::uint8_t place = 0; place < 13 && c.state != nullptr; ++place) {
+        const game::ItemInstance* i = c.state->inventory.At(place);
+        const assets::ItemRow* r = i != nullptr ? c.items->Find(i->refId) : nullptr;
+        if (r == nullptr || r->setId != row.setId || assets::SetPlace(*r) < 0) continue;
+        wornPlaces |= 1u << place;
+        ++worn;
+    }
+    out.push_back({std::format("{} ({}/{})", c.Text(set->nameKey), worn, all), ui::Argb(0xFF6CE675u), kShadow});
+    // Its pieces of the hovered item's country and sex, one a place in the places' order (a ring for both).
+    std::array<const assets::ItemRow*, 12> pieces{};
+    for (const auto& [code, r] : c.items->rows()) {
+        if (!r.inService || r.setId != row.setId || r.country != row.country || r.sex != row.sex) continue;
+        const int place = assets::SetPlace(r);
+        if (place < 0 || place >= 12) continue;
+        if (pieces[std::size_t(place)] == nullptr || r.refObjId < pieces[std::size_t(place)]->refObjId) pieces[std::size_t(place)] = &r;
+    }
+    for (int place = 0; place < 12; ++place) {
+        const assets::ItemRow* r = pieces[std::size_t(place)];
+        if (r == nullptr) continue;
+        for (int ring = 0; ring < (place == 11 ? 2 : 1); ++ring) {
+            const bool on = (wornPlaces & (1u << (place + ring))) != 0;
+            out.push_back({c.Text(r->nameKey), on ? ui::kWhite : ui::Argb(0xFF888888u), on ? kShadow : 0});
+        }
+    }
+    // The bonuses: by the most pieces at or under the worn count, the one below, the next above.
+    const auto has = [&](int n) { return n >= 2 && n <= 11 && set->groups[std::size_t(n - 2)] != 0; };
+    int current = 0, below = 0, above = 0;
+    for (int n = std::min(worn, 11); n >= 2 && current == 0; --n) current = has(n) ? n : 0;
+    for (int n = current - 1; n >= 2 && below == 0; --n) below = has(n) ? n : 0;
+    for (int n = std::max(current, 1) + 1; n <= 11 && above == 0; ++n) above = has(n) ? n : 0;
+    const auto tier = [&](int n, bool lit) {
+        if (n == 0) return;
+        const ui::Color colour = lit ? ui::Argb(0xFF00EAFFu) : ui::Argb(0xFF808080u);
+        const int style = lit ? kShadow : 0;
+        out.push_back({"", ui::kWhite, kShadow});
+        out.push_back({std::format("{}({})", c.Text(set->nameKey), n), colour, style});
+        for (const game::SetOption& o : c.sets->OptionsOf(set->groups[std::size_t(n - 2)])) {
+            std::string name, stat, suffix;
+            if (c.magicOptions != nullptr) {
+                for (const assets::MagicOptionRow& m : *c.magicOptions) {
+                    if (m.paramId == o.option) name = m.optionName;
+                }
+            }
+            if (!MagicOptionStatKeys(name, stat, suffix)) continue;
+            out.push_back({std::format("{} : {} {}", c.Text(stat), o.value, c.Text(suffix)), colour, style});
+        }
+    };
+    tier(below, false);
+    tier(current, true);
+    tier(above, false);
+    return out;
+}
 } // namespace
 
 std::vector<ui::TooltipLine> ItemTooltip(const assets::ItemRow& row, const game::ItemInstance& item, const HudContext& c) {
@@ -456,6 +522,10 @@ std::vector<ui::TooltipLine> ItemTooltip(const assets::ItemRow& row, const game:
         return out;
     }
     std::vector<ui::TooltipLine> out = ItemTooltipBody(row, item, c);
+    // A set item: its set's box beside the tooltip (built while hovered, as the tooltip is).
+    if (ui::Interface* ui = c.hud != nullptr ? c.hud->interface() : nullptr) {
+        if (std::vector<ui::TooltipLine> side = SetTooltip(row, c); !side.empty()) ui->ShowSideTooltip(std::move(side));
+    }
     // A pet's summoning item: its pet's lines after the item's.
     if (game::IsCosSummoner(row)) {
         const auto pet = item.durability != 0 ? c.petItems.find(std::int64_t(item.durability)) : c.petItems.end();

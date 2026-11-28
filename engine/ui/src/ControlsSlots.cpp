@@ -189,7 +189,7 @@ void DrawTooltip(Painter& paint, std::string_view text, Rect owner, Vec2 screen)
     DrawTooltip(paint, std::vector<TooltipLine>{{std::string(text), kWhite, kTextShadow}}, owner, screen, {});
 }
 
-void DrawTooltip(Painter& paint, const std::vector<TooltipLine>& paragraphs, Rect owner, Vec2 screen, const std::string& sign) {
+Rect DrawTooltip(Painter& paint, const std::vector<TooltipLine>& paragraphs, Rect owner, Vec2 screen, const std::string& sign) {
     // Each paragraph wrapped at 200 pixels; one row is 14 high, more rows 18 each. The item sign
     // takes the first row's start: the name begins after spaces as wide as it, and one more.
     struct Row {
@@ -208,7 +208,7 @@ void DrawTooltip(Painter& paint, const std::vector<TooltipLine>& paragraphs, Rec
         }
         for (const std::string& row : WrapLines(paint, text, 200.0f, 0)) lines.push_back({row, paragraphs[k].color, paragraphs[k].style});
     }
-    if (lines.empty()) return;
+    if (lines.empty()) return {};
     float width = 0.0f;
     for (const Row& line : lines) width = std::max(width, paint.TextWidth(line.text, 0) + ((line.style & kTextBold) ? 1.0f : 0.0f));
     const float lineHeight = lines.size() > 1 ? 18.0f : 14.0f;
@@ -245,6 +245,7 @@ void DrawTooltip(Painter& paint, const std::vector<TooltipLine>& paragraphs, Rec
                   lines[i].style);
     }
     if (!sign.empty()) paint.Image(sign, {x, y + std::floor((lineHeight - 12.0f) / 2.0f), 12, 12}, {0, 0}, {1, 1}, tint);
+    return {x, y, width, height};
 }
 
 // --- Registration --------------------------------------------------------------------------------

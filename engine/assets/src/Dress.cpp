@@ -309,12 +309,15 @@ bool Dress(const FileSystem& fs, const CharacterTable& characters, const ItemTab
                                (wornClass >= 2 ? "light" : "clothes") + (out.europe ? "_01_" : "_00_");
     if (garments && (visuals != nullptr ? (covered & 0x02) == 0 : slots[1] == nullptr)) out.items.push_back(folder + "ba.bsr");
     if (garments && (visuals != nullptr ? (covered & 0x10) == 0 : slots[4] == nullptr)) out.items.push_back(folder + "la.bsr");
+    // The sets whole in what is worn: their pieces in the set's look, as the 1.188 client's set operator dresses them.
+    const std::vector<int> whole = WholeSets(items, worn);
     for (int slot = 0; slot < kSlots; ++slot) {
         const ItemRow* row = slots[slot];
         if (row == nullptr || !shown[slot]) continue;
+        const bool fullSet = row->setId != 0 && std::binary_search(whole.begin(), whole.end(), row->setId);
         // The weapon's and the shield's plus glow (for the models of places 6 and 7).
         const EquipGlow* glow = glows != nullptr && (slot == 6 || slot == 7) ? glows->Find(row->codename, slotPlus[slot]) : nullptr;
-        for (std::string& path : WornModels(fs, items, *row)) out.items.push_back(glow != nullptr ? WithGlow(path, *glow) : std::move(path));
+        for (std::string& path : WornModels(fs, items, *row, fullSet)) out.items.push_back(glow != nullptr ? WithGlow(path, *glow) : std::move(path));
     }
     out.covered = covered;
     out.stance = StanceOf(slots[6]);
@@ -324,8 +327,15 @@ bool Dress(const FileSystem& fs, const CharacterTable& characters, const ItemTab
     return true;
 }
 
-std::vector<std::string> WornModels(const FileSystem& fs, const ItemTable& items, const ItemRow& row) {
+std::vector<std::string> WornModels(const FileSystem& fs, const ItemTable& items, const ItemRow& row, bool fullSet) {
     std::vector<std::string> out;
+    if (fullSet && !row.fullSetModelPath.empty()) {
+        const std::string whole = fs.Exists(row.fullSetModelPath) ? row.fullSetModelPath : "res\\" + row.fullSetModelPath;
+        if (fs.Exists(whole)) {
+            out.push_back(whole);
+            return out;
+        }
+    }
     const bool dual = EquipSlot(row) == 6 && (row.typeId[3] == 9 || row.typeId[3] == 13);
     if (dual) {
         // An axe or dagger has no model of its own name, only its hands' (loads the

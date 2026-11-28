@@ -18,6 +18,7 @@
 #include "sr/assets/UiLayout.h"
 #include "sr/assets/UiLayout2dt.h"
 #include "sr/core/Jobs.h"
+#include "sr/game/Sets.h"
 #include "sr/game/Spirit.h"
 #include "sr/gfx/AssetStore.h"
 #include "sr/ui/Font.h"
@@ -54,6 +55,8 @@ public:
     const std::vector<assets::MagicOptionRow>* MagicOptions() const { return Ready() ? &state_->magicOptions : nullptr; }
     // The Devil's Spirit's options by plus (its tooltip's groups).
     const game::SpiritTable* Spirits() const { return Ready() ? &state_->spirits : nullptr; }
+    // The item sets (refsetitemgroup.txt with their groups' rows): the tooltip's set box.
+    const game::SetTable* Sets() const { return Ready() ? &state_->sets : nullptr; }
     // refmagicoptgroup.txt (the socket stones' skills by level); null until ready.
     const std::vector<assets::MagicOptGroupRow>* MagicOptGroups() const { return Ready() ? &state_->magicOptGroups : nullptr; }
     // magicoptionassign.txt (the avatar blessing's lists); null until ready.
@@ -92,6 +95,7 @@ private:
         std::unordered_map<std::uint16_t, std::string> regionKeys;
         std::vector<assets::MagicOptionRow> magicOptions;
         game::SpiritTable spirits;
+        game::SetTable sets;
         std::vector<assets::MagicOptGroupRow> magicOptGroups;
         std::vector<assets::MagicOptionAssignRow> magicOptionAssign;
         std::vector<assets::ActionRow> actions; // the Action window's icons

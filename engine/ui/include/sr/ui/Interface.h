@@ -108,6 +108,10 @@ public:
     // The tooltip for this frame, beside `owner` (interface pixels); call while hovering.
     void ShowTooltip(std::string text, Rect owner);
     void ShowTooltip(std::vector<TooltipLine> lines, Rect owner, std::string sign);
+    // A second box beside this frame's tooltip, its top at the tooltip's (the 1.188 interface's side tooltip: an item
+    // set's pieces and bonuses); call after ShowTooltip.
+    void ShowSideTooltip(std::vector<TooltipLine> lines) { sideTooltip_ = std::move(lines); }
+    const std::vector<TooltipLine>& sideTooltip() const { return sideTooltip_; }
     // The tooltip the last frame showed (empty: none).
     const std::vector<TooltipLine>& tooltip() const { return tooltip_; }
     // A tooltip of something outside the windows (an object of the world under the mouse): set before the frame, shown
@@ -163,7 +167,7 @@ private:
     Widget* popup_ = nullptr;
     Widget* popupOwner_ = nullptr;
     std::vector<Widget*> closing_;
-    std::vector<TooltipLine> tooltip_;
+    std::vector<TooltipLine> tooltip_, sideTooltip_;
     std::vector<TooltipLine> heldTooltip_;
     Rect heldOwner_;
     std::string tooltipSign_;

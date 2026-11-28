@@ -85,8 +85,9 @@ float HeightScale(std::uint8_t shape);
 std::vector<std::pair<std::string, float>> VolumeScales(std::uint8_t shape, bool female);
 
 // The .bsr resources a worn item puts on the body (DressedCharacter::items): its own model, or an
-// axe's or dagger's hands (_r, _l); empty when it has none.
-std::vector<std::string> WornModels(const FileSystem& fs, const ItemTable& items, const ItemRow& row);
+// axe's or dagger's hands (_r, _l); empty when it has none. `fullSet`: its set is whole (WholeSets): its set look, the
+// second model when it has one (the 1.188 client's variant 1 of a set piece).
+std::vector<std::string> WornModels(const FileSystem& fs, const ItemTable& items, const ItemRow& row, bool fullSet = false);
 
 // A worn weapon's or shield's plus glow (ItemGlow.h) rides on its path in the outfit's key, so the asset store
 // marks that item's parts: "item.bsr*glow:<texture>;<u>;<v>;<colour op>;<r,g,b>;<r,g,b>;<period ms>;<alpha test>".

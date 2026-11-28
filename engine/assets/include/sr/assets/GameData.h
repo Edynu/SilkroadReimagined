@@ -94,7 +94,9 @@ struct ItemRow {
     std::array<int, 4> typeId{}; // TID1..TID4
     int country = 0;
     int sex = 2;
-    std::string modelPath; // as written; empty when none
+    std::string modelPath; // as written (col 52's first model); empty when none
+    // Col 52's second model ("a.bsr,a_fullset.bsr": a set's helm and shoulders): the look its set gives while whole.
+    std::string fullSetModelPath;
     std::string dropModelPath; // col 53: the model lying on the ground (pouch, box, coins); empty when none
     bool inService = false;
     std::string nameKey;  // SN_... in textdataname
@@ -366,11 +368,21 @@ public:
     std::string ResolveDropModel(const FileSystem& fs, const ItemRow& row) const;
     std::size_t size() const { return byCode_.size(); }
     const std::unordered_map<std::string, ItemRow>& rows() const { return byCode_; }
+    // A set's pieces, as the 1.188 client counts them: the places its items in service fill (a ring two places).
+    int SetPieces(int setId) const;
 
 private:
     std::unordered_map<std::string, ItemRow> byCode_;
     std::unordered_map<std::uint32_t, std::string> byId_;
+    mutable std::unordered_map<int, std::uint32_t> setPlaces_; // set id -> its places' bits (built on first use)
+    mutable bool setPlacesBuilt_ = false;
 };
+
+// The place a set's piece counts for: 0..5 the armour, 6 the weapon, 7 the shield, 9 the earring, 10 the necklace,
+// 11 a ring; -1 for anything else.
+int SetPlace(const ItemRow& row);
+// The sets whole in what is worn (every place of the set filled by its pieces; each worn piece counts once): their ids.
+std::vector<int> WholeSets(const ItemTable& items, std::span<const std::uint32_t> worn);
 
 // skilldata rows (SkillData_*.txt shards).
 struct SkillRow {

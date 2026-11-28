@@ -3038,3 +3038,38 @@ TEST_CASE("the game guide's topics and events decode (gameguidedata.txt, eventgu
         CHECK((e.kind >= 1 && e.kind <= 9));
     }
 }
+
+TEST_CASE("item sets: their pieces by the places their items fill, the helm's and shoulders' second model, a whole set (1.188)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    ItemTable items;
+    REQUIRE_MESSAGE(items.Load(fs, error), error);
+    // Set 13 (ITEM_11_SET_A_CH_M_HEAVY): the six armour places; 25 (the accessories): earring, necklace, two rings;
+    // 39 (the weapons): one place.
+    CHECK(items.SetPieces(13) == 6);
+    CHECK(items.SetPieces(25) == 4);
+    CHECK(items.SetPieces(39) == 1);
+    // Col 52's two models: the helm's own and its set's look.
+    const ItemRow* helm = items.Find("ITEM_CH_M_HEAVY_11_HA_SET_A");
+    REQUIRE(helm != nullptr);
+    CHECK(helm->modelPath == "item\\common\\man_item\\heavy_11_set_a_ha.bsr");
+    CHECK(helm->fullSetModelPath == "item\\common\\man_item\\heavy_11_set_a_ha_fullset.bsr");
+    CHECK_FALSE(WornModels(fs, items, *helm).empty());
+    CHECK(WornModels(fs, items, *helm, true).front().find("_fullset") != std::string::npos);
+    // The six pieces worn: set 13 whole; five: none.
+    std::vector<std::uint32_t> worn;
+    for (const char* part : {"HA", "SA", "BA", "LA", "AA", "FA"}) {
+        const ItemRow* r = items.Find(std::string("ITEM_CH_M_HEAVY_11_") + part + "_SET_A");
+        REQUIRE(r != nullptr);
+        worn.push_back(r->refObjId);
+    }
+    CHECK(WholeSets(items, worn) == std::vector<int>{13});
+    worn.pop_back();
+    CHECK(WholeSets(items, worn).empty());
+}

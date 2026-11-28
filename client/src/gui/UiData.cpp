@@ -160,6 +160,9 @@ void UiData::Load(core::JobSystem& jobs, const assets::FileSystem& files, std::v
             if (const auto file = files->Read("server_dep\\silkroad\\textdata\\refmagicoptgroup.txt")) {
                 assets::DecodeMagicOptGroups(core::DecodeTextFile(file->Bytes()), state->magicOptGroups, error);
             }
+            if (std::string why; !game::LoadSetTable(*files, state->magicOptions, &state->magicOptGroups, state->sets, why)) {
+                core::LogWarning("ui: the item sets: {}", why);
+            }
             if (const auto file = files->Read("server_dep\\silkroad\\textdata\\regioncode.txt")) {
                 const std::string text = core::DecodeTextFile(file->Bytes());
                 std::size_t start = 0;
