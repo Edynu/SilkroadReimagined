@@ -62,6 +62,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <array>
 #include <optional>
@@ -445,6 +446,10 @@ private:
         // `ambientFor` (its handle + 1; 0 none): a new instance (a new look) starts them afresh.
         std::vector<std::uint32_t> ambient;
         std::uint32_t ambientFor = 0;
+        // Its footprints' clock (StepFootprints): the cyclic clip and the time into it last frame, that clip's steps.
+        const assets::AnimationData* stepClip = nullptr;
+        double stepMs = -1.0;
+        std::vector<assets::ResourceData::AnimationEvent> steps;
         anim::SkeletonPose pose;
     };
     static constexpr std::uint32_t kNoType = 0xFFFFFFFFu;
@@ -460,6 +465,17 @@ private:
     std::vector<std::string> clipSets_{std::string()};
     std::uint32_t ClipKey(std::string_view set, std::uint32_t state);
     void ReleaseUnused(ScreenContext& context);
+    // Footprints (the original's 0xA5A3F0): at each step of a walking or running clip (its events of code 2, the
+    // foot in their second value) on sand-like earth or snow (tile2d.ifo's kind 1 or 9 of the navmesh's tile under the
+    // toe), a print of effect\footstep_sand.ddj / footstep_snow.ddj 2 across and 3.5 long under the toe, turned 4.5
+    // degrees out from the walker's heading, the right foot's mirrored; 20 s on the ground.
+    void StepFootprints(ScreenContext& context);
+    struct Footprint {
+        std::array<glm::vec3, 4> corners{};
+        bool snow = false;
+        double born = 0;
+    };
+    std::deque<Footprint> footprints_;
     struct Prop {
         gfx::AssetId model;
         std::array<float, 12> world{};

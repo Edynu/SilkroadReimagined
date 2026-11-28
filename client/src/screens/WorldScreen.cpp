@@ -1670,6 +1670,91 @@ void WorldScreen::UpdateCharacters(ScreenContext& context, FrameSnapshot& snapsh
     snapshot.scene.worldPalettes = palettes_[context.slot];
 }
 
+void WorldScreen::StepFootprints(ScreenContext& context) {
+    constexpr double kLife = 20.0, kFade = 5.0; // the original's 20,000 ms; ours: the last 5 s fade out
+    constexpr float kWidth = 2.0f, kLength = 3.5f, kSplay = 0.07853982f, kLift = 0.3f;
+    const double now = context.time;
+    while (!footprints_.empty() && now - footprints_.front().born > kLife) footprints_.pop_front();
+    const bool outdoors = !dungeon_ && indexes_ && indexes_->ready && indexes_->tiles;
+    if (outdoors) {
+        static const bool stepLog = context.config.GetBool("step-log", false);
+        for (std::size_t i = 0; i < characters_.size(); ++i) {
+            Character& c = characters_[i];
+            const assets::AnimationData* clip = nullptr;
+            double ms = 0.0;
+            if (!c.spawned || !c.mixing || c.type >= characterModels_.size() ||
+                !c.pose.CycleTime(now * 1000.0 - c.frozenMs, clip, ms)) {
+                c.stepClip = nullptr;
+                continue;
+            }
+            if (clip != c.stepClip) {
+                // A new cycle: its steps, from the set its clip comes from (as ClipPath picks it).
+                const CharacterModel& m = characterModels_[c.type];
+                std::string_view from = "default";
+                if (!c.playingCycleSet.empty() && !m.sets.StateAnimation(c.playingCycleSet, c.playingCycle).empty()) {
+                    from = c.playingCycleSet;
+                } else if (!m.sets.StateAnimation(m.stance, c.playingCycle).empty()) {
+                    from = m.stance;
+                }
+                c.steps = m.sets.StateEventRecords(from, c.playingCycle, 2);
+                c.stepClip = clip;
+                c.stepMs = ms;
+                continue;
+            }
+            const double before = c.stepMs;
+            c.stepMs = ms;
+            if (c.steps.empty() || c.look.held) continue;
+            for (const assets::ResourceData::AnimationEvent& e : c.steps) {
+                const double t = double(e.timeMs);
+                const bool passed = ms >= before ? (t > before && t <= ms) : (t > before || t <= ms); // across the loop's end
+                if (!passed) continue;
+                const bool right = e.b != 0;
+                glm::mat4 toe;
+                if (!StageBone(i, right ? "Bip01 R Toe0" : "Bip01 L Toe0", toe)) continue;
+                const glm::vec3 at(toe[3]);
+                if (stepLog) {
+                    glm::mat4 other;
+                    const float otherY = StageBone(i, right ? "Bip01 L Toe0" : "Bip01 R Toe0", other) ? other[3][1] : at.y;
+                    core::LogInfo("steps: slot {} event {} ms foot value {} toe y {:.2f}, the other's {:.2f}", i, e.timeMs, e.b, at.y, otherY);
+                }
+                // The ground's kind under the toe: the navmesh's tile there, its tile2d.ifo row's kind.
+                const int rx = originX_ + int(std::floor(at.x / assets::kRegionSize)), rz = originY_ + int(std::floor(at.z / assets::kRegionSize));
+                if (rx < 0 || rx > 255 || rz < 0 || rz > 127) continue;
+                const std::uint16_t region = assets::RegionId(rx, rz);
+                const game::NavRegion* nav = navWorld_.Find(region);
+                if (nav == nullptr || nav->data.tiles.empty()) continue;
+                const float lx = at.x - float(rx - originX_) * assets::kRegionSize, lz = at.z - float(rz - originY_) * assets::kRegionSize;
+                const auto kind = indexes_->tiles->find(nav->TileAt(lx, lz).tile2d);
+                if (kind == indexes_->tiles->end() || (kind->second.flags != 1 && kind->second.flags != 9)) continue;
+                // The print along the walker's heading, turned out by 4.5 degrees (the left foot's to the left).
+                const float heading = std::atan2(c.dirX, c.dirZ) + (right ? kSplay : -kSplay);
+                const glm::vec3 forward(std::sin(heading), 0.0f, std::cos(heading)), side(forward.z, 0.0f, -forward.x);
+                Footprint f;
+                f.snow = kind->second.flags == 9;
+                f.born = now;
+                for (int k = 0; k < 4; ++k) {
+                    // Row by row from the toe (v 0), u across; the right foot's mirrored (u from the other side).
+                    const float u = (k % 2 == 0 ? -0.5f : 0.5f) * (right ? -1.0f : 1.0f), v = k < 2 ? 0.5f : -0.5f;
+                    glm::vec3 p = at + side * (u * kWidth) + forward * (v * kLength);
+                    game::proto::WorldPosition w{region, p.x - float(rx - originX_) * assets::kRegionSize, at.y,
+                                                 p.z - float(rz - originY_) * assets::kRegionSize};
+                    float y = at.y;
+                    if (GroundHeight(w, y)) p.y = y;
+                    f.corners[std::size_t(k)] = p + glm::vec3(0.0f, kLift, 0.0f);
+                }
+                footprints_.push_back(f);
+                if (footprints_.size() > 512) footprints_.pop_front();
+            }
+        }
+    }
+    for (const Footprint& f : footprints_) {
+        const double age = now - f.born;
+        const float alpha = age < kLife - kFade ? 1.0f : float(std::clamp((kLife - age) / kFade, 0.0, 1.0));
+        const std::uint32_t colour = 0x00FFFFFFu | (std::uint32_t(alpha * 255.0f + 0.5f) << 24);
+        effects_.GroundDecal(f.snow ? "effect\\footstep_snow.ddj" : "effect\\footstep_sand.ddj", 1, f.corners, colour);
+    }
+}
+
 // The moving map objects (WorldStreamer::AnimatedObjects): each its clip looped from its own moment, on the workers,
 // into this slot's palettes after the characters'.
 void WorldScreen::PoseObjects(ScreenContext& context, FrameSnapshot& snapshot) {
@@ -1876,6 +1961,7 @@ void WorldScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     UpdateCrowd(context);
     UpdateCharacters(context, snapshot);
     PoseObjects(context, snapshot);
+    StepFootprints(context);
     UpdateWeather(context, snapshot);
     UpdateEnvironment(context, snapshot);
     UpdateEffects(context, snapshot);

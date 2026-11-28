@@ -71,6 +71,8 @@ public:
     // The one-shot of that tag still playing or blending out (0: none).
     std::uint32_t FindOnce(std::uint64_t tag, double nowMs) const;
     void ClearOnces() { onces_.clear(); }
+    // The cyclic clip and the time into it (ms, within its length) at `nowMs`; false with none.
+    bool CycleTime(double nowMs, const assets::AnimationData*& clip, double& timeMs) const;
     void EvaluateMix(double nowMs, bool inPlace);
     // What the mixer plays at `nowMs` (the cycle, each one-shot's clip, time and weight): a line for logs.
     std::string MixSummary(double nowMs) const;

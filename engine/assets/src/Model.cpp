@@ -614,7 +614,8 @@ bool DecodeBsr(std::span<const std::byte> file, ResourceData& out, std::string& 
                     ResourceData::AnimationEvent event;
                     event.timeMs = static_cast<std::int32_t>(s.U32());
                     event.code = static_cast<std::int32_t>(s.U32());
-                    s.Skip(8);
+                    event.a = static_cast<std::int32_t>(s.U32());
+                    event.b = static_cast<std::int32_t>(s.U32());
                     state.events.push_back(event);
                 }
                 const std::uint32_t warp = s.U32();
@@ -641,6 +642,12 @@ bool DecodeBsr(std::span<const std::byte> file, ResourceData& out, std::string& 
 
 std::vector<int> ResourceData::StateEvents(std::string_view set, std::uint32_t state, int code) const {
     std::vector<int> out;
+    for (const AnimationEvent& e : StateEventRecords(set, state, code)) out.push_back(e.timeMs);
+    return out;
+}
+
+std::vector<ResourceData::AnimationEvent> ResourceData::StateEventRecords(std::string_view set, std::uint32_t state, int code) const {
+    std::vector<AnimationEvent> out;
     for (const AnimationSet& s : animationSets) {
         if (s.name.size() != set.size() || !std::equal(s.name.begin(), s.name.end(), set.begin(), [](char a, char b) {
                 return (a >= 'A' && a <= 'Z' ? a - 'A' + 'a' : a) == (b >= 'A' && b <= 'Z' ? b - 'A' + 'a' : b);
@@ -650,9 +657,9 @@ std::vector<int> ResourceData::StateEvents(std::string_view set, std::uint32_t s
         for (const AnimationState& st : s.states) {
             if (st.id != state) continue;
             for (const AnimationEvent& e : st.events) {
-                if (e.code == code) out.push_back(e.timeMs);
+                if (e.code == code) out.push_back(e);
             }
-            std::sort(out.begin(), out.end());
+            std::stable_sort(out.begin(), out.end(), [](const AnimationEvent& x, const AnimationEvent& y) { return x.timeMs < y.timeMs; });
             return out;
         }
     }

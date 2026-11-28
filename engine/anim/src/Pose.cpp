@@ -178,6 +178,14 @@ SkeletonPose::Clip SkeletonPose::MapClip(const assets::AnimationData* clip, doub
     return c;
 }
 
+bool SkeletonPose::CycleTime(double nowMs, const assets::AnimationData*& clip, double& timeMs) const {
+    clip = cycle_.clip;
+    if (clip == nullptr || clip->keyTimesMs.empty()) return false;
+    const double duration = double(std::max<std::uint32_t>(clip->keyTimesMs.back(), 1));
+    timeMs = clip->loop ? std::fmod(std::max(nowMs - cycle_.startMs, 0.0), duration) : std::clamp(nowMs - cycle_.startMs, 0.0, duration);
+    return true;
+}
+
 void SkeletonPose::SetCycle(const assets::AnimationData* clip, double nowMs, float fadeMs) {
     if (clip == cycle_.clip) return; // the same loop goes on, its clock its own
     if (cycle_.clip != nullptr && fadeMs > 0.0f) {

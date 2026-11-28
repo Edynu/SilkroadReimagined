@@ -128,7 +128,9 @@ struct ResourceData {
     // State 0 is the stance's idle.
     struct AnimationEvent {
         int timeMs = 0; // into the animation
-        int code = 0;   // 1: an effect / hit moment
+        int code = 0;   // 1: an effect / hit moment, 2: a foot on the ground (walking, running)
+        // Its two values: a step's (code 2) `b` the foot, 0 / 1 (the original reads it for the footprint's toe).
+        int a = 0, b = 0;
     };
     struct AnimationState {
         std::uint32_t id = 0;
@@ -226,6 +228,8 @@ struct ResourceData {
     // The times (ms into the clip) of `state`'s events of a code in that set (code 1: the hit and effect
     // moments a skill stage's "start event" counts), in order; empty if none.
     std::vector<int> StateEvents(std::string_view set, std::uint32_t state, int code = 1) const;
+    // The same events whole, in order of their moments.
+    std::vector<AnimationEvent> StateEventRecords(std::string_view set, std::uint32_t state, int code) const;
     // The sounds of `state`'s clip in that set, in order of their moments (the state's own modifier
     // set, else one under its clip's name); empty if none.
     std::vector<SoundEvent> StateSounds(std::string_view set, std::uint32_t state) const;

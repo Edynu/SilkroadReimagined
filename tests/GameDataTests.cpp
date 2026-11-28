@@ -3073,3 +3073,32 @@ TEST_CASE("item sets: their pieces by the places their items fill, the helm's an
     worn.pop_back();
     CHECK(WholeSets(items, worn).empty());
 }
+
+TEST_CASE("the player bodies' walk and run clips mark each foot's step (events of code 2, the foot in their second value)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(MountGameArchives(fs, dir, error), error);
+    CharacterTable characters;
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    for (const char* codename : {"CHAR_CH_MAN_ADVENTURER", "CHAR_CH_WOMAN_ADVENTURER", "CHAR_EU_MAN_ADVENTURER", "CHAR_EU_WOMAN_ADVENTURER"}) {
+        CAPTURE(codename);
+        const ObjectRow* row = characters.Find(codename);
+        REQUIRE(row != nullptr);
+        auto file = fs.Read(CharacterTable::ResolveModel(fs, *row));
+        REQUIRE(file);
+        ResourceData resource;
+        REQUIRE(DecodeBsr(file->Bytes(), resource, error));
+        for (const std::uint32_t state : {1u, 7u}) { // walking, running
+            CAPTURE(state);
+            const auto steps = resource.StateEventRecords("default", state, 2);
+            REQUIRE(steps.size() == 2);
+            CHECK(steps[0].timeMs < steps[1].timeMs);
+            CHECK(steps[0].b + steps[1].b == 1); // one step a foot
+        }
+    }
+}
