@@ -250,6 +250,7 @@ void NpcWindow::AddChoice(const std::string& text, Choice choice, bool red) {
 
 void NpcWindow::ShowGate(std::uint32_t gate, std::uint32_t services, std::vector<std::uint32_t> opened) {
     gate_ = gate;
+    pulleyTalk_ = false;
     opened_ = std::move(opened);
     const assets::TeleportGate* g = context_.teleports != nullptr ? context_.teleports->Gate(gate) : nullptr;
     Begin(g != nullptr ? context_.Text(g->nameKey) : std::string(), g != nullptr && context_.npcGreeting ? context_.npcGreeting(g->codename) : "");
@@ -262,11 +263,12 @@ void NpcWindow::ShowGate(std::uint32_t gate, std::uint32_t services, std::vector
     }
     if ((services & proto::kGateTeleport) != 0) AddChoice(context_.Text("UIIT_CTL_TELEPORT_TARGET"), {Choice::Kind::Destinations, 0});
     // Ours: an end to the talk on the first menu too (the original's is closed by its button).
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowNpc(std::uint32_t entity, const std::string& codename, const std::string& nameKey, std::uint32_t services) {
     npc_ = entity;
+    pulleyTalk_ = (services & proto::kNpcFortressPulley) != 0;
     gate_ = 0;
     opened_.clear();
     npcCodename_ = codename;
@@ -465,7 +467,11 @@ void NpcWindow::ShowTalk() {
     if (context_.flag != nullptr && context_.flag->Desk().npc == npc_) {
         for (const proto::EventDesk::Row& row : context_.flag->Desk().quests) AddChoice(context_.Text(row.title), {Choice::Kind::EventQuest, row.quest});
     }
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
+}
+
+std::string NpcWindow::EndText() const {
+    return context_.Text(pulleyTalk_ ? "UIIT_STT_NPC_CHATTING_WND_TALKEND2" : "UIIT_STT_NPC_CHATTING_WND_TALKEND");
 }
 
 std::string NpcWindow::QuestTextOf(const game::QuestText& t) const {
@@ -481,7 +487,7 @@ void NpcWindow::ShowOutcome(const std::string& text, bool collect) {
     box_->AddParagraph({}, ui::kWhite);
     // Row 0x25 "Collect this week's outcome" (only when N is not 0), then the end.
     if (collect) AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_HUNTERMENU_OUTCOME"), {Choice::Kind::Job, std::uint32_t(JobNpcRow::OutcomeCollect)});
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowQuestSays(const proto::QuestSays& says) {
@@ -600,7 +606,7 @@ void NpcWindow::ShowRewardChoice() {
         if (item.count > 1) name += " x" + std::to_string(item.count);
         AddChoice(name, {Choice::Kind::QuestReward, std::uint32_t(i)});
     }
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowHire() {
@@ -621,7 +627,7 @@ void NpcWindow::ShowHire() {
     for (std::size_t i = 0; i < 3; ++i) {
         AddChoice(context_.Text(rows[i].first) + " " + fee, {Choice::Kind::Fortress, std::uint32_t(21 + i)}, (hired & rows[i].second) != 0);
     }
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowSoldiers() {
@@ -658,7 +664,7 @@ void NpcWindow::ShowSoldiers() {
                                                                      {game::kMercHealth, "UIIT_CTL_GUILD_SOLDIER_ABILITY_HEALTH"},
                                                                      {0, "UIIT_CTL_GUILD_SOLDIER_ABILITY_INITIALIZE"}};
     for (const auto& [bit, key] : kRows) AddChoice(context_.Text(key), {Choice::Kind::Guild, std::uint32_t(kGuildRowSoldierAbility + bit)});
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowDungeon() {
@@ -673,7 +679,7 @@ void NpcWindow::ShowDungeon() {
     }
     AddChoice(context_.Text("UIIT_STT_FORTRESS_DUNGEON_CREATE"), {Choice::Kind::Fortress, 71});
     AddChoice(FormatText(context_.Text("UIIT_STT_FORTRESS_DUNGEON_ENTER"), {std::to_string(d != nullptr ? d->players : 0), "30"}), {Choice::Kind::Fortress, 72});
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowBlessings() {
@@ -699,7 +705,7 @@ void NpcWindow::ShowBlessings() {
                       {Choice::Kind::Fortress, std::uint32_t(40 + b.id)});
         }
     }
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 void NpcWindow::ShowDestinations() {
@@ -732,7 +738,7 @@ void NpcWindow::ShowDestinations() {
         const assets::TeleportPoint* to = context_.teleports->Point(id);
         if (to != nullptr) AddChoice(FormatText(context_.Text("UIIT_CTL_TELEPORT_FREE_RESULT"), {context_.Text(to->nameKey)}), {Choice::Kind::Destination, id});
     }
-    AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+    AddChoice(EndText(), {Choice::Kind::End, 0});
 }
 
 bool NpcWindow::Choose(int number) {
@@ -803,7 +809,7 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
         }
         Begin(context_.Text(npcNameKey_), std::string(game::ArenaView::ModeTalk(row->mode)));
         AddChoice(context_.Text("UIIT_STT_ARENA_NPC_JOIN"), {Choice::Kind::ArenaJoin, choice.destination});
-        AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+        AddChoice(EndText(), {Choice::Kind::End, 0});
         break;
     }
     case Choice::Kind::ArenaJoin: {
@@ -971,7 +977,7 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
             box_->ClearParagraphs();
             box_->AddParagraph(context_.Text("SN_TALK_CH_GACHA_OPERATOR_3"), ui::kWhite);
             box_->AddParagraph({}, ui::kWhite);
-            AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
+            AddChoice(EndText(), {Choice::Kind::End, 0});
         }
         break;
     case Choice::Kind::AvatarGrant:

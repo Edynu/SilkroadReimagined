@@ -1178,6 +1178,9 @@ private:
     void ShowTalk();
     // A quest's text in the player's language (a key of the text tables, or the words themselves).
     std::string QuestTextOf(const game::QuestText& t) const;
+    // The talk's end row (row 0): "End." at a gate's pulley (an NPC of function 0x1F), else "End conversation.".
+    std::string EndText() const;
+    bool pulleyTalk_ = false;
     void ShowRewardChoice();
     std::uint32_t quest_ = 0;              // the quest being talked about
     std::vector<std::uint8_t> picked_;     // the reward's items chosen so far
