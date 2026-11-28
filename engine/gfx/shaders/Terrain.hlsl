@@ -261,7 +261,12 @@ float4 PSShadow(ShadowOutput input) : SV_Target {
 // ---- Water ("Water"): a quad per visible block with water, at its height. The data: u64 pool, u32 water frame, u32
 // ice, u32 the reflection's target (0: the plain water), u32 its bump map, float2 the screen's size (32 bytes); the
 // blocks (32 bytes: u64 region offset, u32 block, u32 type, float3 region offset, float height).
-static const uint kWaterHeader = 32;
+static const uint kWaterHeader = 48;
+// The Video page's Water Detail (TerrainPass's header, byte 32): 0 low, 1 medium, 2 high (1.188 saves the row and reads it
+// nowhere; ours: the original water still at low (SceneRenderer: one frame) and its reflection's ripples stronger at high;
+// the modern water's sky and glint alone at low, its refraction and foam from medium, its caustics and far reflections
+// at high).
+uint WaterDetailLevel() { return vk::RawBufferLoad<uint>(pc.data + 32, 4); }
 struct WaterOutput {
     float4 position : SV_Position;
     float2 local : TEXCOORD0; // in height samples across the block (0..16)
@@ -336,7 +341,7 @@ float4 PSWater(WaterOutput input) : SV_Target {
         }
         float2 at = input.position.xy / max(screen, 1.0);
         at.x = 1.0 - at.x;
-        at += slope * 0.04;
+        at += slope * (WaterDetailLevel() >= 2 ? 0.07 : 0.04);
         const float3 seen = gTextures[NonUniformResourceIndex(reflection)].SampleLevel(gSamplers[1], saturate(at), 0).rgb;
         const float3 mirrored = seen * FrameValue(pc.frame, kFrameWater).rgb;
         return float4(FrameFog(pc.frame, mirrored, input.viewDepth), 140.0 / 255.0);
@@ -515,7 +520,8 @@ float4 PSWaterModern(WaterModernOutput input) : SV_Target {
     float3 bottom = body;
     bool opaque = false;
     const float4 copyInfo = FrameValue(pc.frame, kFrameWaterCopy);
-    if (copyInfo.y > 0.5 && input.viewDepth <= kModernWaterReach) {
+    const uint level = WaterDetailLevel();
+    if (level >= 1 && copyInfo.y > 0.5 && input.viewDepth <= kModernWaterReach * (level >= 2 ? 2.0 : 1.0)) {
         // The scene under and around the water, copied before it (rgb, a the view depth).
         const Texture2D copy = gTextures[NonUniformResourceIndex(uint(copyInfo.x))];
         uint width, height;
@@ -527,7 +533,7 @@ float4 PSWaterModern(WaterModernOutput input) : SV_Target {
         if (under.a < input.viewDepth) under = copy.SampleLevel(gSamplers[1], screen, 0);
         // The bottom, lit by caustics where the sun reaches it through shallow water, then dimmed
         // by the water over it and filled with its scattered light.
-        const float caustics = WaterCaustics(input.world.xz, time) * shadow * sun.w * saturate(1.0 - depth / 30.0);
+        const float caustics = level >= 2 ? WaterCaustics(input.world.xz, time) * shadow * sun.w * saturate(1.0 - depth / 30.0) : 0.0;
         const float3 ground = under.rgb * (1.0 + caustics * 0.9);
         bottom = ground * extinction + scattered * (1.0 - extinction);
         opaque = true;
@@ -548,7 +554,7 @@ float4 PSWaterModern(WaterModernOutput input) : SV_Target {
     // Foam along the shore: a band where the water is shallow, broken by the waves.
     const float band = saturate(1.0 - depth / 5.0);
     const float breakup = 0.5 + 0.5 * sin(dot(input.world.xz, float2(0.21, 0.17)) + time * 1.7) * sin(dot(input.world.xz, float2(-0.13, 0.29)) - time * 1.3);
-    const float foam = band * band * smoothstep(0.25, 0.75, breakup + band * 0.5);
+    const float foam = level >= 1 ? band * band * smoothstep(0.25, 0.75, breakup + band * 0.5) : 0.0;
     color = lerp(color, float3(0.85, 0.9, 0.92) * lerp(0.6, 1.0, shadow), foam * 0.8);
 
     // How much of the bottom shows: the shallows clear, deep water opaque; the edge fades in.

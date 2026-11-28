@@ -1125,7 +1125,8 @@ void SceneRenderer::Draw(rhi::CommandList& cmd, const SceneView& view, const Orb
         const auto water = assets_->Texture(waterFrames_[std::min<std::size_t>(index, waterFrames_.size() - 1)]);
         const auto ice = assets_->Texture(iceTexture_);
         const std::uint64_t waterFrame = FrameConstants(view, true, true);
-        terrainPass_.DrawWater(cmd, viewProj_, waterFrame, assets_->Geometry(), water ? water->bindless : 0, ice ? ice->bindless : 0, true);
+        terrainPass_.DrawWater(cmd, viewProj_, waterFrame, assets_->Geometry(), water ? water->bindless : 0, ice ? ice->bindless : 0, true, nullptr,
+                               video_.current()[5]);
         // The pools (water parts) and the translucent parts over the copy.
         worldPass_.Draw(cmd, viewProj_, assets_->Geometry(), world_, assets_->Meshes(), waterFrame, gfx::WorldPass::Phase::BeforeWater,
                         Parts::Translucent);
@@ -1137,7 +1138,8 @@ void SceneRenderer::Draw(rhi::CommandList& cmd, const SceneView& view, const Orb
         worldPass_.Draw(cmd, viewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::BeforeWater);
         if (terrainPass_.VisibleWater() != 0) {
             // A frame every 100 ms, as the original's (it counts wall-clock milliseconds).
-            const auto index = static_cast<std::size_t>(std::fmod(std::max(view.seconds, 0.0) * 10.0, 30.0));
+            // Water Detail low: the water stands still (its first frame).
+            const auto index = video_.current()[5] == 0 ? std::size_t{0} : static_cast<std::size_t>(std::fmod(std::max(view.seconds, 0.0) * 10.0, 30.0));
             const auto water = assets_->Texture(waterFrames_[std::min<std::size_t>(index, waterFrames_.size() - 1)]);
             const auto ice = assets_->Texture(iceTexture_);
             gfx::TerrainPass::WaterReflection reflection;
@@ -1149,7 +1151,7 @@ void SceneRenderer::Draw(rhi::CommandList& cmd, const SceneView& view, const Orb
                 reflection.height = float(height_);
             }
             terrainPass_.DrawWater(cmd, viewProj_, frame, assets_->Geometry(), water ? water->bindless : 0, ice ? ice->bindless : 0,
-                                   video_.water != 0, &reflection);
+                                   video_.water != 0, &reflection, video_.current()[5]);
         }
         worldPass_.Draw(cmd, viewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::AfterWater);
     }

@@ -72,7 +72,8 @@ public:
         float width = 0, height = 0;
     };
     void DrawWater(rhi::CommandList& cmd, const glm::mat4& viewProj, std::uint64_t frame, const GeometryPool& pool,
-                   std::uint32_t water, std::uint32_t ice, bool modern = false, const WaterReflection* reflection = nullptr) const;
+                   std::uint32_t water, std::uint32_t ice, bool modern = false, const WaterReflection* reflection = nullptr,
+                   int detail = 1) const; // detail: the Video page's Water Detail (0 low, 1 medium, 2 high)
 
     std::uint32_t VisibleBlocks() const { return static_cast<std::uint32_t>(blocks_.size()); }
     std::uint32_t VisibleWater() const { return static_cast<std::uint32_t>(water_.size()); }
