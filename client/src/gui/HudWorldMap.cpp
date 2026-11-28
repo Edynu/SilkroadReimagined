@@ -135,8 +135,23 @@ private:
     bool ShowMap(int id) {
         if (c_.worldMap == nullptr || !view_.Show(*c_.worldMap, id)) return false;
         view_.SetViewSize({kView.w, kView.h});
+        // A regional map (ids 1..2000, the towns' and the fortresses'): "Regional map - NAME"; a fortress's, then
+        // "    Occupying guild - GUILD" (UIIT_STT_NONE when none holds it). The world: its name alone.
         std::string title;
-        if (const assets::WorldMapRow* m = view_.Map()) title = c_.Text(m->nameKey);
+        if (const assets::WorldMapRow* m = view_.Map()) {
+            title = c_.Text(m->nameKey);
+            if (id >= 1 && id <= 2000) title = c_.Text("UIIT_PAG_LOCALMAP") + " - " + title;
+            if (id > 1000 && id < 2000) {
+                const std::uint32_t shown = id == 1001 ? 1 : id == 1002 ? 6 : id == 1003 ? 3 : 0;
+                std::string guild;
+                if (c_.fortress != nullptr) {
+                    for (const proto::FortressRecord& f : c_.fortress->Fortresses()) {
+                        if (f.id == shown && f.owner != 0) guild = f.ownerName;
+                    }
+                }
+                title += "    " + c_.Text("UIIT_STT_FORT_OFFICAL_OCCUPYGUILD") + " - " + (guild.empty() ? c_.Text("UIIT_STT_NONE") : guild);
+            }
+        }
         if (const assets::DungeonMapRow* d = view_.Dungeon()) title = c_.Text(d->floorKey);
         if (ui::Widget* t = Child(0)) t->SetText(title);
         Floors();
