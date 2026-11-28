@@ -411,6 +411,7 @@ void PlayScreen::Exit(ScreenContext& context, FrameSnapshot& snapshot) {
     if (context.audio != nullptr) {
         context.audio->Silence(); // the place's music and ambience end with the world
         context.audio->SetOcclusion(nullptr); // its test asks this screen
+        context.audio->SetReverb(0.0f, 1.0f);
         const audio::SoundSystem& s = context.audio->engine();
         if (s.positionalPlayed > 0) core::LogInfo("game: sounds at a place {}, muffled behind walls {}", s.positionalPlayed, s.muffled);
     }
@@ -2082,7 +2083,9 @@ bool PlayScreen::CreateSoundCommand(const std::string& text, double now) {
         player_.Post(game::GameMessage::Kind::General, "/createsound 1-10 1-100 (sound, volume %); /createsound 0 removes them", now);
         return true;
     }
-    emitters_.push_back({world_->OriginRelative(self->position), sound, float(volume) / 100.0f, now});
+    glm::vec3 spot = world_->OriginRelative(self->position);
+    if (float ground = 0.0f; world_->GroundHeight(self->position, ground)) spot.y = ground;
+    emitters_.push_back({spot, sound, float(volume) / 100.0f, now});
     player_.Post(game::GameMessage::Kind::General, std::format("Sound {} placed here at {} % (again every 2 s)", sound, volume), now);
     core::LogInfo("game: /createsound {} {} at {:.0f},{:.0f},{:.0f}", sound, volume, emitters_.back().at.x, emitters_.back().at.y,
                   emitters_.back().at.z);
@@ -2206,12 +2209,44 @@ void PlayScreen::Listen(ScreenContext& context) {
     if (occlusion && context.feedback != nullptr) {
         if (std::shared_ptr<const AudioCube> cube = context.feedback->LatestAudioCube()) {
             audioCubeDump_ = context.config.GetString("audio-cube-dump", "");
+            // The room's echo from the cube: how many directions round the head (every fourth texel of the five faces
+            // but the one below) meet the world within 800, and how far they meet it. The open: next to none; a street
+            // between houses: some; a hall or a dungeon's corridor: much, longer the farther its walls.
+            int hits = 0, samples = 0;
+            double far = 0.0;
+            constexpr int F = AudioCube::kFace;
+            for (int face = 0; face < 6; ++face) {
+                if (face == 3) continue; // below: the ground is always there
+                for (int y = 2; y < F; y += 4) {
+                    for (int x = 2; x < F; x += 4) {
+                        ++samples;
+                        const float d = cube->depth[std::size_t((face / 3) * F + y) * AudioCube::kWidth + std::size_t((face % 3) * F + x)];
+                        if (d >= 0.9999f) continue;
+                        const float z = cube->nearZ * cube->farZ / (cube->farZ - d * (cube->farZ - cube->nearZ));
+                        if (z > 800.0f) continue;
+                        ++hits;
+                        far += z;
+                    }
+                }
+            }
+            const float enclosed = samples > 0 ? float(hits) / float(samples) : 0.0f;
+            const float meanDistance = hits > 0 ? float(far / hits) : 0.0f;
+            const float amount = glm::smoothstep(0.3f, 0.85f, enclosed);
+            // Longer the farther its walls and the more wholly closed (a cave's corridor about 2 s, a big hall about 3).
+            const float decay = std::clamp(0.6f + meanDistance / 120.0f + enclosed, 0.4f, 4.0f);
+            audio->SetReverb(amount, decay);
+            static double toldRoom = -100.0;
+            if (context.time - toldRoom > 5.0) {
+                toldRoom = context.time;
+                core::LogInfo("audio: the room: {:.0f} % enclosed, {:.0f} away: echo {:.2f}, {:.1f} s", enclosed * 100.0f, meanDistance, amount, decay);
+            }
             audioCube_ = std::move(cube);
         }
     }
     if (occlusion != audio->Occluding()) {
         if (!occlusion) {
             audio->SetOcclusion(nullptr);
+            audio->SetReverb(0.0f, 1.0f);
             audioCube_.reset();
         } else {
             audio->SetOcclusion([this](glm::vec3 ear, glm::vec3 at) { return SoundOcclusion(ear, at); });
@@ -5142,7 +5177,10 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     snapshot.scene.audioCube = false;
     if (shown_ && world_ && context.options != nullptr && context.options->beta.soundOcclusion) {
         if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
-            const glm::vec3 head = world_->OriginRelative(self->position) + glm::vec3(0.0f, 15.0f, 0.0f);
+            // On the ground under it (the entity's height is not always the ground's), the head 15 over it.
+            glm::vec3 head = world_->OriginRelative(self->position);
+            if (float ground = 0.0f; world_->GroundHeight(self->position, ground)) head.y = ground;
+            head.y += 15.0f;
             snapshot.scene.audioCube = true;
             snapshot.scene.audioEye = {head.x, head.y, head.z};
         }

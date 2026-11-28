@@ -48,6 +48,8 @@ public:
     // screen's ray); null: off.
     void SetOcclusion(std::function<float(glm::vec3 ear, glm::vec3 sound)> occluded);
     bool Occluding() const { return bool(sound_.occluded); }
+    // The room's echo (ours, experimental): 0 none .. 1, its length in seconds.
+    void SetReverb(float amount, float decay) { sound_.SetReverb(amount, decay); }
 
     // The Audio page's three levels and mutes, applied at once (the Options window calls it on every
     // change of a slider or a mute, and again with the kept levels on Cancel).

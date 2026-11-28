@@ -81,6 +81,12 @@ public:
     // kMuffledGainHf). Null: never.
     std::function<float(Vec3 listener, Vec3 sound)> occluded;
     static constexpr float kMuffledGain = 0.6f, kMuffledGainHf = 0.12f;
+    // The positional sounds playing are asked again this often (their muffle eased toward the answer: a long sound opens
+    // and closes as the listener walks round a wall).
+    static constexpr double kOcclusionRefresh = 0.1;
+    // Ours, experimental: the room's echo, one reverb every positional sound is sent to. `amount` 0 (none: the open) .. 1,
+    // `decay` its length in seconds; eased toward over a quarter second.
+    void SetReverb(float amount, float decay);
     // Sounds muffled and played since the start (the tests' and the log's).
     int muffled = 0, positionalPlayed = 0;
 
@@ -136,6 +142,13 @@ private:
     float reference_ = 60.0f, farthest_ = 1.0e6f;
     Vec3 listener_{};
     bool efx_ = false; // the device has ALC_EXT_EFX: each voice has a low-pass filter
+    double occlusionAt_ = 0.0;
+    std::uint32_t reverbEffect_ = 0, reverbSlot_ = 0; // the room's echo (EFX; 0: none)
+    float reverbAmount_ = 0.0f, reverbDecay_ = 1.0f;   // as applied
+    float reverbWantAmount_ = 0.0f, reverbWantDecay_ = 1.0f;
+    double reverbAt_ = 0.0;
+    void ApplyReverb();
+    void Muffle(Voice& v, float muffle);
     std::unordered_map<std::string, std::unique_ptr<Clip>> clips_;
     std::vector<Voice> voices_;
     std::vector<Pending> pending_;

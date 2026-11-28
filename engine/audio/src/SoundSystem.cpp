@@ -34,6 +34,14 @@ LPALGENFILTERS genFilters = nullptr;
 LPALDELETEFILTERS deleteFilters = nullptr;
 LPALFILTERI filteri = nullptr;
 LPALFILTERF filterf = nullptr;
+LPALGENEFFECTS genEffects = nullptr;
+LPALDELETEEFFECTS deleteEffects = nullptr;
+LPALEFFECTI effecti = nullptr;
+LPALEFFECTF effectf = nullptr;
+LPALGENAUXILIARYEFFECTSLOTS genSlots = nullptr;
+LPALDELETEAUXILIARYEFFECTSLOTS deleteSlots = nullptr;
+LPALAUXILIARYEFFECTSLOTI sloti = nullptr;
+LPALAUXILIARYEFFECTSLOTF slotf = nullptr;
 
 // The game's left-handed coordinates to OpenAL's right-handed ones.
 void Flip(const Vec3& v, ALfloat out[3]) {
@@ -63,6 +71,10 @@ struct SoundSystem::Clip {
 struct SoundSystem::Voice {
     std::uint32_t source = 0;
     std::uint32_t filter = 0; // its low-pass filter (EFX; 0: none)
+    bool positional = false;
+    Vec3 position;
+    float muffle = 0.0f; // its low-pass as applied, 0 .. 1
+    float target = 0.0f; // the occlusion's last answer
     bool busy = false;
     Channel channel = Channel::Effects;
     float volume = 1.0f;
@@ -141,6 +153,27 @@ bool SoundSystem::OpenLoopback(int rate, std::string& error) {
             filterf(filter, AL_LOWPASS_GAINHF, kMuffledGainHf);
             v.filter = filter;
         }
+        // The room's echo: one reverb in one auxiliary slot, silent until SetReverb.
+        genEffects = reinterpret_cast<LPALGENEFFECTS>(alGetProcAddress("alGenEffects"));
+        deleteEffects = reinterpret_cast<LPALDELETEEFFECTS>(alGetProcAddress("alDeleteEffects"));
+        effecti = reinterpret_cast<LPALEFFECTI>(alGetProcAddress("alEffecti"));
+        effectf = reinterpret_cast<LPALEFFECTF>(alGetProcAddress("alEffectf"));
+        genSlots = reinterpret_cast<LPALGENAUXILIARYEFFECTSLOTS>(alGetProcAddress("alGenAuxiliaryEffectSlots"));
+        deleteSlots = reinterpret_cast<LPALDELETEAUXILIARYEFFECTSLOTS>(alGetProcAddress("alDeleteAuxiliaryEffectSlots"));
+        sloti = reinterpret_cast<LPALAUXILIARYEFFECTSLOTI>(alGetProcAddress("alAuxiliaryEffectSloti"));
+        slotf = reinterpret_cast<LPALAUXILIARYEFFECTSLOTF>(alGetProcAddress("alAuxiliaryEffectSlotf"));
+        if (efx_ && genEffects && deleteEffects && effecti && effectf && genSlots && deleteSlots && sloti && slotf) {
+            ALuint effect = 0, slot = 0;
+            genEffects(1, &effect);
+            effecti(effect, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
+            genSlots(1, &slot);
+            if (alGetError() == AL_NO_ERROR) {
+                reverbEffect_ = effect;
+                reverbSlot_ = slot;
+                reverbAmount_ = reverbWantAmount_ = 0.0f;
+                ApplyReverb();
+            }
+        }
         alGetError();
     }
     alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
@@ -161,6 +194,12 @@ void SoundSystem::Shutdown() {
         }
     }
     voices_.clear();
+    if (reverbSlot_ != 0) {
+        ALuint slot = Id(reverbSlot_), effect = Id(reverbEffect_);
+        deleteSlots(1, &slot);
+        deleteEffects(1, &effect);
+        reverbSlot_ = reverbEffect_ = 0;
+    }
     for (auto& s : streams_) {
         ALuint source = Id(s->source);
         alSourceStop(source);
@@ -288,6 +327,42 @@ SoundSystem::Voice* SoundSystem::FreeVoice() {
     return oldest;
 }
 
+void SoundSystem::Muffle(Voice& v, float muffle) {
+    muffle = std::clamp(muffle, 0.0f, 1.0f);
+    if (v.filter == 0 || muffle == v.muffle) return;
+    const ALuint source = Id(v.source);
+    if (muffle <= 0.005f) {
+        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+        v.muffle = 0.0f;
+        return;
+    }
+    filterf(v.filter, AL_LOWPASS_GAIN, 1.0f + (kMuffledGain - 1.0f) * muffle);
+    filterf(v.filter, AL_LOWPASS_GAINHF, 1.0f + (kMuffledGainHf - 1.0f) * muffle);
+    alSourcei(source, AL_DIRECT_FILTER, ALint(v.filter)); // a filter's change is taken when it is set on the source again
+    v.muffle = muffle;
+}
+
+void SoundSystem::SetReverb(float amount, float decay) {
+    reverbWantAmount_ = std::clamp(amount, 0.0f, 1.0f);
+    reverbWantDecay_ = std::clamp(decay, 0.1f, 20.0f);
+}
+
+void SoundSystem::ApplyReverb() {
+    if (reverbSlot_ == 0) return;
+    // A room as big as its echo is long: the decay from the room, the reflections later and the late reverb denser with
+    // it; how much of each sound goes into it is the slot's gain.
+    const ALuint effect = Id(reverbEffect_), slot = Id(reverbSlot_);
+    effectf(effect, AL_REVERB_DECAY_TIME, std::clamp(reverbDecay_, 0.1f, 20.0f));
+    effectf(effect, AL_REVERB_DENSITY, 1.0f);
+    effectf(effect, AL_REVERB_DIFFUSION, 1.0f);
+    effectf(effect, AL_REVERB_GAIN, 0.32f);
+    effectf(effect, AL_REVERB_REFLECTIONS_DELAY, std::clamp(0.005f + reverbDecay_ * 0.01f, 0.0f, 0.3f));
+    effectf(effect, AL_REVERB_LATE_REVERB_DELAY, std::clamp(0.01f + reverbDecay_ * 0.015f, 0.0f, 0.1f));
+    sloti(slot, AL_EFFECTSLOT_EFFECT, ALint(effect)); // a changed effect is taken when it is put in the slot again
+    slotf(slot, AL_EFFECTSLOT_GAIN, std::clamp(reverbAmount_, 0.0f, 1.0f));
+    alGetError();
+}
+
 void SoundSystem::Release(Voice& v) {
     const ALuint source = Id(v.source);
     alSourceStop(source);
@@ -311,14 +386,14 @@ void SoundSystem::Start(const Pending& p, Clip& clip) {
     alSourcei(source, AL_BUFFER, ALint(clip.buffer));
     alSourcei(source, AL_LOOPING, p.loop != 0 ? AL_TRUE : AL_FALSE);
     alSourcef(source, AL_GAIN, VoiceGain(*v));
+    v->positional = p.positional;
+    v->position = p.position;
+    v->target = p.muffle;
+    v->muffle = -1.0f; // set below
     if (efx_) {
-        if (p.positional && p.muffle > 0.0f && v->filter != 0) {
-            filterf(v->filter, AL_LOWPASS_GAIN, 1.0f + (kMuffledGain - 1.0f) * p.muffle);
-            filterf(v->filter, AL_LOWPASS_GAINHF, 1.0f + (kMuffledGainHf - 1.0f) * p.muffle);
-            alSourcei(source, AL_DIRECT_FILTER, ALint(v->filter));
-        } else {
-            alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
-        }
+        Muffle(*v, p.positional ? p.muffle : 0.0f);
+        // The room's echo for the sounds of the world (not the interface's, at the listener).
+        if (reverbSlot_ != 0) alSource3i(source, AL_AUXILIARY_SEND_FILTER, p.positional ? ALint(reverbSlot_) : AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
     }
     if (p.positional) {
         ALfloat at[3];
@@ -373,6 +448,28 @@ void SoundSystem::Update(double dt) {
         }
         return p.loop == 0 && now_ - p.asked > kLateSeconds;
     });
+
+    // The positional sounds playing: asked again every kOcclusionRefresh, their muffle eased toward the answer (a fifth of
+    // a second to it), the room's echo eased toward what was set.
+    if (efx_) {
+        const bool ask = occluded && now_ - occlusionAt_ >= kOcclusionRefresh;
+        if (ask) occlusionAt_ = now_;
+        const float ease = std::min(1.0f, float(dt) * 5.0f);
+        for (Voice& v : voices_) {
+            if (!v.busy || !v.positional) continue;
+            if (ask) v.target = std::clamp(occluded(listener_, v.position), 0.0f, 1.0f);
+            else if (!occluded) v.target = 0.0f;
+            if (std::abs(v.target - v.muffle) > 0.005f) Muffle(v, v.muffle + (v.target - v.muffle) * ease);
+        }
+        if (reverbSlot_ != 0 && now_ - reverbAt_ >= 0.05 &&
+            (std::abs(reverbWantAmount_ - reverbAmount_) > 0.01f || std::abs(reverbWantDecay_ - reverbDecay_) > 0.02f)) {
+            reverbAt_ = now_;
+            const float step = std::min(1.0f, float(dt) * 4.0f + 0.05f);
+            reverbAmount_ += (reverbWantAmount_ - reverbAmount_) * step;
+            reverbDecay_ += (reverbWantDecay_ - reverbDecay_) * step;
+            ApplyReverb();
+        }
+    }
 
     // Finished one-shots free their voice.
     for (Voice& v : voices_) {
