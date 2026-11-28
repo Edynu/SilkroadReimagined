@@ -1547,6 +1547,26 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         }
         // --page quest-list: the quest window (L) on two quests under way: each quest's row and its goals' rows under it
         // (one goal met: "Completed" in its colour).
+        // --page quest-map:CODENAME[:world]: a quest of that codename under way, its row's map button pressed (the guide's
+        // QUEST rows: its monsters' tiles tinted or its places' quest icons); :world the world map shown first.
+        if (page_.starts_with("quest-map:") && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
+            hud_.Created()) {
+            questListShown_ = true;
+            namespace proto = game::proto;
+            std::string code = page_.substr(10);
+            const bool world = code.ends_with(":world");
+            if (world) code.resize(code.size() - 6);
+            sampleQuests_.Apply(proto::QuestDefinition{"quest " + code + "\nid 90004\nlevel 5\nname \"Map button\"\nstart level 1-\n"
+                                                       "giver NPC_CH_SMITH\nfinish NPC_CH_SMITH\ngoal kill 10 MOB_CH_TIGER text \"Hunt (%d)\"\n"});
+            proto::QuestList list;
+            list.active = {{90004, proto::QuestStatus::Achieving, {0}, 0}};
+            sampleQuests_.Apply(list);
+            hudContext_.quests = &sampleQuests_;
+            hudContext_.worldMap = host_.data().WorldMap();
+            hudContext_.trackedQuest = 90004;
+            if (world) ShowWorldMap(hudContext_, 0);
+            WorldMapQuest(hudContext_, 90004);
+        }
         if ((page_ == "quest-list" || page_ == "quest-track" || page_ == "quest-track-map") && !questListShown_ && interface_ != nullptr && tables_ && tables_->Ready() && host_.data().Ready() &&
             hud_.Created()) {
             questListShown_ = true;

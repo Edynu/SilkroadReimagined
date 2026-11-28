@@ -186,7 +186,7 @@ public:
             if (n.source == r.map) {
                 // The quest chosen: its NPCs marked on the minimap (1.188's CNIFQuestSlot control 18), and the map.
                 c_.trackedQuest = r.quest;
-                if (c_.hud != nullptr) c_.hud->Show(hud::kWorldMap);
+                WorldMapQuest(c_, r.quest);
                 return true;
             }
         }

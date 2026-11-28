@@ -127,6 +127,60 @@ public:
         if (auto* box = ui::As<ui::CheckBox>(Child(kMonsterBox))) box->checked = on;
         LevelMarks(on);
     }
+    // The quest list's map button (as 1.188's quest row's control 18): the map of the quest's NPC (a town's or a
+    // fortress's, else the world) centred on it, then the quest's rows of the guide's QUEST section: its monsters' tiles
+    // tinted (0x80E9C624, as a monster picked in the guide) or a place's wmap_quest_icon with its tooltip, its map shown.
+    void ShowQuest(std::uint32_t quest) {
+        marks_.clear();
+        questIcons_.clear();
+        const game::QuestDef* q = c_.quests != nullptr ? c_.quests->Find(quest) : nullptr;
+        if (c_.worldMap == nullptr || q == nullptr) return;
+        const auto showAt = [&](int map, ui::Vec2 pixel) {
+            if (!ShowMap(map)) return;
+            following_ = false;
+            PinArt();
+            view_.CentreOn(pixel);
+        };
+        if (c_.questPlaces) {
+            for (const proto::WorldPosition& where : c_.questPlaces(quest)) {
+                const int map = MapAt(*c_.worldMap, where, view_.Id(), {});
+                MapView place;
+                if (map < 0 || !place.Show(*c_.worldMap, map)) continue;
+                if (const auto p = place.Pixel(where.region, where.x, where.z)) showAt(map, *p);
+                break;
+            }
+        }
+        const auto rows = c_.worldMap->guide.quests.find(q->codename);
+        if (rows == c_.worldMap->guide.quests.end()) return;
+        for (const assets::WorldMapGuideRow& row : rows->second) {
+            if (!row.icon) {
+                for (std::size_t at = 0; at <= row.codename.size();) {
+                    std::size_t comma = row.codename.find(',', at);
+                    if (comma == std::string::npos) comma = row.codename.size();
+                    const std::string monster = row.codename.substr(at, comma - at);
+                    at = comma + 1;
+                    for (const assets::WorldMapGuideTab& t : c_.worldMap->guide.tabs) {
+                        if (t.section != "MONSTER") continue;
+                        for (const assets::WorldMapGuideRow& m : t.rows) {
+                            if (!m.heading && m.codename == monster) MarkMonster(m, 0x80E9C624u, true);
+                        }
+                    }
+                }
+                continue;
+            }
+            const int map = c_.worldMap->guide.MapOfArea(row.area);
+            MapView place;
+            if (map < 0 || !place.Show(*c_.worldMap, map)) continue;
+            assets::WorldMapLabel label;
+            label.map = map;
+            label.regionX = row.regionX;
+            label.regionZ = row.regionZ;
+            label.x = row.placeX;
+            label.y = row.placeY;
+            questIcons_.push_back({map, place.LabelPixel(label), row.codename});
+            showAt(map, questIcons_.back().pixel);
+        }
+    }
 
 private:
     // The player's dungeon floor's name (the .dof's: "DH_A01_FLOOR02"; empty outdoors or not known yet).
@@ -238,6 +292,13 @@ private:
         std::vector<std::uint32_t> keys; // its areas' pixels in those pictures
     };
     std::vector<MonsterMark> marks_;
+    // The quest's places from its map button (wmap_quest_icon, 32 x 32; its tooltip key).
+    struct QuestIcon {
+        int map = 0;
+        ui::Vec2 pixel;
+        std::string tipKey;
+    };
+    std::vector<QuestIcon> questIcons_;
     // A monster's mark (none: its area has no map); `keep` the others.
     void MarkMonster(const assets::WorldMapGuideRow& row, std::uint32_t argb, bool keep);
     // The monster box ticked or not: the monsters 0..3 levels over the player's (0x80D9D2C6) and 4..6 over (0x80B63143)
@@ -471,6 +532,14 @@ void WorldMapWindow::DrawMap(ui::Frame& frame, const ui::Rect& at) {
         if (view_.Id() != mark.map) continue;
         const ui::Vec2 s = view_.ToScreen(mark.pixel, at);
         frame.paint.Image("interface\\worldmap\\wmap_monster_icon.ddj", {std::floor(s.x - 8.0f), std::floor(s.y - 8.0f), 16.0f, 16.0f});
+    }
+    for (const QuestIcon& icon : questIcons_) {
+        if (view_.Id() != icon.map) continue;
+        const ui::Vec2 s = view_.ToScreen(icon.pixel, at);
+        const ui::Rect box{std::floor(s.x - 16.0f), std::floor(s.y - 16.0f), 32.0f, 32.0f};
+        frame.paint.Image("interface\\worldmap\\wmap_quest_icon.ddj", box);
+        const ui::Vec2 m = frame.pointer.position;
+        if (m.x >= box.x && m.y >= box.y && m.x < box.Right() && m.y < box.Bottom()) frame.interface.ShowTooltip(c_.Text(icon.tipKey), box);
     }
     // The party's members, then the player's arrow (mm_sign_character.ddj, turned by its yaw).
     if (c_.state != nullptr) {
@@ -860,6 +929,11 @@ std::string KeyedPicture(const assets::FileSystem& files, assets::MemorySource& 
     made.Put(path, std::move(out));
     madeOnce.insert(path);
     return path;
+}
+
+void WorldMapQuest(HudContext& c, std::uint32_t quest) {
+    if (c.hud == nullptr) return;
+    if (auto* window = dynamic_cast<WorldMapWindow*>(c.hud->Show(hud::kWorldMap))) window->ShowQuest(quest);
 }
 
 void WorldMapMonsterBox(HudContext& c, bool on) {

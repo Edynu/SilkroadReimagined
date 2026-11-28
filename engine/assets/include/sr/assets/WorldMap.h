@@ -165,6 +165,7 @@ struct WorldMapGuideRow {
     int linkKind = 0, link = 0;                        // AREA
     int regionX = -1, regionZ = -1, placeX = 0, placeY = 0; // MONSTER
     std::vector<std::uint32_t> keys;                        // MONSTER: its areas' pixels in its tiles' pictures
+    bool icon = false; // QUEST: a place (wmap_quest_icon, `codename` its tooltip key), else its monsters ("A,B" in `codename`)
 };
 struct WorldMapGuideTab {
     std::string section, art, labelKey;
@@ -173,6 +174,8 @@ struct WorldMapGuideTab {
 struct WorldMapGuide {
     std::vector<WorldMapGuideTab> tabs; // in service, in the file's order
     std::unordered_map<std::string, std::vector<std::pair<int, int>>> monsterTiles; // codename -> its tiles (x, z)
+    // The QUEST section (no tab in 1.188; the quest list's map button reads it): a quest's codename -> its rows.
+    std::unordered_map<std::string, std::vector<WorldMapGuideRow>> quests;
     // An area's map: the world for "field", else the AREA row of that area linking a map.
     int MapOfArea(const std::string& area) const;
 };

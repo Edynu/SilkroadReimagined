@@ -582,6 +582,8 @@ void ShowWorldMap(HudContext& context, int map); // the window open on that map 
 // The world map's guide shown (the window opened first) on tab `tab` (0 the places, 1 the monsters), its heading `heading`
 // opened and that heading's entry `entry` picked (-1: none): the gallery's and the scripts' way.
 void WorldMapGuideStep(HudContext& context, int tab, int heading, int entry);
+// The quest list's map button: the world map on the quest's NPC, its monsters' tiles tinted, its places' quest icons.
+void WorldMapQuest(HudContext& context, std::uint32_t quest);
 // The world map's monster box (31) ticked or not: the monsters 0..6 levels over the player's marked.
 void WorldMapMonsterBox(HudContext& context, bool on);
 // `source` (a game .ddj) read, its pixels whose ARGB is one of `keys` drawn in `colour` and the rest clear, written once

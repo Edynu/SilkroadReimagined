@@ -277,15 +277,33 @@ int WorldMapGuide::MapOfArea(const std::string& area) const {
 void DecodeWorldMapGuide(std::string_view text, std::string_view regions, WorldMapGuide& out) {
     out.tabs.clear();
     out.monsterTiles.clear();
+    out.quests.clear();
     WorldMapGuideTab* tab = nullptr;
+    bool quests = false;
     Lines(text, [&](const std::vector<std::string_view>& c) {
         if (c.empty()) return;
         if (Trim(c[0]) == "#section") {
-            // "#section  NAME  service  art  label" (MAP_MANAGER: the maps' pages, not a tab).
+            // "#section  NAME  service  art  label" (MAP_MANAGER: the maps' pages, not a tab; QUEST: no tab, its rows the
+            // quest list's map button's).
             tab = nullptr;
+            quests = c.size() > 1 && Trim(c[1]) == "QUEST";
             if (c.size() < 5 || Trim(c[2]) != "1" || Trim(c[1]) == "MAP_MANAGER") return;
             out.tabs.push_back({std::string(Trim(c[1])), Text(c[3]), Text(c[4]), {}});
             tab = &out.tabs.back();
+            return;
+        }
+        if (quests && Trim(c[0]) == "1" && c.size() >= 12) {
+            // QUEST: 2 the quest, 3 its kind (0 its monsters, 1 a place), 4 the area, 5 6 its world pixel, 7 8 its region,
+            // 9 10 its place, 11 the monsters ("A,B") or the place's tooltip key.
+            WorldMapGuideRow r;
+            r.icon = Int(c[3]) == 1;
+            r.area = Text(c[4]);
+            r.regionX = Int(c[7]);
+            r.regionZ = Int(c[8]);
+            r.placeX = Int(c[9]);
+            r.placeY = Int(c[10]);
+            r.codename = Text(c[11]);
+            if (!r.codename.empty()) out.quests[Text(c[2])].push_back(std::move(r));
             return;
         }
         if (tab == nullptr || Trim(c[0]) != "1") return; // out of service, notes

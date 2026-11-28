@@ -2050,6 +2050,34 @@ TEST_CASE("the world map's guide: its two tabs, headings and entries, each entry
     const auto stone = std::find_if(g.tabs[1].rows.begin(), g.tabs[1].rows.end(), [](const WorldMapGuideRow& r) { return r.codename == "MOB_CH_STONEGHOST"; });
     REQUIRE(stone != g.tabs[1].rows.end());
     CHECK(stone->keys == std::vector<std::uint32_t>{0x80000001u, 0x80000003u});
+    // The QUEST section (no tab): 423 rows by quest, a quest's monsters ("A,B") or a place with its tooltip key; every
+    // monster a MONSTER row's, every place's area a map.
+    std::size_t questRows = 0, questPlaces = 0, unknownMonsters = 0;
+    for (const auto& [quest, rows] : g.quests) {
+        for (const WorldMapGuideRow& r : rows) {
+            ++questRows;
+            if (r.icon) {
+                ++questPlaces;
+                CHECK(g.MapOfArea(r.area) >= 0);
+                continue;
+            }
+            for (std::size_t at = 0; at <= r.codename.size();) {
+                std::size_t comma = r.codename.find(',', at);
+                if (comma == std::string::npos) comma = r.codename.size();
+                const std::string m = r.codename.substr(at, comma - at);
+                at = comma + 1;
+                if (std::none_of(g.tabs[1].rows.begin(), g.tabs[1].rows.end(), [&](const WorldMapGuideRow& x) { return x.codename == m; })) ++unknownMonsters;
+            }
+        }
+    }
+    CHECK(questRows == 423);
+    CHECK(questPlaces == 72);
+    MESSAGE("the QUEST rows' monsters the MONSTER tab lacks: " << unknownMonsters);
+    REQUIRE(g.quests.contains("QNO_SD_MA_031"));
+    CHECK(g.quests.at("QNO_SD_MA_031").front().icon);
+    CHECK(g.quests.at("QNO_SD_MA_031").front().codename == "SN_MOB_SD_ANUBIS");
+    REQUIRE(g.quests.contains("QNO_CH_SPECIAL_1"));
+    CHECK(g.quests.at("QNO_CH_SPECIAL_1").front().codename == "MOB_CH_TIGER,MOB_CH_TIGER_CLON");
 }
 
 TEST_CASE("the world map's tables: every map's, floor's and label's pictures (worldmap_mapinfo.txt, worldmap_localinfo.txt)") {
