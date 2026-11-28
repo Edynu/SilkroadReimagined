@@ -132,6 +132,19 @@ int Run(const core::Config& config) {
         }
         if (!known) core::LogWarning("--video {}: not one of the video rows", pair);
     }
+    // --game-rows key=0|1,...: the Game page's rows for this run (the keys of sro_options.cfg's game.<key>, e.g. guide=1); kept
+    // only when the Option window saves.
+    const std::string gameRows = config.GetString("game-rows", "");
+    for (std::string_view rest = gameRows; !rest.empty();) {
+        const std::size_t comma = rest.find(',');
+        const std::string_view pair = rest.substr(0, comma);
+        rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+        if (const std::size_t eq = pair.find('='); eq != std::string_view::npos) {
+            options.game.Set(pair.substr(0, eq), pair.substr(eq + 1) != "0");
+        } else {
+            core::LogWarning("--game-rows {}: key=0 or key=1", pair);
+        }
+    }
     int frameLimit = config.GetInt("frame-limit", options.video.frameLimit); // 0: display rate, -1: none
     const bool vsyncAllowed = config.GetBool("vsync", true);
 

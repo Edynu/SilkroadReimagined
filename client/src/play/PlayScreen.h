@@ -624,6 +624,17 @@ private:
     // The states the event guide watches, once a frame: the level, the hwan gauge, HP, a bad state, the skill points, the
     // league, the party and academy pages, the first move and field, a death in the field then the town.
     void StepEventGuides(ScreenContext& context);
+    // The Game page's Game Guide (the options' byte 0): every 60 s in the world (the original's interface timer 2, 60,000
+    // ms from the world's entry), one of messagetipdata.txt's tips for the player's race (3 any, 0 China, 1 Europe) and
+    // level at random, a Guide line of the system messages (texthelp.txt's SRO_MSGTIP_*: "[Guide] ...").
+    void StepGuideTips(ScreenContext& context);
+    struct GuideTip {
+        int race = 3, lowest = 0, highest = 0;
+        std::string key;
+    };
+    std::vector<GuideTip> guideTips_;
+    bool guideTipsRead_ = false;
+    double nextGuideTip_ = -1.0;
     struct GuideWatch {
         int level = -1;
         std::uint32_t skillPoints = 0;

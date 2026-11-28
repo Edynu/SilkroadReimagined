@@ -67,6 +67,49 @@ void PlayScreen::GuideEvent(int kind, std::string_view value) {
     shared_->session->SendGame(proto::EventGuideMet::kId, proto::Encode(proto::EventGuideMet{bits}));
 }
 
+void PlayScreen::StepGuideTips(ScreenContext& context) {
+    if (replay_ || !shown_) return;
+    if (nextGuideTip_ < 0.0) nextGuideTip_ = context.time + 60.0; // the first a minute after the entry
+    if (context.time < nextGuideTip_) return;
+    nextGuideTip_ = context.time + 60.0;
+    if (context.options == nullptr || !context.options->game.Get("guide")) return;
+    if (!guideTipsRead_) {
+        guideTipsRead_ = true;
+        // messagetipdata.txt: service, id, race (0 China, 1 Europe, 3 any), lowest and highest level, a flag, the text key.
+        if (const auto file = context.files.Read("server_dep\\silkroad\\textdata\\messagetipdata.txt")) {
+            const std::string text = core::DecodeTextFile(file->Bytes());
+            std::size_t at = 0;
+            while (at < text.size()) {
+                std::size_t end = text.find('\n', at);
+                if (end == std::string::npos) end = text.size();
+                std::string line = text.substr(at, end - at);
+                at = end + 1;
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                std::vector<std::string> c;
+                for (std::size_t p = 0;;) {
+                    const std::size_t tab = line.find('\t', p);
+                    c.push_back(line.substr(p, tab == std::string::npos ? std::string::npos : tab - p));
+                    if (tab == std::string::npos) break;
+                    p = tab + 1;
+                }
+                if (c.size() < 7 || c[0] != "1" || c[6].empty()) continue;
+                guideTips_.push_back({std::atoi(c[2].c_str()), std::atoi(c[3].c_str()), std::atoi(c[4].c_str()), c[6]});
+            }
+        }
+        core::LogInfo("game: {} guide tips", guideTips_.size());
+    }
+    const int level = player_.self.level, race = player_.self.race;
+    std::vector<const GuideTip*> fit;
+    for (const GuideTip& t : guideTips_) {
+        if ((t.race == 3 || t.race == race) && t.lowest <= level && level <= t.highest) fit.push_back(&t);
+    }
+    if (fit.empty()) return;
+    const GuideTip& tip = *fit[std::size_t(std::rand()) % fit.size()];
+    if (const std::string line = gui_.data().Text(tip.key); !line.empty() && line != tip.key) {
+        player_.Post(game::GameMessage::Kind::Guide, line, context.time);
+    }
+}
+
 void PlayScreen::StepEventGuides(ScreenContext&) {
     if (!eventGuidesKnown_ || replay_ || !hudContext_.gameGuide || hudContext_.gameGuide() == nullptr) return;
     const game::CharacterStatus& s = player_.self;

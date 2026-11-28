@@ -429,9 +429,9 @@ void OpenGameGuideAt(HudContext& c, std::uint32_t topic) {
 void ShowEventGuide(HudContext& c, std::uint32_t topic) {
     c.eventGuidePage = topic;
     if (c.hud == nullptr || topic == 0) return;
-    // The Option window's Notice Window on (UIIT_STT_EVENTGUIDE_SIGN, "detailed description whenever there is an
-    // important check point"): the guide opens on the page at once, no icon, as the original's.
-    if (c.options != nullptr && c.options->game.Get("eventGuide")) {
+    // The Game page's "Open the guide" on (UIIT_STT_QUICKPARTY_OPEN_GUIDE, the options' byte 0x19 the original's event
+    // guide reads): the guide opens on the page at once, no icon, as the original's.
+    if (c.options != nullptr && c.options->game.Get("quickPartyGuide")) {
         c.hud->Hide(hud::kEventGuide);
         OpenGameGuideAt(c, topic);
         return;

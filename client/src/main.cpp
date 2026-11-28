@@ -13,6 +13,7 @@
 //   --frame-limit N               frames a second (0: the display's rate, -1: none); --vsync false
 //   --look classic|modern-low|modern-high|modern-ultra   this run's look (Classic or the Modern rows)
 //   --video key=value,...         single video rows after the look (sunShadows=2,viewDistance=0, ...)
+//   --game-rows key=0|1,...       the Game page's rows for this run (guide=1: the guide's tips every minute, ...)
 //   --validation, --sync-validation   Vulkan validation layers (the second adds synchronisation checks)
 //   --tools false                 hide the developer tools (F1)
 //   --audio false                 no sound (the device is not opened)

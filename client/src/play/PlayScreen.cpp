@@ -5180,6 +5180,7 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     StepTempleNotices(context);
     StepFortressCountdowns(context);
     StepEventGuides(context);
+    StepGuideTips(context);
     CameraInput(context);
     FollowCamera();
     if (shown_) Interface(context, snapshot);
