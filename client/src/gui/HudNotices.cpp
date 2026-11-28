@@ -238,21 +238,34 @@ void NoticeBanner::Draw(ui::Frame& frame) {
 
 void SystemMenu::Created(ui::Interface& ui) {
     MainFrame::Created(ui);
-    // The customer centre's button goes; the other four stand 34 apart from y 58, and the window
-    // shrinks to them.
-    if (Widget* help = Child(12)) {
-        help->visible = false;
-        help->enabled = false;
+    Arrange(static_cast<bool>(context_.helpRequest));
+}
+
+void SystemMenu::Update(ui::Frame& frame) {
+    MainFrame::Update(frame);
+    if (const bool help = static_cast<bool>(context_.helpRequest); int(help) != arranged_) Arrange(help);
+}
+
+void SystemMenu::Arrange(bool help) {
+    arranged_ = int(help);
+    // The customer centre's button (12): 1.188 takes it away; ours keeps it while help requests are taken (the user's call,
+    // HudContext::helpRequest), between the guide and Restart. The buttons stand 34 apart from y 58, the window fits them.
+    if (Widget* b = Child(12)) {
+        b->visible = help;
+        b->enabled = help;
     }
     float y = 58.0f;
-    for (int id : {10, 11, 13, 14}) {
+    int shown = 0;
+    for (int id : {10, 11, 12, 13, 14}) {
+        if (id == 12 && !help) continue;
         if (Widget* b = Child(id)) {
             b->rect.x = 31.0f;
             b->rect.y = y;
             y += 34.0f;
+            ++shown;
         }
     }
-    constexpr float kButtons = 4.0f;
+    const float kButtons = float(shown);
     if (Widget* tile = Child(5)) tile->rect.h = 28.0f * kButtons;
     if (Widget* border = Child(6)) border->rect.h = 15.0f + 34.0f * kButtons;
     rect.h = 60.0f + 38.0f * kButtons;
@@ -269,6 +282,12 @@ bool SystemMenu::OnNotice(const ui::Notice& notice) {
         case 11:
             visible = false;
             context_.hud->Show(hud::kGameGuide);
+            return true;
+        case 12: // the customer centre: the help request (ours)
+            visible = false;
+#ifdef SR_BUG_REPORTS
+            OpenHelpRequest(context_);
+#endif
             return true;
         case 13: // Restart: no question asked; the server counts down
             visible = false;

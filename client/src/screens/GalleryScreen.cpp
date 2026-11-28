@@ -724,6 +724,19 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             }
             // The reverse return scroll: its box, or the world map's choosing mode
             // (reverse-map[:N]: marker N's destinations listed).
+#ifdef SR_BUG_REPORTS
+            // (help-request: the system menu's help request window, sending to the log; system-menu: the menu with its button.)
+            if (page_ == "system-menu") {
+                hudContext_.helpRequest = [](std::uint8_t, std::string, std::string, std::string) {};
+                hud_.Escape();
+            }
+            if (page_ == "help-request") {
+                hudContext_.helpRequest = [](std::uint8_t category, std::string target, std::string email, std::string text) {
+                    core::LogInfo("gallery: help request {} about '{}' from {}: {}", category, target, email, text);
+                };
+                OpenHelpRequest(hudContext_);
+            }
+#endif
             // (event-guides: the event guide's side icon for page 50005 and the academy's guide icon, side by side.)
             if (page_ == "event-guides") {
                 hudContext_.eventGuidePage = 50005;

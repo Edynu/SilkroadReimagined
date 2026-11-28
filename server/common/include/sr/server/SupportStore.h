@@ -17,7 +17,7 @@
 namespace sr::server {
 
 struct NewTicket {
-    std::string kind;     // "contact" or "bug"
+    std::string kind;     // "contact", "bug" or "help" (a help request from the game: the admin's alone)
     std::string category; // SupportCategories(kind)
     std::string subject, body;
     std::string name, email;

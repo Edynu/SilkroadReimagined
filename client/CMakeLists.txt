@@ -146,7 +146,7 @@ if(SR_AUDIO_OCCLUSION)
 endif()
 # The players' bug reports (the root's SR_BUG_REPORTS): the HUD's button and window.
 if(SR_BUG_REPORTS)
-    target_sources(SroReimagined PRIVATE src/gui/HudBugReport.cpp src/play/PlayBugReport.cpp)
+    target_sources(SroReimagined PRIVATE src/gui/HudBugReport.cpp src/gui/HudHelpRequest.cpp src/play/PlayBugReport.cpp)
     target_compile_definitions(SroReimagined PRIVATE SR_BUG_REPORTS=1)
 endif()
 # The shard a players' build plays on, built into the exe (res/PlayerServer.h.in): its gateway, the servers'

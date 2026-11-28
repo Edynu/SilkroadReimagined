@@ -56,6 +56,26 @@ struct BugReportPart {
     }
 };
 
+// A help request (the original's customer centre, CIFCASRequestHelp: out of service in 1.188, ours brought back on the system
+// menu): its category (kHelpCategories, the window's order), the user it is about (needed for 1, 2, 3 and 5), an e-mail
+// and the text, as the original's limits. Kept as the website's support ticket of kind "help" (the admin's alone); the
+// server answers in the chat as for a bug report.
+inline constexpr std::string_view kHelpCategories[] = {"cannot_move", "bad_manners", "advertising", "account", "bug", "illegal_program", "other"};
+constexpr std::size_t kHelpTargetChars = 17, kHelpEmailChars = 40, kHelpTextChars = 512;
+inline bool HelpNeedsTarget(std::uint8_t category) { return category == 1 || category == 2 || category == 3 || category == 5; }
+struct HelpRequest {
+    static constexpr MessageId kId = 0x1482;
+    std::uint8_t category = 0;
+    std::string target, email, text;
+    template <typename V>
+    void Visit(V& v) {
+        v("category", category);
+        v("target", target, kHelpTargetChars * 4);
+        v("email", email, kHelpEmailChars * 4);
+        v("text", text, kHelpTextChars * 4);
+    }
+};
+
 // The bug reports' range (0x1480-0x149F).
 inline bool IsSupportMessage(MessageId id) { return id >= 0x1480 && id < 0x14A0; }
 

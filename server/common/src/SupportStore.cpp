@@ -35,8 +35,9 @@ std::size_t Length(std::string_view s) {
 const std::vector<std::string>& SupportCategories(const std::string& kind) {
     static const std::vector<std::string> contact = {"account", "report", "suggestion", "other"};
     static const std::vector<std::string> bug = {"gameplay", "graphics", "crash", "connection", "website", "other"};
+    static const std::vector<std::string> help = {"cannot_move", "bad_manners", "advertising", "account", "bug", "illegal_program", "other"};
     static const std::vector<std::string> none;
-    return kind == "contact" ? contact : kind == "bug" ? bug : none;
+    return kind == "contact" ? contact : kind == "bug" ? bug : kind == "help" ? help : none;
 }
 
 std::optional<std::string> CheckTicket(NewTicket& t) {
@@ -45,12 +46,13 @@ std::optional<std::string> CheckTicket(NewTicket& t) {
     t.name = Trim(t.name);
     t.email = Trim(t.email);
     t.clientInfo = Trim(t.clientInfo);
-    if (t.kind != "contact" && t.kind != "bug") return "Choose a message or a bug report.";
+    if (t.kind != "contact" && t.kind != "bug" && t.kind != "help") return "Choose a message or a bug report.";
     const auto& categories = SupportCategories(t.kind);
     if (std::find(categories.begin(), categories.end(), t.category) == categories.end()) return "Choose what it is about.";
     if (t.source != "site" && t.source != "client") return "An unknown source.";
     if (Length(t.subject) < 3 || Length(t.subject) > 120 || !PlainText(t.subject, false)) return "The subject is 3 to 120 characters.";
-    if (Length(t.body) < 10 || Length(t.body) > 5000 || !PlainText(t.body, true)) return "The message is 10 to 5000 characters.";
+    const std::size_t shortest = t.kind == "help" ? 1 : 10; // a help request: the original's (any text)
+    if (Length(t.body) < shortest || Length(t.body) > 5000 || !PlainText(t.body, true)) return "The message is 10 to 5000 characters.";
     if (Length(t.name) > 40 || !PlainText(t.name, false)) return "The name is up to 40 characters.";
     if (!t.email.empty() && !ValidEmail(t.email)) return "That e-mail address does not look right.";
     if (t.jid == 0 && t.email.empty()) return "Give an e-mail address, so we can answer (or log in: the answer then shows on your account page).";

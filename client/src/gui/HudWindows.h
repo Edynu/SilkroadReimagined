@@ -97,6 +97,9 @@ struct HudContext {
     const HudPerformance* performance = nullptr;
     // The bug report's sending (null: no reports, the performance panel shows no report button).
     std::function<void(BugReportForm)> bugReport;
+    // The help request's (the system menu's customer centre; SR_BUG_REPORTS): its category (proto::kHelpCategories), the user
+    // it is about, the e-mail and the text, sent (null: none, its button hidden).
+    std::function<void(std::uint8_t category, std::string target, std::string email, std::string text)> helpRequest;
     game::PlayerState* state = nullptr;
     // The player's guild and union (the guild window; null: none yet), its requests to the server
     // (GuildProtocol.h, encoded; null: offline) and the 1.188 windows' binary layouts by path.
@@ -1551,6 +1554,9 @@ std::uint32_t WornSocketSkill(HudContext& context, int index, bool dragged);
 // The quest windows (HudQuest.cpp): the quest list (Q), the reward window (a quest's page,
 // its reward and its button; `npc` the finisher talked to, 0 to look), the quick window.
 void RegisterQuestWindows(ui::Interface& ui, HudContext& context);
+// The help request (HudHelpRequest.cpp; SR_BUG_REPORTS): its window registered, and opened.
+void RegisterHelpRequestWindow(ui::Interface& ui, HudContext& context);
+void OpenHelpRequest(HudContext& context);
 // The game guide (HudGameGuide.cpp).
 void RegisterGameGuideWindows(ui::Interface& ui, HudContext& context);
 // The guide open on that topic (its tab, its heading opened; 0: as it was).
@@ -1749,10 +1755,13 @@ class SystemMenu : public ui::MainFrame {
 public:
     SystemMenu(const assets::UiLayoutNode& node, HudContext& context) : MainFrame(node), context_(context) {}
     void Created(ui::Interface& ui) override;
+    void Update(ui::Frame& frame) override;
     bool OnNotice(const ui::Notice& notice) override;
 
 private:
+    void Arrange(bool help); // the buttons for whether the help request is taken
     HudContext& context_;
+    int arranged_ = -1; // the help button's state laid out (-1: not yet)
 };
 
 } // namespace sr::client

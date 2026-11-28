@@ -10990,8 +10990,24 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // A build without them (CMake SR_BUG_REPORTS=OFF): the player told once a report, nothing kept.
         (void)player;
         if (m.id == proto::BugReport::kId) TellNotice(peer, "Bug reports are not taken by this server.");
-        return m.id == proto::BugReport::kId || m.id == proto::BugReportPart::kId;
+        if (m.id == proto::HelpRequest::kId) TellNotice(peer, "Help requests are not taken by this server.");
+        return m.id == proto::BugReport::kId || m.id == proto::BugReportPart::kId || m.id == proto::HelpRequest::kId;
 #else
+        if (m.id == proto::HelpRequest::kId) {
+            proto::HelpRequest help;
+            if (!proto::Decode(m.payload, help) || help.category >= std::size(proto::kHelpCategories)) return false;
+            // Counted with the bug reports (kBugReportsPerHour an account).
+            auto& times = bugReportTimes[peer.account];
+            const Clock::time_point now = Clock::now();
+            while (!times.empty() && now - times.front() > std::chrono::hours(1)) times.pop_front();
+            if (times.size() >= kBugReportsPerHour) {
+                TellNotice(peer, "You have sent several reports in the last hour: please wait a while before the next one.");
+                return true;
+            }
+            times.push_back(now);
+            TakeHelpRequest(peer, player, std::move(help));
+            return true;
+        }
         if (m.id == proto::BugReport::kId) {
             proto::BugReport report;
             if (!proto::Decode(m.payload, report) || report.imageBytes > proto::kBugImageMax ||
@@ -11028,6 +11044,48 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
     }
 
 #ifdef SR_BUG_REPORTS
+    // A help request kept as the website's support ticket of kind "help" (the admin's alone): its category, the user it is
+    // about, the e-mail and the text; the player told its number or why not.
+    void TakeHelpRequest(Peer& peer, PlayerWorld& player, proto::HelpRequest help) {
+        static constexpr std::string_view kLabels[] = {"Cannot move", "Bad manners", "Advertising", "Account related", "Bug", "Illegal program", "Others"};
+        NewTicket t;
+        t.kind = "help";
+        t.category = std::string(proto::kHelpCategories[help.category]);
+        t.subject = std::format("{} ({})", kLabels[help.category], player.name);
+        if (!help.target.empty()) t.subject += " about " + help.target;
+        t.body = help.text;
+        if (!help.target.empty()) t.body += "\n\nTarget user: " + help.target;
+        t.name = player.name;
+        t.email = help.email;
+        t.source = "client";
+        t.jid = peer.account;
+        t.address = peer.address;
+        std::string info = std::format("character: {}\ngame server: {} ({})", player.name, config.id, config.name);
+        if (const auto place = world->Where(player.entity)) {
+            info += std::format("\nposition: region {} ({}, {}, {})", place->position.region, std::lround(place->position.x),
+                                std::lround(place->position.y), std::lround(place->position.z));
+        }
+        t.clientInfo = info;
+        if (const auto refusal = CheckTicket(t)) {
+            TellNotice(peer, "The help request was not sent: " + *refusal);
+            return;
+        }
+        database.Submit([this, peerId = peer.id, name = player.name, t = std::move(t)](Database& db) {
+            const auto made = CreateTicket(db, t);
+            const std::int64_t ticket = made ? made->first : 0;
+            completions->Post([this, peerId, name, ticket] {
+                Peer* p = peers->Find(peerId);
+                if (ticket == 0) {
+                    core::LogWarning("{}: {}'s help request could not be saved", config.name, name);
+                    if (p != nullptr) TellNotice(*p, "Help request service registration has failed due to server error.");
+                    return;
+                }
+                core::LogInfo("{}: help request #{} from {}", config.name, ticket, name);
+                if (p != nullptr) TellNotice(*p, std::format("Help request #{} registered: a GM will take care of it after checking the issue.", ticket));
+            });
+        });
+    }
+
     // Kept as the website's support ticket (source "client", the account's), the screenshot in the database; the player
     // told its number or why not.
     void FinishBugReport(Peer& peer, PlayerWorld& player) {

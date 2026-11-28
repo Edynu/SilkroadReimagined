@@ -3149,6 +3149,80 @@ TEST_CASE("Pathfinding: the wall cost keeps a way off the walls: Jangan's specia
     CHECK(game::NavPathLength(from, kept) <= game::NavPathLength(from, plain) * 1.15); // and not much longer
 }
 
+TEST_CASE("Game server: a help request from the game becomes the website's ticket of kind help, the admin's alone") {
+    TestDatabase t;
+    SKIP_WITHOUT_DATABASE(t);
+    std::string error;
+    core::JobSystem jobs(2);
+    server::GameServer game;
+    server::GameServerConfig config;
+    config.listen = Local();
+    config.databaseUrl = t.Url();
+    config.rules = WorldRules();
+    config.reportInterval = 50ms;
+    config.jobs = &jobs;
+    net::NetService net(1);
+    const auto pump = [&] { game.Poll(2ms); };
+    REQUIRE_MESSAGE(game.Start(config, error), error);
+    REQUIRE(server::CreateAccount(t.Db(), "reporter", "secret1", error) == server::CreateAccountResult::Created);
+    bool ok = false;
+    const std::int64_t account = server::FindAccount(t.Db(), "reporter", ok)->id;
+    Client c(net, game.Port(), pump);
+    REQUIRE(c.Greet());
+    proto::LobbyEnter e;
+    e.ticket = server::IssueTicket(t.Db(), account, config.id, 30, error);
+    c.Send(e);
+    proto::LobbyEntered entered;
+    REQUIRE(c.Expect(entered));
+    proto::CharacterCreate m;
+    m.name = "Reporter";
+    m.model = 100;
+    m.chest = 1;
+    m.legs = 2;
+    m.shoes = 3;
+    m.weapon = 10;
+    c.Send(m);
+    proto::LobbyResult r;
+    REQUIRE(c.Expect(r));
+    REQUIRE(r.status == proto::LobbyStatus::Ok);
+    c.Send(proto::CharacterSelect{"Reporter"});
+    REQUIRE(c.Expect(r));
+    c.Send(proto::WorldEnter{});
+    proto::WorldEntered in;
+    REQUIRE(c.Expect(in));
+    REQUIRE(in.status == proto::WorldStatus::Ok);
+
+    // The original's checks are the client's; the server keeps what comes: a bad manners report about another player.
+    proto::HelpRequest help;
+    help.category = 1; // bad manners
+    help.target = "Rude";
+    help.email = "reporter@example.com";
+    help.text = "Insults in the town chat.";
+    c.Send(help);
+    proto::ChatLine line;
+    bool told = false;
+    for (int i = 0; i < 20 && !told; ++i) {
+        if (!c.Expect(line)) break;
+        told = line.kind == proto::ChatKind::Notice && line.text.find("Help request #") != std::string::npos;
+    }
+    REQUIRE(told);
+    const auto tickets = t.Db().Query("SELECT kind, category, source, jid, email, subject, body FROM sro_vt_account.sr_support_tickets");
+    REQUIRE(tickets.Ok());
+    REQUIRE(tickets.Rows() == 1);
+    CHECK(tickets.Text(0, 0) == "help");
+    CHECK(tickets.Text(0, 1) == "bad_manners");
+    CHECK(tickets.Text(0, 2) == "client");
+    CHECK(tickets.Int(0, 3) == account);
+    CHECK(tickets.Text(0, 4) == "reporter@example.com");
+    CHECK(tickets.Text(0, 5).find("Reporter") != std::string::npos);
+    CHECK(tickets.Text(0, 6).find("Target user: Rude") != std::string::npos);
+    // An unknown category closes the connection (a message that does not decode as one).
+    help.category = 7;
+    c.Send(help);
+    for (int i = 0; i < 50; ++i) pump();
+    game.Stop();
+}
+
 TEST_CASE("Game server: a bug report from the game becomes the website's support ticket, its screenshot in the database") {
     TestDatabase t;
     SKIP_WITHOUT_DATABASE(t);

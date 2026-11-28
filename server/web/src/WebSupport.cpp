@@ -63,7 +63,7 @@ json PlayerTickets(Database& db, std::int64_t jid) {
     json a = json::array();
     const QueryResult r = db.Query(std::string("SELECT ") + kTicketColumns +
                                        "FROM sro_vt_account.sr_support_tickets t LEFT JOIN sro_vt_account.tb_user u ON u.jid = t.jid "
-                                       "WHERE t.jid = $1 ORDER BY t.updated_at DESC LIMIT 50",
+                                       "WHERE t.jid = $1 AND t.kind <> 'help' ORDER BY t.updated_at DESC LIMIT 50", // help requests: the admin's alone
                                    {jid});
     for (int i = 0; r.Ok() && i < r.Rows(); ++i) {
         json t = TicketRow(r, i, false);
@@ -90,7 +90,7 @@ json TicketList(Database& db, const std::string& status, const std::string& kind
         params.emplace_back(status);
         where += std::format(" AND t.status = ${}", params.size());
     }
-    if (kind == "contact" || kind == "bug") {
+    if (kind == "contact" || kind == "bug" || kind == "help") {
         params.emplace_back(kind);
         where += std::format(" AND t.kind = ${}", params.size());
     }
@@ -150,7 +150,9 @@ std::optional<std::vector<std::string>> DeleteTicket(Database& db, std::int64_t 
 }
 
 json SupportCounts(Database& db) {
-    json counts = {{"contact", {{"open", 0}, {"answered", 0}, {"closed", 0}}}, {"bug", {{"open", 0}, {"answered", 0}, {"closed", 0}}}};
+    json counts = {{"contact", {{"open", 0}, {"answered", 0}, {"closed", 0}}},
+                   {"bug", {{"open", 0}, {"answered", 0}, {"closed", 0}}},
+                   {"help", {{"open", 0}, {"answered", 0}, {"closed", 0}}}};
     const QueryResult r = db.Query("SELECT kind, status, count(*) FROM sro_vt_account.sr_support_tickets GROUP BY kind, status");
     for (int i = 0; r.Ok() && i < r.Rows(); ++i)
         if (counts.contains(r.Text(i, 0))) counts[r.Text(i, 0)][r.Text(i, 1)] = r.Int(i, 2);

@@ -1,6 +1,8 @@
 #include "play/PlayScreen.h"
 
 #include <stb_image_write.h>
+
+#include "sr/game/SupportProtocol.h"
 #include "gui/ErrorTexts.h"
 #include "sr/game/BetaQuests.h"
 #include "sr/game/TimedServices.h"
@@ -3170,6 +3172,16 @@ void PlayScreen::Interface(ScreenContext& context, FrameSnapshot& snapshot) {
         hudContext_.bugReport = [this](BugReportForm form) { StartBugReport(std::move(form)); };
     } else {
         hudContext_.bugReport = nullptr;
+    }
+    // The system menu's help request (HudHelpRequest.cpp): sent to the game server, kept as the website's ticket.
+    if (!replay_) {
+        hudContext_.helpRequest = [this](std::uint8_t category, std::string target, std::string email, std::string text) {
+            if (replay_ || !shared_ || !shared_->session) return;
+            shared_->session->SendGame(proto::HelpRequest::kId, proto::Encode(proto::HelpRequest{category, std::move(target), std::move(email), std::move(text)}));
+            core::LogInfo("game: help request sent ({})", proto::kHelpCategories[std::min<std::size_t>(category, std::size(proto::kHelpCategories) - 1)]);
+        };
+    } else {
+        hudContext_.helpRequest = nullptr;
     }
 #endif
     hudContext_.state = &player_;
