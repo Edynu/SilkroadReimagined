@@ -91,7 +91,8 @@ struct FrameConstants {
     // now (each 0..1; the wetness and the snow build up and go slowly, WorldScreen's).
     glm::vec4 weather{0.0f};
     // 736: the Metallic Sheen (kMaterialEnvMap): x spheremap_gray, y spheremap_highlight (bindless), z 0 off, 1 the
-    // original's, 2 modern. 752: its colour (the original's texture factor: the environment's diffuse curve).
+    // original's, 2 modern; w the Modern look's reflection probe (bindless; 0 none yet). 752: its colour (the original's
+    // texture factor: the environment's diffuse curve).
     glm::vec4 metal{0.0f};
     glm::vec4 metalColour{0.0f};
     // 768, 784: the camera's right and up (the original's camera-space normal, which picks the sphere map's texel).

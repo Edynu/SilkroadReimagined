@@ -243,6 +243,10 @@ void SceneRenderer::Shutdown() {
     assets_->Release(sunTexture_);
     for (gfx::AssetId id : moonTextures_) assets_->Release(id);
     moonTextures_.clear();
+    device_->DestroyTexture(metalProbe_);
+    device_->DestroyTexture(metalProbeDepth_);
+    if (metalProbeMade_) metalProbePass_.Shutdown();
+    metalProbeMade_ = false;
     device_->DestroyPipeline(blit_);
     device_->DestroyPipeline(probePipeline_);
     device_->DestroyBuffer(probeBuffer_);
@@ -598,9 +602,76 @@ gfx::RenderGraph::Resource SceneRenderer::AddPasses(gfx::RenderGraph& graph, con
                       },
                       [this, &view](rhi::CommandList& cmd, const gfx::RenderGraph&) { DrawReflection(cmd, view); });
     }
+    // The Modern metal sheen's probe (ours): with its row on and the Modern look of it, one face of the cube round the
+    // player a frame (90 degrees each, near 14 so the player's own body stays out of it).
+    metalProbeDrawing_ = false;
+    gfx::RenderGraph::Resource metalProbeTarget = 0;
+    if (video_.current()[6] != 0 && video_.metalSheen != 0 && world_.Live() > 0) {
+        if (!metalProbeMade_) {
+            std::string error;
+            gfx::WorldPass::Limits limits;
+            limits.maxDraws = 1u << 14;
+            limits.arenaVertices = 1u << 18;
+            limits.maxSkinJobs = 256;
+            if (metalProbePass_.Init(*device_, kSceneColor, rhi::Format::D32Float, limits, error)) {
+                rhi::TextureDesc desc;
+                desc.width = kMetalFace * 3;
+                desc.height = kMetalFace * 2;
+                desc.format = kSceneColor;
+                desc.usage = rhi::TextureUsage::RenderTarget;
+                desc.debugName = "metal probe";
+                metalProbe_ = device_->CreateTexture(desc);
+                desc.format = rhi::Format::D32Float;
+                desc.usage = rhi::TextureUsage::DepthStencil;
+                desc.debugName = "metal probe depth";
+                metalProbeDepth_ = device_->CreateTexture(desc);
+                metalProbeMade_ = true;
+                metalProbeFaces_ = 0;
+            } else {
+                core::LogWarning("render: the metal probe: {}", error);
+            }
+        }
+        if (metalProbeMade_) {
+            static const glm::vec3 kDirs[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            const std::uint32_t face = metalProbeFace_ % 6;
+            const glm::vec3 centre(camera.targetX, camera.targetY, camera.targetZ);
+            const glm::vec3 up = (face == 2 || face == 3) ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+            const glm::mat4 look = glm::lookAt(centre, centre + kDirs[face], up);
+            glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 14.0f, 4000.0f);
+            projection[1][1] *= -1.0f;
+            metalProbeViewProj_ = projection * look;
+            glm::mat4 skyProjection = glm::perspective(glm::radians(90.0f), 1.0f, 10.0f, 5000000.0f);
+            skyProjection[1][1] *= -1.0f;
+            metalProbeSkyViewProj_ = skyProjection * glm::mat4(glm::mat3(look));
+            metalProbePass_.SetWaterBlended(false);
+            metalProbeLists_ = metalProbePass_.AddCulling(graph, worldInstances, meshes, world_, assets_->Meshes(), metalProbeViewProj_, skinning,
+                                                          terrainPass_.WaterLevel());
+            if (skinning) {
+                metalProbePass_.AddSkinning(graph, metalProbeLists_, worldInstances, meshes, geometry, palettes, view.worldPalettes, assets_->Geometry(),
+                                            world_, assets_->Meshes());
+            }
+            metalProbeTarget = graph.ImportTexture(metalProbe_, "metal probe");
+            metalProbeDrawing_ = true;
+            graph.AddPass("scene: metal probe", gfx::PassKind::Graphics,
+                          [&](gfx::RenderGraph::Builder& b) {
+                              b.Read(worldInstances, gfx::Use::VertexRead)
+                                  .Read(meshes, gfx::Use::VertexRead)
+                                  .Read(metalProbeLists_.commands, gfx::Use::IndirectRead)
+                                  .Read(metalProbeLists_.counts, gfx::Use::IndirectRead)
+                                  .Read(metalProbeLists_.draws, gfx::Use::VertexRead)
+                                  .Read(metalProbeLists_.arena, gfx::Use::VertexRead)
+                                  .Read(geometry, gfx::Use::VertexRead)
+                                  .Read(geometry, gfx::Use::FragmentRead)
+                                  .Read(geometry, gfx::Use::IndexRead)
+                                  .Write(metalProbeTarget, gfx::Use::ColorWrite);
+                          },
+                          [this, &view](rhi::CommandList& cmd, const gfx::RenderGraph&) { DrawMetalProbe(cmd, view); });
+        }
+    }
     graph.AddPass("scene", gfx::PassKind::Graphics,
                   [&](gfx::RenderGraph::Builder& b) {
                       if (reflectionTarget != 0) b.Read(reflectionTarget, gfx::Use::Sampled);
+                      if (metalProbeTarget != 0) b.Read(metalProbeTarget, gfx::Use::Sampled);
                       b.Read(instances, gfx::Use::VertexRead)
                           .Read(worldInstances, gfx::Use::VertexRead)
                           .Read(meshes, gfx::Use::VertexRead)
@@ -1216,7 +1287,10 @@ std::uint64_t SceneRenderer::FrameConstants(const SceneView& view, bool shadows,
     {
         const auto gray = assets_->Texture(sphereGray_), highlight = assets_->Texture(sphereHighlight_);
         const float mode = video_.current()[6] == 0 ? 0.0f : video_.metalSheen != 0 ? 2.0f : 1.0f;
-        constants.metal = glm::vec4(gray ? float(gray->bindless) : 0.0f, highlight ? float(highlight->bindless) : 0.0f, gray ? mode : 0.0f, 0.0f);
+        // w: the Modern look's probe (bindless), once each of its faces has been drawn; the main scene's passes only (`shadows`:
+        // the probe's own pass writes it, the reflection's and the overlay's do not declare it).
+        const float probe = shadows && metalProbeMade_ && metalProbeFaces_ >= 6 && mode > 1.5f ? float(device_->BindlessIndex(metalProbe_)) : 0.0f;
+        constants.metal = glm::vec4(gray ? float(gray->bindless) : 0.0f, highlight ? float(highlight->bindless) : 0.0f, gray ? mode : 0.0f, probe);
         constants.metalColour = glm::vec4(view.lighting.sunDiffuse, 1.0f);
         // GLM's left-handed look-at: its rows are the camera's right, up and forward.
         constants.cameraRight = glm::vec4(cameraView_[0][0], cameraView_[1][0], cameraView_[2][0], 0.0f);
@@ -1325,6 +1399,39 @@ void SceneRenderer::DrawReflection(rhi::CommandList& cmd, const SceneView& view)
         reflectionPass_.Draw(cmd, reflectViewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::AfterWater);
     }
     cmd.EndPass();
+}
+
+void SceneRenderer::DrawMetalProbe(rhi::CommandList& cmd, const SceneView& view) {
+    SR_ZONE("render: metal probe");
+    const std::uint64_t frame = FrameConstants(view, false);
+    const std::uint32_t face = metalProbeFace_ % 6;
+    rhi::RenderPassDesc pass;
+    pass.color = metalProbe_;
+    pass.depth = metalProbeDepth_;
+    pass.loadColor = true; // the other faces stay
+    cmd.BeginRenderPass(pass);
+    const std::uint32_t x = (face % 3) * kMetalFace, y = (face / 3) * kMetalFace;
+    cmd.SetViewport({float(x), float(y), float(kMetalFace), float(kMetalFace)});
+    cmd.SetScissor({std::int32_t(x), std::int32_t(y), kMetalFace, kMetalFace});
+    if (view.sky.active) {
+        const auto bindless = [&](gfx::AssetId id) -> std::uint32_t {
+            const auto texture = assets_->Texture(id);
+            return texture ? texture->bindless : 0;
+        };
+        gfx::SkyPass::Textures textures;
+        textures.clouds = bindless(cloudTexture_);
+        textures.sun = bindless(sunTexture_);
+        textures.moon = bindless(moonTextures_[static_cast<std::size_t>(std::clamp(view.sky.moonPhase, 0, 28))]);
+        skyPass_.Draw(cmd, metalProbeSkyViewProj_, view.sky, textures, view.seconds, kMetalFace, kMetalFace);
+    }
+    if (frame != 0) {
+        terrainPass_.Draw(cmd, metalProbeViewProj_, assets_->Geometry(), frame);
+        metalProbePass_.Draw(cmd, metalProbeViewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::BeforeWater);
+        metalProbePass_.Draw(cmd, metalProbeViewProj_, assets_->Geometry(), world_, assets_->Meshes(), frame, gfx::WorldPass::Phase::AfterWater);
+    }
+    cmd.EndPass();
+    ++metalProbeFace_;
+    metalProbeFaces_ = std::min<std::uint32_t>(metalProbeFaces_ + 1, 6);
 }
 
 void SceneRenderer::DrawOverlay(rhi::CommandList& cmd, const SceneView& view) {

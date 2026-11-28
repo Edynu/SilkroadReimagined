@@ -264,11 +264,39 @@ float3 ObjectColor(VSOutput input, float3 albedo, float3 normal, out float shado
     return color;
 }
 
+// The reflection probe (SceneRenderer's kMetalFace faces in a 3 x 2 atlas: +x, -x, +y, -y, +z, -z, each drawn with GLM's
+// left-handed look-at and Vulkan's y flip) along a direction: its face, then its texel.
+float3 MetalProbe(uint probe, float3 r) {
+    const float3 a = abs(r);
+    uint face;
+    float3 f, up;
+    if (a.x >= a.y && a.x >= a.z) {
+        face = r.x > 0.0 ? 0 : 1;
+        f = float3(sign(r.x), 0.0, 0.0);
+        up = float3(0.0, 1.0, 0.0);
+    } else if (a.y >= a.z) {
+        face = r.y > 0.0 ? 2 : 3;
+        f = float3(0.0, sign(r.y), 0.0);
+        up = float3(0.0, 0.0, 1.0);
+    } else {
+        face = r.z > 0.0 ? 4 : 5;
+        f = float3(0.0, 0.0, sign(r.z));
+        up = float3(0.0, 1.0, 0.0);
+    }
+    const float3 s = normalize(cross(up, f)), u = cross(f, s);
+    const float z = max(dot(r, f), 1e-4);
+    float2 uv = float2(0.5 + 0.5 * dot(r, s) / z, 0.5 - 0.5 * dot(r, u) / z);
+    uv = clamp(uv, 1.0 / 128.0, 1.0 - 1.0 / 128.0); // not across into the next face
+    uv = (float2(face % 3, face / 3) + uv) / float2(3.0, 2.0);
+    return gTextures[NonUniformResourceIndex(probe)].SampleLevel(gSamplers[1], uv, 0).rgb;
+}
+
 // The Metallic Sheen (gfx::kMaterialEnvMap: a model's environment-map modifier, 1.188's CRTModEnvMap::vf_010): the part's
 // texture alpha masks a shine added onto its colour before the light, as the original's stages: stage 0 the sphere map
 // (spheremap_gray, or spheremap_highlight with kMaterialEnvHighlight) at its texel for the camera-space normal (x 0.8 +
 // 0.5) times the texture factor (the environment's diffuse); stage 1 the part's texture plus its alpha times that, each
-// stage clamped. Ours (Modern): the sky and the sun reflected in its place, stronger at grazing angles.
+// stage clamped. Ours (Modern): what is round the player reflected in its place (SceneRenderer's probe: the scene in six
+// faces round the player; the sky until it is ready), the sun and the effects' lights glinting, stronger at grazing angles.
 float3 MetalSheen(VSOutput input, float4 albedo, float3 normal) {
     const float4 metal = FrameValue(pc.frame, kFrameMetal);
     if ((input.material & (1u << 26)) == 0 || metal.z < 0.5) return albedo.rgb;
@@ -281,11 +309,16 @@ float3 MetalSheen(VSOutput input, float4 albedo, float3 normal) {
     }
     const float3 toEye = normalize(FrameValue(pc.frame, kFrameCamera).xyz - input.world);
     const float3 r = reflect(-toEye, normal);
-    const float4 zenith = FrameValue(pc.frame, kFrameSkyZenith);
-    const float3 horizon = zenith.w > 0.5 ? FrameValue(pc.frame, kFrameSkyHorizon).rgb : FrameValue(pc.frame, kFrameFogColor).rgb;
-    const float3 sky = lerp(horizon * 0.6, zenith.w > 0.5 ? zenith.rgb : horizon, saturate(r.y * 1.4 + 0.3));
     const float fresnel = 0.35 + 0.65 * pow(1.0 - saturate(dot(normal, toEye)), 3.0);
-    float3 shine = sky * factor * fresnel;
+    float3 around;
+    if (metal.w > 0.5) {
+        around = MetalProbe(uint(metal.w), r) * 0.85;
+    } else {
+        const float4 zenith = FrameValue(pc.frame, kFrameSkyZenith);
+        const float3 horizon = zenith.w > 0.5 ? FrameValue(pc.frame, kFrameSkyHorizon).rgb : FrameValue(pc.frame, kFrameFogColor).rgb;
+        around = lerp(horizon * 0.6, zenith.w > 0.5 ? zenith.rgb : horizon, saturate(r.y * 1.4 + 0.3)) * factor;
+    }
+    float3 shine = around * fresnel + FrameEffectGlint(pc.frame, input.world, r, input.position.xy);
     const float4 sun = FrameValue(pc.frame, kFrameSun);
     if (sun.w > 0.0) shine += FrameValue(pc.frame, kFrameSunColour).rgb * (pow(saturate(dot(r, sun.xyz)), 120.0) * 1.5 + pow(saturate(dot(r, sun.xyz)), 12.0) * 0.15) * sun.w;
     return saturate(albedo.rgb + albedo.a * shine);

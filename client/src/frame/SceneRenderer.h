@@ -139,6 +139,17 @@ private:
     // (its right and up turn a normal into the sphere map's texel).
     gfx::AssetId sphereGray_, sphereHighlight_;
     glm::mat4 cameraView_{1.0f};
+    // The Modern metal sheen's reflection probe (ours): the scene round the player (the camera's target) in six faces of
+    // kMetalFace pixels (a 3 x 2 atlas), one face drawn a frame, sampled by the shining parts' reflection; ready once each
+    // face has been drawn.
+    static constexpr std::uint32_t kMetalFace = 128;
+    gfx::WorldPass metalProbePass_;
+    gfx::WorldPass::Lists metalProbeLists_;
+    rhi::TextureHandle metalProbe_, metalProbeDepth_;
+    bool metalProbeMade_ = false, metalProbeDrawing_ = false;
+    std::uint32_t metalProbeFace_ = 0, metalProbeFaces_ = 0;
+    glm::mat4 metalProbeViewProj_{1.0f}, metalProbeSkyViewProj_{1.0f};
+    void DrawMetalProbe(rhi::CommandList& cmd, const SceneView& view);
     glm::mat4 reflectViewProj_{1.0f}, reflectSkyViewProj_{1.0f};
     bool reflecting_ = false;
     void DrawReflection(rhi::CommandList& cmd, const SceneView& view);

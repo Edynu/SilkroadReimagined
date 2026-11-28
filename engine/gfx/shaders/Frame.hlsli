@@ -141,6 +141,39 @@ float3 FrameEffectLight(uint64_t frame, float3 world, float3 n, float2 pixel) {
     return sum;
 }
 
+// The effects' lights mirrored along `r` (the Modern metal sheen's glints): each light of this pixel's tile that reaches
+// the point, a sharp highlight where the reflection points at it; the brightest, as FrameEffectLight.
+float3 FrameEffectGlint(uint64_t frame, float3 world, float3 r, float2 pixel) {
+    const uint count = uint(FrameValue(frame, kFrameWaterCopy).z);
+    if (count == 0) return 0.0;
+    const uint first = kFramePointLights + uint(FrameValue(frame, kFrameLights).x) * 64;
+    const float4 tiles = FrameValue(frame, kFrameLightTiles);
+    const uint2 tile = uint2(pixel / tiles.y);
+    if (tiles.y < 1.0 || tile.x >= uint(tiles.x) || tile.y >= uint(tiles.w)) return 0.0;
+    const uint4 mask = vk::RawBufferLoad<uint4>(frame + uint(tiles.z) + (tile.y * uint(tiles.x) + tile.x) * 16, 16);
+    float3 glint = 0.0;
+    [loop] for (uint word = 0; word < 4; ++word) {
+        uint bits = mask[word];
+        [loop] for (uint step = 0; step < 32; ++step) {
+            if (bits == 0) break;
+            const uint i = word * 32 + firstbitlow(bits);
+            bits &= bits - 1;
+            if (i < count) {
+                const float4 at = FrameValue(frame, first + i * 32);
+                const float3 d = at.xyz - world;
+                const float dist2 = dot(d, d);
+                if (dist2 < at.w * at.w && dist2 > 1e-6) {
+                    const float dist = sqrt(dist2);
+                    const float fall = 1.0 - dist / at.w;
+                    const float facing = saturate(dot(r, d / dist));
+                    glint = max(glint, FrameValue(frame, first + i * 32 + 16).rgb * fall * (pow(facing, 40.0) * 1.5 + pow(facing, 6.0) * 0.12));
+                }
+            }
+        }
+    }
+    return glint;
+}
+
 // Towards the light objects are lit from: the shadows' when they are on (so the lit side and the
 // shadow agree), else the original's fixed direction.
 float3 FrameObjectLight(uint64_t frame) {
