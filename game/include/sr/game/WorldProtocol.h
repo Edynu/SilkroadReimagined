@@ -1510,7 +1510,10 @@ enum class SkillUseStatus : std::uint8_t {
     FortressPosition = 29,
     // A dance (reqc 0x20) while the caster plays no music: none of its songs ('scls') running (0x3032,
     // UIIT_STT_SKILL_USE_FAIL_MUSICAL_RANGE).
-    Music = 30
+    Music = 30,
+    // A skill above the caster's level (0x3008, UIIT_SKILL_USE_FAIL_NOTENOUGHLEVEL: a transform's level); the mask on a
+    // monster not of the general kind (0x3033) or above its level cap (0x3035).
+    Level = 31, MonsterClass = 32, TargetLevel = 33
 };
 // The action list's count (the original's B074 second byte): the commands the server
 // holds for the player, 0, 1 (the one running) or 2 (and one waiting). Two held: the client sends no attack and no

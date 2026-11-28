@@ -399,8 +399,9 @@ const char* FortressErrorKey(std::uint16_t code) {
     case FortressError::ItemNotInFortress: return "UIIT_STT_FORT_ITEMUSE_ERROR_FORTIN";
     case FortressError::ItemWrongTarget:
     case FortressError::ItemTargetState: return "UIIT_SKILL_USE_FAIL_WRONGTARGET";
-    case FortressError::ItemNotInWar:
-    case FortressError::ItemInWar: return "UIIT_STT_FORT_ITEMUSE_ERROR_FORTPERIOD";
+    case FortressError::ItemNotInWar: return "UIIT_STT_FORT_ITEMUSE_ERROR_FORTPERIOD";
+    // A guard's or a summon's item in the war: the original's 0x18EE ("Unable to summon during fortress war.").
+    case FortressError::ItemInWar: return "UIIT_MSG_FORT_SCROLL_FAIL";
     case FortressError::ItemDefender: return "UIIT_STT_FORT_ITEMUSE_ERROR_ONLY_ATTGUILD";
     case FortressError::ItemAttacker: return "UIIT_STT_FORT_ITEMUSE_ERROR_ONLY_DEFENGUILD";
     case FortressError::ItemNotHolder: return "UIIT_MSG_FORT_POSITION_GRANT_FAIL_05";

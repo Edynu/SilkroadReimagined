@@ -52,7 +52,8 @@ using MessageId = std::uint16_t;
 // 11: a states-only skill's hit told (EntityDamaged with kDamageResist, damage 0).
 // 12: TradeScale carries the cargo and its rule (goods, the trader's unit, capacity, the scale, the three-star cap).
 // 13: the event guide's pages met (EventGuideState, EventGuideMet), kept by the server.
-inline constexpr std::uint32_t kProtocolVersion = 13;
+// 14: the skill refusals Level, MonsterClass and TargetLevel (SkillUseStatus 31..33).
+inline constexpr std::uint32_t kProtocolVersion = 14;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

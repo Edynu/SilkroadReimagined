@@ -2847,12 +2847,12 @@ TEST_CASE("transforms: the mask from a normal monster's body, the monster's shap
         f.host.corpses[2001] = {1947, 21, 0, 1};
         f.host.corpses[2002] = {1948, 10, 1, 1};
         CHECK(use(mask, Field::kSelected, t0) == proto::SkillUseStatus::Target); // alive: no body
-        CHECK(use(mask, 2001, t0) == proto::SkillUseStatus::Target);             // above its level
-        CHECK(use(mask, 2002, t0) == proto::SkillUseStatus::Target);             // a champion
+        CHECK(use(mask, 2001, t0) == proto::SkillUseStatus::TargetLevel);        // above its level (0x3035)
+        CHECK(use(mask, 2002, t0) == proto::SkillUseStatus::MonsterClass);       // a champion (0x3033)
         // A thieves' and a hunters' job monster, a quest's (TID4 2, 3, 4: 0x3006).
         for (const int type : {2, 3, 4}) {
             f.host.corpses[2003] = {1949, 10, 0, type};
-            CHECK(use(mask, 2003, t0) == proto::SkillUseStatus::Target);
+            CHECK(use(mask, 2003, t0) == proto::SkillUseStatus::MonsterClass);
         }
         CHECK(f.host.dropped.empty());
         CHECK(use(mask, 2000, t0) == proto::SkillUseStatus::Ok);
@@ -2870,6 +2870,7 @@ TEST_CASE("transforms: the mask from a normal monster's body, the monster's shap
         f.player.stats.level = 20;
         server::SkillCaster c = f.player.Caster();
         CHECK_FALSE(skills.TransformInto(c, *shape, 1946, 21, basic->id, t0));
+        CHECK(f.host.All<proto::SkillUseAnswer>().back().status == proto::SkillUseStatus::Level); // 0x3008
         CHECK(f.player.state.transform.mode == 0);
         CHECK(skills.TransformInto(c, *shape, 1946, 20, basic->id, t0));
         CHECK(f.player.state.transform.mode == 1);

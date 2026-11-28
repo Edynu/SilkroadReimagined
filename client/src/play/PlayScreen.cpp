@@ -808,6 +808,9 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         case proto::SkillUseStatus::Transformed: key = OriginalErrorKey(0x3030); break;
         case proto::SkillUseStatus::Berserk: key = OriginalErrorKey(0x3031); break;
         case proto::SkillUseStatus::ReviveLevel: key = "UIIT_MSG_SKILL_USE_FAIL_RESURRECT"; break;
+        case proto::SkillUseStatus::Level: key = OriginalErrorKey(0x3008); break;
+        case proto::SkillUseStatus::MonsterClass: key = OriginalErrorKey(0x3033); break;
+        case proto::SkillUseStatus::TargetLevel: key = OriginalErrorKey(0x3035); break;
         // The jobs' 0x3018, 0x3022, 0x3019, 0x3021, 0x3006.
         case proto::SkillUseStatus::NotBattlefield: key = "UIIT_MSG_SKILL_USE_FAIL_ITS_NOT_A_BATTLE_FIELD"; break;
         case proto::SkillUseStatus::PartyMember: key = "UIIT_MSG_SKILL_USE_FAIL_CANT_ATTACK_PARTY_MEMBER"; break;

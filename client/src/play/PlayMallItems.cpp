@@ -6,6 +6,7 @@
 #include <array>
 #include <format>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "play/PlayScreen.h"
@@ -19,23 +20,9 @@ namespace sr::client {
 
 namespace proto = game::proto;
 
-const char* MallItemErrorKey(std::uint16_t code) {
-    switch (code) {
-    case 0x1882: return "UIIT_MSG_STRGERR_CANT_MUTATE_EQUIPED_ITEM";
-    case 0x1887: return "UIIT_MSG_STRGERR_ONLY_THE_DEAD_CAN_USE_RESURRECT_SCROLL";
-    case 0x1889: return "UIIT_SKILL_USE_FAIL_CHAR_DEAD";
-    case 0x1894: return "UIIT_SKILL_USE_FAIL_OVERLAP";
-    case 0x18B8: return "UIIT_MSG_COSPETERR_CANT_USE_WRONGOBJECT"; // ours: the original's key for 0x18B8 is not traced
-    case 0x18C6: return "UIIT_MSG_PREMIUM_USE_OVER";
-    case 0x18CC: return "UIIT_MSG_PREMIUM_NOT_USE";
-    case 0x18F8: return "UIIT_MSG_NASRUN_EXTENSION_ITEM_USE_AFTER_AWAKE";
-    case 0x18F9: return "UIIT_MSG_NASRUN_NOT_AWAKE_WEAR_ERROR";
-    case 0x18FA: return "UIIT_CTL_NASRUN_NOT_TRADE";
-    case 0x18FB: return "UIIT_STT_GOLDTIME_PAUSE_ERROR";
-    case 0x18FE: return "UIIT_STT_STORAGE_EXPANSION_USE_ERORR";
-    default: return nullptr;
-    }
-}
+// The mall's items' and services' refusals: the original's one table (ErrorTexts.h; 0x18B8 "The selected item is
+// unusable.", 0x186C the level, ...).
+const char* MallItemErrorKey(std::uint16_t code) { return code >= 0x100 ? OriginalErrorKey(code) : nullptr; }
 
 bool PlayScreen::BerserkScrollRefused(std::uint8_t place, double time) {
     if (!tables_ || !tables_->Usable() || player_.self.berserkLit == 0) return false;

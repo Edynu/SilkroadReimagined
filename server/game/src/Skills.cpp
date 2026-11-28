@@ -335,14 +335,16 @@ bool Skills::Use(SkillCaster& caster, const proto::UseSkill& u, Clock::time_poin
         return false;
     }
     // The mask ('mcap' level cap, item): on a monster's body of the
-    // normal kind and no higher level, not a job's or a quest's monster (0x3033, 0x3006 for
-    // TID4 2, 3 and 4, 0x3035; ours: one answer), the item dropped at the caster's feet, its own,
+    // normal kind and no higher level, not a job's or a quest's monster (0x3033 the kind and the special ones (the
+    // original's 0x3006 for TID4 2, 3 and 4 ours words as the kind), 0x3035 the level), the item dropped at the caster's feet, its own,
     // carrying the monster (ours: at the cast).
     if (route == game::SkillRoute::Mask) {
         const assets::SkillParam cap = assets::FindSkillParam(*skill, assets::SkillTag("mcap"));
         const std::optional<Monsters::Corpse> corpse = u.target != 0 ? host_.MonsterCorpse(u.target) : std::nullopt;
         const bool special = corpse && corpse->type >= 2 && corpse->type <= 4;
-        if (!corpse || corpse->rarity != 0 || special || corpse->level > cap.Int(0)) return refuse(proto::SkillUseStatus::Target);
+        if (!corpse) return refuse(proto::SkillUseStatus::Target);
+        if (corpse->rarity != 0 || special) return refuse(proto::SkillUseStatus::MonsterClass);
+        if (corpse->level > cap.Int(0)) return refuse(proto::SkillUseStatus::TargetLevel);
         caster.mp -= PaidMana(caster, *skill);
         host_.VitalsChanged(caster.entity);
         StartCooldown(caster, *skill, now);
@@ -526,7 +528,7 @@ bool Skills::TransformInto(SkillCaster& holder, const assets::SkillRow& skill, s
     };
     if (holder.dead) return refuse(proto::SkillUseStatus::Dead);
     if (holder.state.berserk) return refuse(proto::SkillUseStatus::Berserk); // 0x3031
-    if (level > holder.stats.level) return refuse(proto::SkillUseStatus::ReviveLevel); // 0x3008 (ours: the level answer)
+    if (level > holder.stats.level) return refuse(proto::SkillUseStatus::Level); // 0x3008
     const std::uint32_t ms = skill.hasDuration && skill.buffDurationMs > 0 ? std::uint32_t(skill.buffDurationMs) : 900000u;
     const SkillState::Buff* buff = AddBuff(holder, skill, ms, now);
     if (buff == nullptr) return refuse(proto::SkillUseStatus::Overlap);

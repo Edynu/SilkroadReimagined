@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "gui/ErrorTexts.h"
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
 #include "sr/game/TimedServices.h"
@@ -124,7 +125,9 @@ const char* JobSuitKey(std::uint16_t code, bool* banner = nullptr) {
     case 0x1864: return with("UIIT_MSG_STRGERR_YOU_ARENT_BUYER_OF_THIS_SPECIALTY", false); // 0x1864's own text not found (inferred)
     case 0x186F: return with("UIIT_MSG_STRGERR_ROBBER_CANT_PICK_HIS_ITEM", false);
     case 0x1807: return with("UIIT_MSG_STRGERR_INVENTORY_FULL", false);
-    default: return nullptr;
+    case 0x189B: return with(nullptr, false); // the change's pending: no line
+    // The rest by the original's table (0x186E a pick-up while a return is read, ...).
+    default: return with(OriginalErrorKey(code), false);
     }
 }
 
