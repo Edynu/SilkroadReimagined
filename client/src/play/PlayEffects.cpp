@@ -673,6 +673,7 @@ void PlayScreen::SetLookChanged(std::uint32_t entity, bool whole, GameAudio* aud
     if (audio != nullptr) audio->PlayUi(whole ? "SND_SETITEM_ACTIVE" : "SND_SETITEM_DEACTIVE");
     const auto* stages = tables_->skillAnimations.Stages(key);
     const std::size_t slot = SlotOf(entity);
+    core::LogInfo("game: {}: {} stages on slot {}", key, stages != nullptr ? stages->size() : 0, slot == StageEffects::kNone ? -1 : int(slot));
     if (stages == nullptr || slot == StageEffects::kNone) return;
     for (const assets::SkillEffectStage& s : *stages) stageEffects_.Play(*world_, slot, s.object, s.start, gfx::EffectSystem::Kind::World);
 }

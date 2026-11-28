@@ -21,7 +21,7 @@ std::pair<std::string, int> CodeAndNumber(const std::string& arg) {
 } // namespace
 
 bool PlayScreen::AlchemyScriptStep(const std::string& verb, const std::string& arg) {
-    if (verb.starts_with("socket-") || verb == "alchemy-page" || verb == "wear") return SocketScriptStep(verb, arg);
+    if (verb.starts_with("socket-") || verb == "alchemy-page" || verb == "wear" || verb == "move") return SocketScriptStep(verb, arg);
     if (verb.starts_with("pop-")) return PopScriptStep(verb, arg); // Magic POP's (PlayMagicPop.cpp)
     if (MallScriptStep(verb, arg)) return true;                    // the item mall's (PlayMall.cpp)
     if (verb != "alchemy" && verb != "alchemy-tab" && verb != "alchemy-put" && verb != "alchemy-go" && verb != "alchemy-yes" && verb != "alchemy-no") {
@@ -89,6 +89,10 @@ bool PlayScreen::SocketScriptStep(const std::string& verb, const std::string& ar
                                           : -1;
         if (place < 0 || wornAt < 0) core::LogWarning("game: wear: no {} to wear", arg);
         else hud_.Request({HudRequest::Kind::MoveItem, place, {}, {}, wornAt});
+    } else if (verb == "move") {
+        // move:FROM,TO: an item moved between two places (a worn piece taken off into the bag: move:0,40).
+        int from = -1, to = -1;
+        if (std::sscanf(arg.c_str(), "%d,%d", &from, &to) == 2) hud_.Request({HudRequest::Kind::MoveItem, from, {}, {}, to});
     } else if (verb == "socket-wear") {
         // The bag's first of it worn, as dropped on the equipment (the alchemy window closed first: it holds the bag).
         const int place = BagPlaceOf(arg);
