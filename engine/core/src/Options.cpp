@@ -219,8 +219,8 @@ bool VideoOptions::Change(int slot, int value) {
     return true;
 }
 
-const std::array<VideoOptions::ExtraRow, 21>& VideoOptions::ExtraRows() {
-    static const std::array<ExtraRow, 21> kRows = {{
+const std::array<VideoOptions::ExtraRow, 23>& VideoOptions::ExtraRows() {
+    static const std::array<ExtraRow, 23> kRows = {{
         {"sunShadows", &VideoOptions::sunShadows, 4, 0},
         {"lightEffects", &VideoOptions::lightEffects, 2, 0},
         {"lensFlare", &VideoOptions::lensFlare, 2, 1},
@@ -242,6 +242,8 @@ const std::array<VideoOptions::ExtraRow, 21>& VideoOptions::ExtraRows() {
         {"volumetricFog", &VideoOptions::volumetricFog, 2, 0},
         {"clouds", &VideoOptions::clouds, 1, 0},
         {"effectGlow", &VideoOptions::effectGlow, 10, 10},
+        {"smoothText", &VideoOptions::smoothText, 1, 0},
+        {"sharpInterface", &VideoOptions::sharpInterface, 1, 0},
     }};
     return kRows;
 }

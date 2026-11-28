@@ -20,4 +20,4 @@ add_library(sr_ui STATIC
 add_library(sr::ui ALIAS sr_ui)
 
 target_include_directories(sr_ui PUBLIC include)
-target_link_libraries(sr_ui PUBLIC sr::core sr::assets PRIVATE stb sr_compile_options)
+target_link_libraries(sr_ui PUBLIC sr::core sr::assets PRIVATE stb freetype sr_compile_options)

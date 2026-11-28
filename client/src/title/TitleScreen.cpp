@@ -280,7 +280,7 @@ void TitleScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         return;
     }
     ui::Font* font = shared_->data.Font();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     ui_.font = font;
     ui_.getClipboard = context.getClipboard;
     ui_.setClipboard = context.setClipboard;
@@ -295,7 +295,7 @@ void TitleScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     fade_.Draw(*kit_, width, height);
     ui_.EndLayer();
     ui_.EndFrame();
-    if (font) atlas_.Sync(context.device, *font); // glyphs drawn for the first time this frame
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0); // glyphs drawn for the first time this frame
     // The screen shows all at once, the interface and the flight together, once the world around
     // the intro, the interface data and its art are in; black until then, and never black again.
     if (!shown_ && world_ && world_->Settled() && textures_->Settled()) {

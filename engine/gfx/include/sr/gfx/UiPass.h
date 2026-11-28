@@ -60,11 +60,14 @@ public:
     // (bindless, the swapchain's size) for commands with a depth; 0: they are drawn as the rest.
     void Draw(rhi::CommandList& cmd, const UiFrame& frame, float width, float height, std::uint32_t sceneOverlay = 0,
               std::uint32_t sceneDepth = 0) const;
+    // The art sampled by its nearest texel (sharp, a scaled interface's pixels made bigger) or linearly (smooth).
+    void SetSharp(bool sharp) { sharp_ = sharp; }
 
 private:
     rhi::Device* device_ = nullptr;
     rhi::PipelineHandle pipeline_;
     rhi::PipelineHandle additivePipeline_; // the same, adding (effect sprites drawn on black)
+    bool sharp_ = false;
 };
 
 } // namespace sr::gfx

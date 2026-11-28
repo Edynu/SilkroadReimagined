@@ -226,7 +226,7 @@ void CharactersScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
         return;
     }
     ui::Font* font = shared_->data.Font();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     ui_.font = font;
     ui_.getClipboard = context.getClipboard;
     ui_.setClipboard = context.setClipboard;
@@ -241,7 +241,7 @@ void CharactersScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     screenFade_.Draw(*kit_, width, height);
     ui_.EndLayer();
     ui_.EndFrame();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     for (const ui::DrawList* list : ui_.DrawOrder()) AppendUi(snapshot.ui, *list);
     context.textInput = ui_.typing();
     // A capture waits for the list, the characters on their slots and the camera's arrival.

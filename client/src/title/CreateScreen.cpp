@@ -343,7 +343,7 @@ void CreateScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     }
     layout_ = shared_->data.Layout(europe_ ? kCreateEuropeLayout : kCreateChinaLayout);
     ui::Font* font = shared_->data.Font();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     ui_.font = font;
     ui_.getClipboard = context.getClipboard;
     ui_.setClipboard = context.setClipboard;
@@ -370,7 +370,7 @@ void CreateScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     screenFade_.Draw(*kit_, width, height);
     ui_.EndLayer();
     ui_.EndFrame();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     for (const ui::DrawList* list : ui_.DrawOrder()) AppendUi(list == under ? snapshot.uiUnder : snapshot.ui, *list);
     // Not in yet: the race's loading picture over it all, its gauge by the town's streaming.
     if (!shown_ && world_) {

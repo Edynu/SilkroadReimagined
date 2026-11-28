@@ -13,10 +13,11 @@
 
 namespace sr::ui {
 
-// A TrueType font rasterised on demand (stb_truetype) into an RGBA atlas:
-// white glyphs with coverage in alpha, plus one white texel for fills. Sizes
-// are em heights in pixels, like GDI's negative lfHeight the original uses.
-// The renderer uploads the atlas when it changed and tells the font its texture.
+// A TrueType font rasterised on demand into an RGBA atlas: white glyphs with coverage in alpha, plus one white texel
+// for fills. Sizes are em heights in pixels, like GDI's negative lfHeight the original uses. Two ways to draw the
+// letters: the original's (the default; 1.188's GetGlyphOutline GGO_BITMAP: hinted by the font's own TrueType
+// instructions, every pixel on or off; FreeType's classic interpreter in mono mode) or smooth (ours, stb_truetype:
+// unhinted, anti-aliased). The renderer uploads the atlas when it changed and tells the font its texture.
 class Font {
 public:
     Font();
@@ -29,6 +30,9 @@ public:
     // the Forgotten World's grade stars with Arial); its glyphs at the same pixel size.
     bool LoadFallback(std::vector<std::byte> ttf, std::string& error);
     bool loaded() const { return font_ != nullptr; }
+    // Smooth letters (ours) or the original's 1-bit ones; a change draws every glyph again.
+    void SetSmooth(bool smooth);
+    bool smooth() const { return smooth_; }
 
     // Width and height of UTF-8 text (one line per '\n').
     Vec2 Measure(std::string_view text, float pixelSize);
@@ -66,10 +70,14 @@ private:
     void ResetAtlas();
 
     struct State;
+    struct Mono;
     std::unique_ptr<State> font_; // stb_truetype font info
+    bool smooth_ = false;
+    void LoadMono();
     std::vector<std::byte> ttf_;
     std::unique_ptr<State> fallback_;
     std::vector<std::byte> fallbackTtf_;
+    std::unique_ptr<Mono> mono_; // FreeType's faces over the bytes above (the original's letters), gone before them
     std::unordered_map<std::uint64_t, Glyph> glyphs_; // (size << 32) | codepoint
     std::vector<std::uint8_t> atlas_;
     int atlasWidth_ = 1024, atlasHeight_ = 1024;

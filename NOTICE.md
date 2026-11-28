@@ -44,5 +44,7 @@ and reviewed and tested by people. See [CONTRIBUTING.md](CONTRIBUTING.md) for ho
 ## Third-party software
 
 The libraries the build fetches (SDL3, Dear ImGui, Vulkan Memory Allocator, OpenAL Soft, Asio, OpenSSL, libpq,
-cpp-httplib, nlohmann/json, stb_truetype, Tracy, doctest, GLM and others) remain under their own licenses; their
+cpp-httplib, nlohmann/json, stb_truetype, FreeType, Tracy, doctest, GLM and others) remain under their own licenses; their
 versions are pinned in `cmake/`. Anyone distributing binaries must carry the notices those licenses require.
+FreeType is used under the FreeType License: portions of this software are copyright © The FreeType Project
+(www.freetype.org). All rights reserved.

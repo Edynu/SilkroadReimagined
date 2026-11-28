@@ -8,6 +8,11 @@
 #define STBTT_STATIC
 #include <stb_truetype.h>
 
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_DRIVER_H
+#include FT_MODULE_H
+
 namespace sr::ui {
 
 struct Font::State {
@@ -15,8 +20,40 @@ struct Font::State {
     int ascent = 0, descent = 0, lineGap = 0;
 };
 
+// FreeType with the classic TrueType interpreter (v35: the font's instructions applied in both directions, as
+// Windows' rasteriser of 1.188's time did), the face and its fallback over the loaded bytes.
+struct Font::Mono {
+    FT_Library library = nullptr;
+    FT_Face face = nullptr, fallback = nullptr;
+    ~Mono() {
+        if (fallback != nullptr) FT_Done_Face(fallback);
+        if (face != nullptr) FT_Done_Face(face);
+        if (library != nullptr) FT_Done_FreeType(library);
+    }
+};
+
 Font::Font() { ResetAtlas(); }
 Font::~Font() = default;
+
+void Font::LoadMono() {
+    mono_.reset();
+    if (ttf_.empty()) return;
+    auto m = std::make_unique<Mono>();
+    if (FT_Init_FreeType(&m->library) != 0) return;
+    FT_UInt version = TT_INTERPRETER_VERSION_35;
+    FT_Property_Set(m->library, "truetype", "interpreter-version", &version);
+    if (FT_New_Memory_Face(m->library, reinterpret_cast<const FT_Byte*>(ttf_.data()), FT_Long(ttf_.size()), 0, &m->face) != 0) return;
+    if (!fallbackTtf_.empty()) {
+        FT_New_Memory_Face(m->library, reinterpret_cast<const FT_Byte*>(fallbackTtf_.data()), FT_Long(fallbackTtf_.size()), 0, &m->fallback);
+    }
+    mono_ = std::move(m);
+}
+
+void Font::SetSmooth(bool smooth) {
+    if (smooth == smooth_) return;
+    smooth_ = smooth;
+    ResetAtlas();
+}
 
 std::uint32_t NextCodepoint(std::string_view s, std::size_t& i) {
     const auto byte = [&](std::size_t at) { return static_cast<std::uint8_t>(s[at]); };
@@ -50,6 +87,7 @@ bool Font::Load(std::vector<std::byte> ttf, std::string& error) {
     }
     stbtt_GetFontVMetrics(&state->info, &state->ascent, &state->descent, &state->lineGap);
     font_ = std::move(state);
+    LoadMono();
     glyphs_.clear();
     ResetAtlas();
     return true;
@@ -67,6 +105,7 @@ bool Font::LoadFallback(std::vector<std::byte> ttf, std::string& error) {
     }
     stbtt_GetFontVMetrics(&state->info, &state->ascent, &state->descent, &state->lineGap);
     fallback_ = std::move(state);
+    LoadMono();
     glyphs_.clear();
     ResetAtlas();
     return true;
@@ -102,6 +141,65 @@ const Font::Glyph& Font::GlyphFor(std::uint32_t codepoint, int pixelSize) {
     const std::uint64_t key = static_cast<std::uint64_t>(pixelSize) << 32 | codepoint;
     if (const auto it = glyphs_.find(key); it != glyphs_.end()) return it->second;
     Glyph glyph;
+    // Where a glyph's pixels go in the atlas (a new row, or the atlas started over when full); false when it started over.
+    const auto place = [&](int w, int h) {
+        if (penX_ + w + 1 > atlasWidth_) {
+            penX_ = 0;
+            penY_ += rowHeight_ + 1;
+            rowHeight_ = 0;
+        }
+        if (penY_ + h + 1 > atlasHeight_) {
+            ResetAtlas();
+            return false;
+        }
+        return true;
+    };
+    const auto placed = [&](int x0, int y0, int w, int h) {
+        glyph.x0 = static_cast<float>(x0);
+        glyph.y0 = static_cast<float>(y0);
+        glyph.x1 = static_cast<float>(x0 + w);
+        glyph.y1 = static_cast<float>(y0 + h);
+        glyph.u0 = static_cast<float>(penX_) / atlasWidth_;
+        glyph.v0 = static_cast<float>(penY_) / atlasHeight_;
+        glyph.u1 = static_cast<float>(penX_ + w) / atlasWidth_;
+        glyph.v1 = static_cast<float>(penY_ + h) / atlasHeight_;
+        dirtyTop_ = std::min(dirtyTop_, penY_);
+        dirtyBottom_ = std::max(dirtyBottom_, penY_ + h);
+        penX_ += w + 1;
+        rowHeight_ = std::max(rowHeight_, h);
+        dirty_ = true;
+    };
+    // The original's letters: hinted at this size, rendered 1-bit (each set bit a full pixel), the hinted advance.
+    if (!smooth_ && mono_ && mono_->face != nullptr) {
+        FT_Face face = mono_->face;
+        FT_UInt index = FT_Get_Char_Index(face, codepoint);
+        if (index == 0 && codepoint != ' ' && mono_->fallback != nullptr) {
+            if (const FT_UInt other = FT_Get_Char_Index(mono_->fallback, codepoint); other != 0) {
+                face = mono_->fallback;
+                index = other;
+            }
+        }
+        if (index == 0 && codepoint != ' ') index = FT_Get_Char_Index(face, '?');
+        if (FT_Set_Pixel_Sizes(face, 0, FT_UInt(pixelSize)) == 0 && FT_Load_Glyph(face, index, FT_LOAD_RENDER | FT_LOAD_TARGET_MONO) == 0) {
+            const FT_GlyphSlot slot = face->glyph;
+            glyph.advance = static_cast<float>((slot->advance.x + 32) >> 6);
+            const FT_Bitmap& b = slot->bitmap;
+            const int w = int(b.width), h = int(b.rows);
+            if (w > 0 && h > 0 && b.pixel_mode == FT_PIXEL_MODE_MONO) {
+                if (!place(w, h)) return GlyphFor(codepoint, pixelSize);
+                for (int y = 0; y < h; ++y) {
+                    const unsigned char* row = b.buffer + static_cast<std::ptrdiff_t>(y) * b.pitch;
+                    for (int x = 0; x < w; ++x) {
+                        std::uint8_t* px = &atlas_[(static_cast<std::size_t>(penY_ + y) * atlasWidth_ + penX_ + x) * 4];
+                        px[0] = px[1] = px[2] = 255;
+                        px[3] = (row[x >> 3] & (0x80 >> (x & 7))) != 0 ? 255 : 0;
+                    }
+                }
+                placed(slot->bitmap_left, -slot->bitmap_top, w, h);
+            }
+        }
+        return glyphs_.emplace(key, glyph).first->second;
+    }
     if (font_) {
         const stbtt_fontinfo* info = &font_->info;
         int index = stbtt_FindGlyphIndex(info, static_cast<int>(codepoint));

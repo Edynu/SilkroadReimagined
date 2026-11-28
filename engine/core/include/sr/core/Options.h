@@ -49,6 +49,8 @@ struct VideoOptions {
     int softParticles = 0;    // effects fade where they meet the scene
     int foliageSway = 0;      // trees and grass move in the wind
     int effectGlow = 10;      // the effects' brightness in tenths: 10 the original's (the default); lower is ours
+    int smoothText = 0;       // the interface's letters: 0 the original's (hinted, 1-bit), 1 smooth (ours, anti-aliased)
+    int sharpInterface = 0;   // the interface's art drawn scaled (the title screens, a larger interface): 0 smooth, 1 sharp
     int characterLighting = 0; // 0 the original's, 1 modern (wrap and rim light)
     int water = 0;            // 0 the original's, 1 modern (refraction, depth colour, caustics, Fresnel, foam)
     int weather = 1;          // 0 none, 1 the original's (rain, snow, lightning), 2 modern (+ wet ground, overcast light)
@@ -66,7 +68,7 @@ struct VideoOptions {
         int max;
         int initial;
     };
-    static const std::array<ExtraRow, 21>& ExtraRows();
+    static const std::array<ExtraRow, 23>& ExtraRows();
     static constexpr int kAntiAliasingChoices = 5;
     // The scene's sample count (1 unless MSAA is chosen).
     std::uint32_t Samples() const { return antiAliasing >= 2 ? 1u << (antiAliasing - 1) : 1u; }

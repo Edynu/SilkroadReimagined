@@ -100,7 +100,7 @@ void UiPass::Draw(rhi::CommandList& cmd, const UiFrame& frame, float width, floa
         cmd.SetScissor({static_cast<std::int32_t>(x0), static_cast<std::int32_t>(y0), static_cast<std::uint32_t>(x1 - x0),
                         static_cast<std::uint32_t>(y1 - y0)});
         push.texture = texture;
-        push.flags = static_cast<std::uint32_t>(rhi::SamplerIndex::LinearClamp) | (dc.premultipliedAlpha ? 0x10000u : 0u) |
+        push.flags = static_cast<std::uint32_t>(sharp_ ? rhi::SamplerIndex::PointClamp : rhi::SamplerIndex::LinearClamp) | (dc.premultipliedAlpha ? 0x10000u : 0u) |
                      (dc.opaque ? 0x20000u : 0u);
         push.mask = dc.mask;
         push.depth = dc.depth;

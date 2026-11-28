@@ -93,6 +93,7 @@ void FrameRenderer::Render(const FrameSnapshot& snapshot) {
                            if (crowd != 0) crowd_.Composite(list);
                            if (scene != 0) scene_.Composite(list);
                            // The UI under the scene's overlay, then the overlay (character windows).
+                           ui_.SetSharp(snapshot.video.sharpInterface != 0);
                            ui_.Draw(list, snapshot.uiUnder, static_cast<float>(width), static_cast<float>(height));
                            // An overlay with a camera of its own is drawn by the window that shows it.
                            const bool overlayInUi = scene != 0 && snapshot.scene.overlayOwnCamera;

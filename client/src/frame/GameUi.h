@@ -41,10 +41,12 @@ inline void AppendUi(gfx::UiFrame& frame, const ui::DrawList& list) {
     }
 }
 
-// A font's atlas on the GPU: made at the first Sync, then the rows new glyphs changed.
+// A font's atlas on the GPU: made at the first Sync, then the rows new glyphs changed. `smooth`: the Video page's
+// "Interface text" (the original's 1-bit letters, or smooth ones); a change draws the glyphs again.
 class FontAtlas {
 public:
-    void Sync(rhi::Device& device, ui::Font& font) {
+    void Sync(rhi::Device& device, ui::Font& font, bool smooth = false) {
+        font.SetSmooth(smooth);
         const auto width = static_cast<std::uint32_t>(font.atlasWidth()), height = static_cast<std::uint32_t>(font.atlasHeight());
         const auto pixels = std::as_bytes(std::span(font.atlasPixels()));
         if (!texture_) {

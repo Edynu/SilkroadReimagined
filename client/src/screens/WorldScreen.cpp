@@ -1889,7 +1889,7 @@ void WorldScreen::DrawHud(ScreenContext& context, FrameSnapshot& snapshot) {
     hud_.Outline({12, 12, width + 20, line * 3 + 16}, ui::Rgba(200, 170, 110, 220));
     for (int i = 0; i < 3; ++i) font.Draw(hud_, lines[i], {22, 20 + line * static_cast<float>(i)}, size, ui::Rgba(240, 230, 210));
     // New glyphs go to the GPU before the frame that draws them.
-    hudAtlas_.Sync(context.device, font);
+    hudAtlas_.Sync(context.device, font, context.options != nullptr && context.options->video.smoothText != 0);
     AppendUi(snapshot.ui, hud_);
 }
 

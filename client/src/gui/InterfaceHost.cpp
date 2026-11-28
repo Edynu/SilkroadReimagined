@@ -25,7 +25,7 @@ void InterfaceHost::Frame(ScreenContext& context, FrameSnapshot& snapshot, const
     if (!interface_) return;
     const float width = float(context.device.SwapchainWidth()), height = float(context.device.SwapchainHeight());
     ui::Font* font = data_.Font();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     ui_.font = font;
     ui_.getClipboard = context.getClipboard;
     ui_.setClipboard = context.setClipboard;
@@ -38,7 +38,7 @@ void InterfaceHost::Frame(ScreenContext& context, FrameSnapshot& snapshot, const
     }
     if (windows) interface_->Frame(ui_, scale, context.time, float(context.dt));
     ui_.EndFrame();
-    if (font) atlas_.Sync(context.device, *font);
+    if (font) atlas_.Sync(context.device, *font, context.options != nullptr && context.options->video.smoothText != 0);
     for (const ui::DrawList* list : ui_.DrawOrder()) AppendUi(snapshot.ui, *list);
     if (ui_.typing()) {
         context.textInput = true;
