@@ -5,6 +5,12 @@
 // dungeons' teleport circles (`system\system_dungeonpotal.efp` on each zone of the tomb's floors, its door
 // outside Jangan, Donhwang's entrance room), Jangan's portal stone's glow, lamps,
 // flames. Every one the 1.188 files hold hangs at the model's root with an offset in its own space.
+//
+// The Video page's Light Effect (slot 7; 1.188's device 0x1113154, read by CRTModParticle's particles, CObjRenderer::vf_04C
+// and 0xC81450) shows them: off, every one fades out; on, they fade in, those whose modifier's second flag is set (the
+// lamps: cj_pal_lamp_light, the lanterns, the bonfire) only at night (the environment's time past 0.75 or before 0.25,
+// the device's 0x1113158 set by SWorld::vf_010). Ours: a one-second fade (the original's rate not read), and no
+// occlusion test (the original's CVisibleChecker fades one out behind a wall; ours are depth-tested).
 
 #include <array>
 #include <cstdint>
@@ -18,11 +24,38 @@
 
 namespace sr::client {
 
-// Starts `info`'s attached effects where an instance stands (`world`: rows of its 3 x 4 transform);
-// their handles, for Stop when it goes.
-inline std::vector<std::uint32_t> StartAttachedEffects(gfx::EffectSystem& effects, const gfx::ModelInfo& info, const std::array<float, 12>& world) {
-    std::vector<std::uint32_t> handles;
-    if (info.ambientParticles.empty()) return handles;
+// What shows the attached effects: the Light Effect row, and the night (for the lamps).
+struct AttachedLighting {
+    bool on = true;
+    bool night = false;
+    bool operator==(const AttachedLighting&) const = default;
+};
+struct AttachedEffect {
+    gfx::EffectSystem::Request request;
+    bool nightOnly = false;
+    std::uint32_t handle = 0; // 0 while not shown
+};
+using AttachedEffects = std::vector<AttachedEffect>;
+
+// Each effect started (fading in) or released (fading out) as `lighting` wants it.
+inline void ApplyAttachedLighting(gfx::EffectSystem& effects, AttachedEffects& list, AttachedLighting lighting) {
+    for (AttachedEffect& e : list) {
+        const bool wanted = lighting.on && (!e.nightOnly || lighting.night);
+        if (wanted && e.handle == 0) {
+            e.handle = effects.Start(e.request);
+        } else if (!wanted && e.handle != 0) {
+            effects.Release(e.handle);
+            e.handle = 0;
+        }
+    }
+}
+
+// `info`'s attached effects where an instance stands (`world`: rows of its 3 x 4 transform), shown as `lighting` wants;
+// kept for StopAttachedEffects when it goes.
+inline AttachedEffects StartAttachedEffects(gfx::EffectSystem& effects, const gfx::ModelInfo& info, const std::array<float, 12>& world,
+                                            AttachedLighting lighting) {
+    AttachedEffects list;
+    if (info.ambientParticles.empty()) return list;
     // glm is column-major: m[column][row].
     glm::mat4 placed(1.0f);
     for (int row = 0; row < 3; ++row) {
@@ -40,14 +73,18 @@ inline std::vector<std::uint32_t> StartAttachedEffects(gfx::EffectSystem& effect
             at = glm::rotate(at, p.turn[2], glm::vec3(0, 0, 1));
         }
         request.at = at;
-        if (const std::uint32_t h = effects.Start(request); h != 0) handles.push_back(h);
+        request.fadeIn = request.fadeOut = 1.0f;
+        list.push_back({request, (p.flags[1] & 1u) != 0, 0u});
     }
-    return handles;
+    ApplyAttachedLighting(effects, list, lighting);
+    return list;
 }
 
-inline void StopAttachedEffects(gfx::EffectSystem& effects, std::vector<std::uint32_t>& handles) {
-    for (const std::uint32_t h : handles) effects.Stop(h);
-    handles.clear();
+inline void StopAttachedEffects(gfx::EffectSystem& effects, AttachedEffects& list) {
+    for (const AttachedEffect& e : list) {
+        if (e.handle != 0) effects.Stop(e.handle);
+    }
+    list.clear();
 }
 
 } // namespace sr::client

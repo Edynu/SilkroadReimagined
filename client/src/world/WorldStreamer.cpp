@@ -197,8 +197,13 @@ void WorldStreamer::Unplace(gfx::AssetStore& assets, Region& region, std::vector
     region.placed = false;
 }
 
-void WorldStreamer::StartEffects(const gfx::AssetStore& assets) {
-    if (effects_ == nullptr || effectsPending_.empty()) return;
+void WorldStreamer::StartEffects(const gfx::AssetStore& assets, AttachedLighting lighting) {
+    if (effects_ == nullptr) return;
+    if (!(lighting == lighting_)) {
+        lighting_ = lighting;
+        for (auto& [key, placed] : placed_) ApplyAttachedLighting(*effects_, placed.effects, lighting_);
+    }
+    if (effectsPending_.empty()) return;
     std::erase_if(effectsPending_, [&](std::uint32_t key) {
         const auto placed = placed_.find(key);
         if (placed == placed_.end()) return true; // gone again
@@ -206,7 +211,7 @@ void WorldStreamer::StartEffects(const gfx::AssetStore& assets) {
         if (state == gfx::AssetState::Failed) return true;
         if (state != gfx::AssetState::Resident) return false;
         if (const std::shared_ptr<const gfx::ModelInfo> info = assets.Model(placed->second.model)) {
-            placed->second.effects = StartAttachedEffects(*effects_, *info, placed->second.world);
+            placed->second.effects = StartAttachedEffects(*effects_, *info, placed->second.world, lighting_);
         }
         return true;
     });

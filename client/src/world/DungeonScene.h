@@ -19,6 +19,7 @@
 
 #include "frame/FrameSnapshot.h"
 #include "sr/assets/Dungeon.h"
+#include "world/AttachedEffects.h"
 #include "sr/gfx/AssetStore.h"
 #include "sr/gfx/Effects.h"
 
@@ -69,7 +70,7 @@ public:
     // The shown blocks' and objects' own effects (world/AttachedEffects.h: the teleport circles on the
     // zones, flames, lights), started once each model is in, stopped as its block goes; null: none.
     void SetEffects(gfx::EffectSystem* effects) { effects_ = effects; }
-    void StartEffects(const gfx::AssetStore& assets);
+    void StartEffects(const gfx::AssetStore& assets, AttachedLighting lighting);
 
 private:
     void Prepare(); // the lights' table, once read
@@ -95,10 +96,11 @@ private:
         std::vector<std::string> models; // the paths they show (one each)
         std::vector<std::array<float, 12>> worlds; // where each stands
         std::vector<bool> effectsStarted;
-        std::vector<std::uint32_t> effects; // their models' own effects
+        AttachedEffects effects; // their models' own effects
         bool effectsPending = false;
     };
     gfx::EffectSystem* effects_ = nullptr;
+    AttachedLighting lighting_;
     std::unordered_map<std::uint32_t, BlockInstances> blocks_;
     struct Model {
         gfx::AssetId id;

@@ -134,6 +134,12 @@ public:
     const OrbitCamera& Camera() const { return camera_; }
     // The time of day shown, 0..1 (0 midnight, 0.5 noon): --time-of-day, else the game clock.
     float TimeOfDay() const { return fixedTime_ >= 0.0f ? std::min(fixedTime_, 1.0f) : clock_.TimeOfDay(); }
+    // What shows the models' own effects: the Video page's Light Effect (slot 7), and the night (the environment's time
+    // past 0.75 or before 0.25, as the original's) for the lamps.
+    AttachedLighting AttachedLight(const ScreenContext& context) const {
+        const float t = TimeOfDay();
+        return {context.options == nullptr || context.options->video.current()[7] != 0, t > 0.75f || t < 0.25f};
+    }
     // The in-game view (C6c), in the world's coordinates (a region and a place in it):
     // where a point is relative to the origin region,
     glm::vec3 OriginRelative(const game::proto::WorldPosition& p) const {

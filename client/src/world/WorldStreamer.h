@@ -28,6 +28,7 @@
 #include "sr/assets/Terrain.h"
 #include "sr/game/NavLoader.h"
 #include "sr/gfx/AssetStore.h"
+#include "world/AttachedEffects.h"
 #include "sr/gfx/Effects.h"
 
 namespace sr::client {
@@ -58,8 +59,9 @@ public:
     // started once each model is in and stopped as it goes; null: none. Before Start; it outlives the
     // streamer's use of it.
     void SetEffects(gfx::EffectSystem* effects) { effects_ = effects; }
-    // Starts the effects of the objects whose models came in since the last call.
-    void StartEffects(const gfx::AssetStore& assets);
+    // Starts the effects of the objects whose models came in since the last call; `lighting` (the Light Effect row, the
+    // night) shows or hides them all when it changed.
+    void StartEffects(const gfx::AssetStore& assets, AttachedLighting lighting);
 
     // Map objects that move (a hawk circling over the desert, res\nature\china\hawk.bsr with its hawk_fly.ban): a
     // placed object whose model has a skeleton and clips loops its standing clip (its "default" set's state 0, else its first
@@ -149,7 +151,7 @@ private:
         std::uint32_t uses = 0;   // regions listing it that are placed
         gfx::AssetId model;
         std::array<float, 12> world{}; // where it stands (its instance's rows)
-        std::vector<std::uint32_t> effects; // its model's own effects, once started
+        AttachedEffects effects; // its model's own effects, once started
     };
     struct ObjectModel {
         gfx::AssetId model;
@@ -169,6 +171,7 @@ private:
     std::unordered_map<std::uint32_t, Placed> placed_;      // by PlacedKey
     gfx::EffectSystem* effects_ = nullptr;
     std::vector<std::uint32_t> effectsPending_;             // placed keys whose models' effects are not started yet
+    AttachedLighting lighting_;
     std::vector<std::uint32_t> animationsPending_;          // placed keys whose models are not in yet (SetPalettes)
     std::vector<Animated> animated_;
     std::vector<std::uint32_t> freeSmall_, freeLarge_;      // palette slots' first matrices

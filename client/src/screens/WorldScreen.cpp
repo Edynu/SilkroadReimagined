@@ -1943,10 +1943,10 @@ void WorldScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
             core::LogError("world: {}", dungeon_->Error());
             reported_ = true;
         }
-        dungeon_->StartEffects(context.assets); // the blocks' own: the teleport circles, flames
+        dungeon_->StartEffects(context.assets, AttachedLight(context)); // the blocks' own: the teleport circles, flames
     } else {
         streamer_.Update(context.assets, position, velocity, snapshot.worldCommands);
-        streamer_.StartEffects(context.assets); // the map objects' own: the portal glows, lamps, the tomb's door
+        streamer_.StartEffects(context.assets, AttachedLight(context)); // the map objects' own: the portal glows, lamps, the tomb's door
         streamer_.StartAnimations(context.assets, snapshot.worldCommands); // the moving ones (a hawk)
     }
     if (!cameraPlaced_ && !dungeon_) {

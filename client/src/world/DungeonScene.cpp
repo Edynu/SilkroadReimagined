@@ -212,8 +212,12 @@ float DungeonScene::Progress(const gfx::AssetStore& assets) const {
     return static_cast<float>(done) / static_cast<float>(models_.size());
 }
 
-void DungeonScene::StartEffects(const gfx::AssetStore& assets) {
+void DungeonScene::StartEffects(const gfx::AssetStore& assets, AttachedLighting lighting) {
     if (effects_ == nullptr) return;
+    if (!(lighting == lighting_)) {
+        lighting_ = lighting;
+        for (auto& [b, instances] : blocks_) ApplyAttachedLighting(*effects_, instances.effects, lighting_);
+    }
     for (auto& [b, instances] : blocks_) {
         if (!instances.effectsPending) continue;
         bool pending = false;
@@ -228,7 +232,7 @@ void DungeonScene::StartEffects(const gfx::AssetStore& assets) {
             instances.effectsStarted[i] = true;
             if (state != gfx::AssetState::Resident) continue;
             if (const std::shared_ptr<const gfx::ModelInfo> info = assets.Model(model->second.id)) {
-                std::vector<std::uint32_t> started = StartAttachedEffects(*effects_, *info, instances.worlds[i]);
+                AttachedEffects started = StartAttachedEffects(*effects_, *info, instances.worlds[i], lighting_);
                 instances.effects.insert(instances.effects.end(), started.begin(), started.end());
             }
         }
