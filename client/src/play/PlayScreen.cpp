@@ -1319,6 +1319,7 @@ void PlayScreen::ForgetEntities() {
     prune(lookVersions_);
     prune(setsWhole_);
     prune(structureStages_);
+    prune(battleDresses_);
     prune(speech_);
     prune(gaps_);
     prune(gapsAsked_);
@@ -4499,13 +4500,20 @@ const WorldScreen::StageLook* PlayScreen::LookOf(ScreenContext& context, const g
         const float ratio = s->maxHp > 0 ? float(e.look.hp) / float(s->maxHp) : 0.0f;
         structureStage = (s->state & 1) != 0 || s->maxHp == 0 ? 2 : e.look.hp >= s->maxHp ? 0 : ratio <= 0.6f ? 1 : 0;
     }
+    // The battle dress (a player's; the team events, the fortress war).
+    const game::BattleDress battle =
+        e.kind == proto::EntityKind::Character && e.id != kPreviewId && !IsNpc(e) ? BattleDressFor(context, e) : game::BattleDress::None;
     // Dressed again when what it wears changed.
     if (const auto it = looks_.find(e.id); it != looks_.end()) {
-        if (lookVersions_[e.id] == e.lookVersion && (structureStage < 0 || structureStages_[e.id] == structureStage)) return &it->second;
+        const auto dress = battleDresses_.find(e.id);
+        const game::BattleDress before = dress != battleDresses_.end() ? dress->second : game::BattleDress::None;
+        if (lookVersions_[e.id] == e.lookVersion && (structureStage < 0 || structureStages_[e.id] == structureStage) && before == battle) return &it->second;
         looks_.erase(it);
     }
     lookVersions_[e.id] = e.lookVersion;
     if (structureStage >= 0) structureStages_[e.id] = structureStage;
+    if (battle != game::BattleDress::None) battleDresses_[e.id] = battle;
+    else battleDresses_.erase(e.id);
     if (!tables_->Usable()) return nullptr;
     std::vector<std::uint32_t> worn;
     std::vector<std::uint8_t> plus;
@@ -4589,8 +4597,10 @@ const WorldScreen::StageLook* PlayScreen::LookOf(ScreenContext& context, const g
     }
     assets::DressedCharacter dressed;
     std::string error;
+    const assets::VisualChangeTable::BattleDress* battleDress =
+        battle != game::BattleDress::None ? tables_->visuals.BattleDressOf(game::BattleDressMaterial(battle)) : nullptr;
     if (!assets::Dress(context.files, tables_->characters, tables_->items, e.look.model, worn, e.look.height, dressed, error, plus,
-                       &tables_->equipGlows, tables_->visuals.Size() > 0 ? &tables_->visuals : nullptr)) {
+                       &tables_->equipGlows, tables_->visuals.Size() > 0 ? &tables_->visuals : nullptr, true, battleDress)) {
         core::LogWarning("game: {}: {}", e.look.name, error);
         return nullptr;
     }

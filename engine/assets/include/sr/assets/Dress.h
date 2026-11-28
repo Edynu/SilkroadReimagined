@@ -57,22 +57,35 @@ int AvatarSlot(const ItemRow& row);
 // worn item's visual covers (Slot: 0x01 head, 0x02 chest, 0x04 shoulders, 0x08 hands, 0x10 legs, 0x20 feet, 0x40
 // weapon, 0x80 shield, 0x0700 the suits' own) and its priority. Columns: Service, ID, Name, ConditionID, AttachType,
 // Pram1 (the item's type: TID1 << 2 | TID2 << 5 | TID3 << 7 | TID4 << 11), Pram2..4, StrPram1..4, Slot, OverlapSlot,
-// OverlapSlotGroup, Priority, .... The avatars' rows (ConditionID 2)
+// OverlapSlotGroup, Priority, MaterialID, AnimationName, BsrName(M), BsrName(F). The avatars' rows (ConditionID 2)
 // are by the type and Pram2, which an avatar's Param7 names (measured: a hat's 513 = 0x0201, a dress's 574 = 0x023E).
+// The large battle's dress (ConditionID 5, the rows "Green", "Red", "Blue"): one outfit over the head to the feet and
+// the suits' bits (0x073F, priority 40), its colour the material set MaterialID (0, 3, 4) of its model
+// (res\item\etc\fort_man.bsr / fort_woman.bsr).
 class VisualChangeTable {
 public:
     struct Row {
         std::uint16_t slots = 0, overlap = 0;
         int group = 0, priority = 0;
     };
+    struct BattleDress {
+        std::uint16_t slots = 0;
+        int priority = 0;
+        std::uint32_t material = 0; // the model's material set
+        std::string male, female;   // its .bsr for each sex
+    };
     bool Load(const FileSystem& fs, std::string& error);
     bool Parse(std::string_view utf8Text, std::string& error);
     const Row* ForItem(const ItemRow& row) const;
+    // The battle dress of that material set (0 green, 3 red, 4 blue); null when the table has none.
+    const BattleDress* BattleDressOf(std::uint32_t material) const;
     std::size_t Size() const { return byType_.size(); }
+    std::size_t BattleDresses() const { return battle_.size(); }
 
 private:
     std::unordered_map<std::uint32_t, Row> byType_;
     std::unordered_map<std::uint64_t, Row> byAvatar_;
+    std::vector<BattleDress> battle_;
 };
 // The animation set a weapon puts the body in ("default" without one).
 std::string StanceOf(const ItemRow* weapon);
@@ -101,10 +114,12 @@ bool SplitGlow(std::string& path, EquipGlow& glow);
 // meet those covered is not drawn: a thief's suit hides the armour, a trader's or hunter's pack is drawn over it; the
 // default garments only where nothing shown covers the chest or the legs (without: every item drawn).
 // `garments` false: no default garments on an empty chest or legs (a bandit's figure).
+// `battle` (with `visuals`): the battle dress worn too, at its priority like a worn visual: over the armour and the
+// avatars, under a job suit; its model by the figure's sex in its material set ("path.bsr#setN", AssembleOutfit).
 bool Dress(const FileSystem& fs, const CharacterTable& characters, const ItemTable& items, std::uint32_t model,
            std::span<const std::uint32_t> worn, std::uint8_t shape, DressedCharacter& out, std::string& error,
            std::span<const std::uint8_t> plus = {}, const EquipGlowTable* glows = nullptr, const VisualChangeTable* visuals = nullptr,
-           bool garments = true);
+           bool garments = true, const VisualChangeTable::BattleDress* battle = nullptr);
 
 // --- The jobs' bandits ------------------------------------------------------------------
 // A thief or hunter monster (characterdata 1/2/1/2, 1/2/1/3) has no model of its own: the 1.188 client draws it as a

@@ -106,6 +106,7 @@ bool VisualChangeTable::Load(const FileSystem& fs, std::string& error) {
 bool VisualChangeTable::Parse(std::string_view text, std::string& error) {
     byType_.clear();
     byAvatar_.clear();
+    battle_.clear();
     std::vector<std::string_view> c;
     for (std::size_t start = 0; start < text.size();) {
         const std::size_t end = std::min(text.find('\n', start), text.size());
@@ -117,6 +118,16 @@ bool VisualChangeTable::Parse(std::string_view text, std::string& error) {
             const std::size_t tab = std::min(line.find('\t', from), line.size());
             c.push_back(TrimCell(line.substr(from, tab - from)));
             from = tab + 1;
+        }
+        if (c.size() >= 21 && Number(c[0]) == 1 && Number(c[3]) == 5) { // the battle dress
+            BattleDress dress;
+            dress.slots = std::uint16_t(Number(c[13]));
+            dress.priority = int(Number(c[16]));
+            dress.material = std::uint32_t(Number(c[17]));
+            dress.male = c[19] != "xxx" ? std::string(c[19]) : std::string();
+            dress.female = c[20] != "xxx" ? std::string(c[20]) : std::string();
+            battle_.push_back(std::move(dress));
+            continue;
         }
         if (c.size() < 17 || Number(c[0]) != 1 || (Number(c[3]) != 1 && Number(c[3]) != 2)) continue; // in service, the equipment's, the avatars'
         Row row;
@@ -135,6 +146,13 @@ bool VisualChangeTable::Parse(std::string_view text, std::string& error) {
         return false;
     }
     return true;
+}
+
+const VisualChangeTable::BattleDress* VisualChangeTable::BattleDressOf(std::uint32_t material) const {
+    for (const BattleDress& d : battle_) {
+        if (d.material == material) return &d;
+    }
+    return nullptr;
 }
 
 const VisualChangeTable::Row* VisualChangeTable::ForItem(const ItemRow& row) const {
@@ -242,7 +260,8 @@ bool SplitGlow(std::string& path, EquipGlow& glow) {
 
 bool Dress(const FileSystem& fs, const CharacterTable& characters, const ItemTable& items, std::uint32_t model,
            std::span<const std::uint32_t> worn, std::uint8_t shape, DressedCharacter& out, std::string& error,
-           std::span<const std::uint8_t> plus, const EquipGlowTable* glows, const VisualChangeTable* visuals, bool garments) {
+           std::span<const std::uint8_t> plus, const EquipGlowTable* glows, const VisualChangeTable* visuals, bool garments,
+           const VisualChangeTable::BattleDress* battle) {
     out = DressedCharacter{};
     const ObjectRow* figure = characters.Find(model);
     if (figure == nullptr) {
@@ -279,19 +298,29 @@ bool Dress(const FileSystem& fs, const CharacterTable& characters, const ItemTab
         if (row != nullptr && wornClass == 0) wornClass = ArmourClass(*row);
     }
     // What is drawn: with the visual table, by priority (the lowest number first), each shown covering its slots and
-    // one meeting those covered left out (unless both share an overlap group); without it, everything.
+    // one meeting those covered left out (unless both share an overlap group); without it, everything. The battle
+    // dress takes its turn among them (place kSlots in the order).
     bool shown[kSlots] = {};
+    bool battleShown = false;
     std::uint32_t covered = 0;
     if (visuals != nullptr) {
-        int order[kSlots];
-        for (int i = 0; i < kSlots; ++i) order[i] = i;
+        int order[kSlots + 1];
+        for (int i = 0; i <= kSlots; ++i) order[i] = i;
         const auto priorityOf = [&](int slot) {
+            if (slot == kSlots) return battle != nullptr ? battle->priority : 250;
             const VisualChangeTable::Row* v = slots[slot] != nullptr ? visuals->ForItem(*slots[slot]) : nullptr;
             return v != nullptr ? v->priority : 250;
         };
-        std::stable_sort(order, order + kSlots, [&](int a, int b) { return priorityOf(a) < priorityOf(b); });
+        std::stable_sort(order, order + kSlots + 1, [&](int a, int b) { return priorityOf(a) < priorityOf(b); });
         int coveredGroup = 0;
         for (const int slot : order) {
+            if (slot == kSlots) {
+                if (battle != nullptr && (battle->slots & covered) == 0) {
+                    battleShown = true;
+                    covered |= battle->slots;
+                }
+                continue;
+            }
             if (slots[slot] == nullptr) continue;
             const VisualChangeTable::Row* v = visuals->ForItem(*slots[slot]);
             const std::uint32_t mine = v != nullptr ? v->slots : 0u;
@@ -309,6 +338,11 @@ bool Dress(const FileSystem& fs, const CharacterTable& characters, const ItemTab
                                (wornClass >= 2 ? "light" : "clothes") + (out.europe ? "_01_" : "_00_");
     if (garments && (visuals != nullptr ? (covered & 0x02) == 0 : slots[1] == nullptr)) out.items.push_back(folder + "ba.bsr");
     if (garments && (visuals != nullptr ? (covered & 0x10) == 0 : slots[4] == nullptr)) out.items.push_back(folder + "la.bsr");
+    if (battleShown) {
+        std::string path = out.female && !battle->female.empty() ? battle->female : battle->male;
+        if (path.empty()) path = battle->female;
+        if (!path.empty()) out.items.push_back(battle->material != 0 ? path + "#set" + std::to_string(battle->material) : path);
+    }
     // The sets whole in what is worn: their pieces in the set's look, as the 1.188 client's set operator dresses them.
     const std::vector<int> whole = WholeSets(items, worn);
     for (int slot = 0; slot < kSlots; ++slot) {

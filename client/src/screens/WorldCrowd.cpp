@@ -187,11 +187,18 @@ void PlanPlayer(Rng& rng, const CharacterData& t, const assets::FileSystem& fs, 
 bool PlanChosen(const CharacterData& t, const assets::FileSystem& fs, const std::vector<std::string>& items, WalkerPlan& out) {
     std::vector<std::uint32_t> worn;
     int race = -1;
-    // Besides the codenames: "woman", "height:N", "volume:N" (0..4) for the wearer's body.
+    // Besides the codenames: "woman", "height:N", "volume:N" (0..4) for the wearer's body; "battle:N" the large
+    // battle's dress over them in material set N (0 green, 3 red, 4 blue).
     bool male = true;
     int height = 2, volume = 2;
     std::size_t figureIndex = 0;
+    const assets::VisualChangeTable::BattleDress* battle = nullptr;
     for (const std::string& code : items) {
+        if (code.starts_with("battle:")) {
+            battle = t.visuals.BattleDressOf(std::uint32_t(std::max(0, std::atoi(code.c_str() + 7))));
+            if (battle == nullptr) core::LogWarning("world: crowd: --walker-items: no battle dress {}", code);
+            continue;
+        }
         if (code.starts_with("figure:")) {
             figureIndex = std::size_t(std::max(0, std::atoi(code.c_str() + 7)));
             continue;
@@ -219,7 +226,8 @@ bool PlanChosen(const CharacterData& t, const assets::FileSystem& fs, const std:
     if (figures.empty()) return false;
     assets::DressedCharacter dressed;
     std::string error;
-    if (!assets::Dress(fs, t.characters, t.items, figures[std::min(figureIndex, figures.size() - 1)], worn, assets::PackShape(height, volume), dressed, error)) {
+    if (!assets::Dress(fs, t.characters, t.items, figures[std::min(figureIndex, figures.size() - 1)], worn, assets::PackShape(height, volume), dressed, error,
+                       {}, nullptr, t.visuals.Size() > 0 ? &t.visuals : nullptr, true, battle)) {
         core::LogWarning("world: crowd: --walker-items: {}", error);
         return false;
     }

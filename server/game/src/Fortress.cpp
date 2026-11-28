@@ -338,6 +338,7 @@ struct Fortresses::State {
             if (const std::optional<FortressGuild> g = f.Controller() != 0 ? host.FortressGuildById(f.Controller()) : std::nullopt) {
                 r.masterName = g->masterName;
                 r.crest = g->crest;
+                r.controllerUnion = g->alliance;
             }
             r.introduction = f.row.introduction;
             list.fortresses.push_back(std::move(r));

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <unordered_set>
 
@@ -86,13 +87,23 @@ bool AssembleOutfit(const FileSystem& fs, const std::string& bodyPath, const std
     std::unordered_set<int> hidden;
 
     int itemIndex = -1;
-    for (const std::string& itemPath : itemPaths) {
+    for (const std::string& passed : itemPaths) {
         ++itemIndex;
+        // "item.bsr#setN": the piece in its resource's material set N (the battle dress's colours).
+        std::string itemPath = passed;
+        std::uint32_t materialSet = 0;
+        if (const std::size_t mark = itemPath.find("#set"); mark != std::string::npos) {
+            materialSet = static_cast<std::uint32_t>(std::strtoul(itemPath.c_str() + mark + 4, nullptr, 10));
+            itemPath.resize(mark);
+        }
         ModelData item;
         std::string itemError;
         if (!LoadModel(fs, itemPath, item, itemError)) {
             report.warnings.push_back(itemPath + ": " + itemError);
             continue;
+        }
+        if (materialSet != 0 && !UseMaterialSet(fs, item, materialSet)) {
+            report.warnings.push_back(itemPath + ": no material set " + std::to_string(materialSet));
         }
         // Covering: a mode 1 piece hides the body's meshes of its keys; a mode 2 piece is drawn over them.
         bool overSkin = false;

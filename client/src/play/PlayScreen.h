@@ -410,6 +410,7 @@ private:
     void ForgetEntities(); // Arrive: the old world's entries by entity id
     std::unordered_map<std::uint32_t, std::uint32_t> lookVersions_;  // the entity's look they were dressed for
     std::unordered_map<std::uint32_t, int> structureStages_;         // a structure's model (0 whole, 1 damaged, 2 rubble) they were dressed for
+    std::unordered_map<std::uint32_t, game::BattleDress> battleDresses_; // the battle dress they were dressed in
     // The follow camera (ours: the original's limits are not traced yet).
     float cameraYaw_ = 0.0f, cameraPitch_ = 0.35f, cameraDistance_ = 60.0f;
     // A camera shake (the player's own skills' SCT_SHAKECAM): its amplitude (the original's units; ours
@@ -878,6 +879,9 @@ private:
     bool FortressFoe(std::uint32_t entity, const game::WorldView::Entity& e) const;
     // A player's fortress war mark over its head (its texture; null: none), as the 1.188 client picks it.
     const char* FortressWarMark(std::uint32_t entity) const;
+    // The battle dress a player wears as this viewer sees it (game::BattleDressOf: the event teams, the war's sides, the
+    // Video page's row); the player itself too.
+    game::BattleDress BattleDressFor(ScreenContext& context, const game::WorldView::Entity& e) const;
     // A fortress's structure of the player's guild or union (never hit by them).
     bool OwnStructure(std::uint32_t entity) const;
     // The test bots: a random attack skill known and off its wait (0: none).

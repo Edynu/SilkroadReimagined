@@ -2924,6 +2924,67 @@ TEST_CASE("The body under worn pieces: only a mode 1 piece's cover table hides i
     CHECK_FALSE(mage.contains("woman_torso_lower.bms"));
 }
 
+TEST_CASE("The large battle's dress: its three rows, their model's material sets, worn over the armour (2026-11-28)") {
+    const auto dir = GameDir();
+    if (dir.empty()) {
+        MESSAGE("SR_GAME_DIR not set - skipped");
+        return;
+    }
+    sr::assets::FileSystem fs;
+    std::string error;
+    REQUIRE_MESSAGE(sr::assets::MountGameArchives(fs, dir, error), error);
+    sr::assets::VisualChangeTable visuals;
+    REQUIRE_MESSAGE(visuals.Load(fs, error), error);
+    CHECK(visuals.BattleDresses() == 3);
+    sr::assets::CharacterTable characters;
+    sr::assets::ItemTable items;
+    REQUIRE_MESSAGE(characters.Load(fs, error), error);
+    REQUIRE_MESSAGE(items.Load(fs, error), error);
+    for (const std::uint32_t material : {0u, 3u, 4u}) {
+        const sr::assets::VisualChangeTable::BattleDress* dress = visuals.BattleDressOf(material);
+        REQUIRE(dress != nullptr);
+        CHECK(dress->slots == 0x073F);
+        CHECK(dress->priority == 40);
+        for (const std::string& path : {dress->male, dress->female}) {
+            sr::assets::ModelData model;
+            REQUIRE_MESSAGE(sr::assets::LoadModel(fs, path, model, error), std::string(path + ": " + error));
+            if (material != 0) CHECK_MESSAGE(sr::assets::UseMaterialSet(fs, model, material), path);
+        }
+    }
+    // Worn over a full armour and a weapon: the dress and the weapon drawn, the armour and the garments not; a job suit
+    // (priority 10) keeps its own look over the dress.
+    const auto dressed = [&](const char* body, std::vector<const char*> worn) {
+        const sr::assets::ObjectRow* figure = characters.Find(std::string_view(body));
+        REQUIRE(figure != nullptr);
+        std::vector<std::uint32_t> ids;
+        for (const char* w : worn) {
+            const sr::assets::ItemRow* r = items.Find(std::string_view(w));
+            REQUIRE_MESSAGE(r != nullptr, w);
+            ids.push_back(r->refObjId);
+        }
+        sr::assets::DressedCharacter d;
+        REQUIRE_MESSAGE(sr::assets::Dress(fs, characters, items, figure->refObjId, ids, sr::assets::kNeutralShape, d, error, {}, nullptr,
+                                          &visuals, true, visuals.BattleDressOf(3)),
+                        error);
+        return d;
+    };
+    const sr::assets::DressedCharacter knight =
+        dressed("CHAR_EU_WOMAN_NOBLE", {"ITEM_EU_W_HEAVY_01_BA_A_DEF", "ITEM_EU_W_HEAVY_01_LA_A_DEF", "ITEM_EU_W_HEAVY_01_FA_A_DEF", "ITEM_EU_SWORD_01_A"});
+    std::string text = "dressed:";
+    for (const std::string& item : knight.items) text += " " + item;
+    MESSAGE(text);
+    REQUIRE(knight.items.size() == 2);
+    CHECK(knight.items[0] == "res\\item\\etc\\fort_woman.bsr#set3");
+    CHECK(knight.items[1].find("sword") != std::string::npos);
+    sr::assets::ModelData model;
+    sr::assets::OutfitReport report;
+    REQUIRE_MESSAGE(sr::assets::AssembleOutfit(fs, knight.body, knight.items, model, report, error), error);
+    for (const std::string& w : report.warnings) MESSAGE(w);
+    const sr::assets::DressedCharacter thief = dressed("CHAR_CH_MAN_MONK", {"ITEM_CH_M_TRADE_THIEF_04"});
+    REQUIRE(thief.items.size() == 1);
+    CHECK(thief.items[0].find("fort_") == std::string::npos);
+}
+
 TEST_CASE("An avatar dress worn over armour: drawn, the armour it covers left out (2026-11-22)") {
     const auto dir = GameDir();
     if (dir.empty()) {

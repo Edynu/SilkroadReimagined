@@ -388,6 +388,9 @@ struct FortressRecord {
     std::string masterName;
     std::string introduction;
     std::uint32_t crest = 0; // the controlling guild's emblem's revision (the world map's crest box; 0: none)
+    // The controlling guild's union (0: none): with it the war's defenders (the battle dress, the commanders' marks), as
+    // the original tells the defending guilds.
+    std::uint32_t controllerUnion = 0;
     template <typename V>
     void Visit(V& v) {
         v("id", id);
@@ -402,6 +405,7 @@ struct FortressRecord {
         v("masterName", masterName, 64);
         v("introduction", introduction, 256);
         v("crest", crest);
+        v("controllerUnion", controllerUnion);
     }
 };
 

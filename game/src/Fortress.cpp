@@ -66,6 +66,19 @@ bool PlayersHostileInWar(bool warOn, WarSide a, WarSide b) {
     return warOn;
 }
 
+BattleDress BattleDressOf(const BattleDressFacts& f) {
+    if (f.viewerTeam != 0xFF) return f.team == 0 ? BattleDress::Red : f.team == 1 ? BattleDress::Blue : BattleDress::None;
+    if (!f.warArea || !f.rowOn) return BattleDress::None;
+    if (f.viewer.guild == 0 || f.other.guild == 0 || f.defenders.guild == 0) return BattleDress::Green;
+    const auto defends = [&](WarSide s) {
+        return s.guild == f.defenders.guild || (f.defenders.alliance != 0 && s.alliance == f.defenders.alliance);
+    };
+    if (defends(f.viewer)) return defends(f.other) ? BattleDress::Green : BattleDress::Red;
+    if (defends(f.other)) return BattleDress::Red;
+    const bool friendly = f.other.guild == f.viewer.guild || (f.viewer.alliance != 0 && f.other.alliance == f.viewer.alliance);
+    return friendly ? BattleDress::Green : BattleDress::Blue;
+}
+
 std::uint32_t TopDamager(const std::vector<std::pair<std::uint32_t, std::uint64_t>>& damage) {
     std::uint32_t best = 0;
     std::uint64_t most = 0;

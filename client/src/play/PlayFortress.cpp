@@ -60,7 +60,8 @@ const char* PlayScreen::FortressWarMark(std::uint32_t entity) const {
     if (self == nullptr || !guild_.InGuild()) return nullptr;
     const proto::FortressRecord* f = fortress_.Fortress(fortress_.WarArea(self->position.region));
     if (f == nullptr || !f->atWar) return nullptr;
-    const std::uint32_t holder = f->holder != 0 ? f->holder : f->owner, holderUnion = guild_.UnionOf(holder);
+    const std::uint32_t holder = f->holder != 0 ? f->holder : f->owner;
+    const std::uint32_t holderUnion = f->controllerUnion != 0 ? f->controllerUnion : guild_.UnionOf(holder);
     const auto defends = [&](std::uint32_t guild, std::uint32_t unionId) {
         return holder != 0 && (guild == holder || (holderUnion != 0 && unionId == holderUnion));
     };
@@ -80,6 +81,30 @@ const char* PlayScreen::FortressWarMark(std::uint32_t entity) const {
                                               {"icon\\etc\\mark_aggressive2.ddj", "icon\\etc\\mark_aggressive3.ddj"}};
     const int row = kind[0] == 'f' ? 0 : kind[0] == 'd' ? 1 : 2;
     return kMarks[row][deputy ? 1 : 0].c_str();
+}
+
+game::BattleDress PlayScreen::BattleDressFor(ScreenContext& context, const game::WorldView::Entity& e) const {
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (self == nullptr) return game::BattleDress::None;
+    game::BattleDressFacts facts;
+    facts.viewerTeam = flag_.TeamOf(view_.Self());
+    facts.team = flag_.TeamOf(e.id);
+    const proto::FortressRecord* f = fortress_.Fortress(fortress_.WarArea(self->position.region));
+    facts.warArea = f != nullptr && f->atWar;
+    if (facts.viewerTeam == 0xFF && !facts.warArea) return game::BattleDress::None;
+    facts.rowOn = context.options == nullptr || context.options->video.current()[15] == 0;
+    const auto sideOf = [&](std::uint32_t id) {
+        if (id == view_.Self()) return guild_.InGuild() ? game::WarSide{guild_.Guild().id, guild_.Guild().unionId} : game::WarSide{};
+        const proto::EntityGuild* tag = guild_.EntityTag(id);
+        return tag != nullptr ? game::WarSide{tag->guild, tag->unionId} : game::WarSide{};
+    };
+    facts.viewer = sideOf(view_.Self());
+    facts.other = sideOf(e.id);
+    if (f != nullptr) {
+        facts.defenders.guild = f->holder != 0 ? f->holder : f->owner;
+        facts.defenders.alliance = f->controllerUnion != 0 ? f->controllerUnion : guild_.UnionOf(facts.defenders.guild);
+    }
+    return game::BattleDressOf(facts);
 }
 
 bool PlayScreen::OwnStructure(std::uint32_t entity) const {

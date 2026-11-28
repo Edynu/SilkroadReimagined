@@ -254,6 +254,24 @@ FortressError StructureRefusal(bool warOn, WarSide owner, WarSide attacker);
 // Are two players enemies in a fortress war: not in one
 // union, not of one guild (two without a guild are of "one"), and the war runs.
 bool PlayersHostileInWar(bool warOn, WarSide a, WarSide b);
+
+// The large battle's dress (the Video page's "Display Friendly/Enemy" row; charactervisualchange's battle dress): what a
+// player wears over its armour as the viewer sees it, the viewer itself included.
+enum class BattleDress : std::uint8_t { None, Green, Red, Blue };
+// Its material set in the dress's model: 0 the ally's, 3 the enemy's, 4 the other attackers'.
+constexpr std::uint32_t BattleDressMaterial(BattleDress d) { return d == BattleDress::Red ? 3u : d == BattleDress::Blue ? 4u : 0u; }
+struct BattleDressFacts {
+    std::uint8_t viewerTeam = 0xFF, team = 0xFF; // the event teams (Capture the Flag, the arena): 0, 1, 0xFF none
+    bool warArea = false;  // the viewer stands in the area of a fortress at war
+    bool rowOn = true;     // the row at "Friend/Enemy Dress" (else "General")
+    WarSide viewer, other; // their guilds and unions
+    WarSide defenders;     // the fortress's controlling guild and its union (guild 0: none)
+};
+// The viewer in an event's team: every player in its own team's colour, team 0 red, team 1 blue (whatever the row; one
+// of no team as it is). Else in a war's area with the row on: green while either has no guild or nobody holds the
+// fortress; a defending viewer sees the defenders green and everyone else red; an attacking one sees its own guild and
+// union green, the defenders red and the other attackers blue. Elsewhere none.
+BattleDress BattleDressOf(const BattleDressFacts& facts);
 // The guild that dealt the heart the most damage: the
 // first of the highest (0: none).
 std::uint32_t TopDamager(const std::vector<std::pair<std::uint32_t, std::uint64_t>>& damage);

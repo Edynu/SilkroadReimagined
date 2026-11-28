@@ -146,6 +146,58 @@ TEST_CASE("Fortress war: the original's rules (applying, cancelling, who may hit
     CHECK_FALSE(game::PlayersHostileInWar(true, {5, 0}, {5, 0}));
     CHECK_FALSE(game::PlayersHostileInWar(true, {0, 0}, {0, 0}));
     CHECK(game::PlayersHostileInWar(true, {0, 0}, {6, 0}));
+    // The battle dress as the 1.188 client picks it.
+    {
+        using game::BattleDress;
+        game::BattleDressFacts f;
+        CHECK(game::BattleDressOf(f) == BattleDress::None); // no team, no war's area
+        // An event team: by the player's own team, whatever the row; one of no team as it is.
+        f.viewerTeam = 1;
+        f.rowOn = false;
+        f.team = 0;
+        CHECK(game::BattleDressOf(f) == BattleDress::Red);
+        f.team = 1;
+        CHECK(game::BattleDressOf(f) == BattleDress::Blue);
+        f.team = 0xFF;
+        CHECK(game::BattleDressOf(f) == BattleDress::None);
+        // A war's area: the row off, none; nobody holding it or a player without a guild, green.
+        f = {};
+        f.warArea = true;
+        f.rowOn = false;
+        f.viewer = {5, 0};
+        f.other = {6, 0};
+        f.defenders = {7, 70};
+        CHECK(game::BattleDressOf(f) == BattleDress::None);
+        f.rowOn = true;
+        f.defenders = {};
+        CHECK(game::BattleDressOf(f) == BattleDress::Green);
+        f.defenders = {7, 70};
+        f.other = {0, 0};
+        CHECK(game::BattleDressOf(f) == BattleDress::Green);
+        // An attacker sees its guild and union green, the defenders (the holder and its union) red, the other attackers blue.
+        f.viewer = {5, 50};
+        f.other = {5, 50};
+        CHECK(game::BattleDressOf(f) == BattleDress::Green);
+        f.other = {8, 50};
+        CHECK(game::BattleDressOf(f) == BattleDress::Green);
+        f.other = {7, 70};
+        CHECK(game::BattleDressOf(f) == BattleDress::Red);
+        f.other = {9, 70};
+        CHECK(game::BattleDressOf(f) == BattleDress::Red);
+        f.other = {6, 60};
+        CHECK(game::BattleDressOf(f) == BattleDress::Blue);
+        // A defender sees the defenders green and every other red.
+        f.viewer = {9, 70};
+        f.other = {7, 70};
+        CHECK(game::BattleDressOf(f) == BattleDress::Green);
+        f.other = {6, 60};
+        CHECK(game::BattleDressOf(f) == BattleDress::Red);
+        f.other = {5, 50};
+        CHECK(game::BattleDressOf(f) == BattleDress::Red);
+        CHECK(game::BattleDressMaterial(BattleDress::Green) == 0);
+        CHECK(game::BattleDressMaterial(BattleDress::Red) == 3);
+        CHECK(game::BattleDressMaterial(BattleDress::Blue) == 4);
+    }
     // The heart's taker: the most damage, the first of equals.
     CHECK(game::TopDamager({}) == 0);
     CHECK(game::TopDamager({{3, 10}, {4, 30}, {5, 30}}) == 4);
