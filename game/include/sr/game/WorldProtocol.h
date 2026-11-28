@@ -502,6 +502,10 @@ struct GateRefused {
 // carries them as a mask: kGateRecallPoint "Designate as return/recall point", kGateTeleport "Select
 // teleport area"), or GateRefused.
 constexpr std::uint32_t kGateRecallPoint = 0x40, kGateTeleport = 0x80;
+// A gate whose point goes to the return point (the original's NPC function 9, its row 0x10 "Teleport to the resurrection
+// point"; the thieves' den's): UseGate with kGateReturnDestination asks for it (the original's 0x705A of kind 1).
+constexpr std::uint32_t kGateToReturn = 0x1000000;
+constexpr std::uint32_t kGateReturnDestination = 0xFFFFFFFFu;
 
 struct GateTalk {
     static constexpr MessageId kId = 0x1032;

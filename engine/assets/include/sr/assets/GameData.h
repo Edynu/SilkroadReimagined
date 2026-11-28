@@ -278,6 +278,7 @@ struct TeleportPoint {
     std::uint16_t region = 0;        // col 5: where a traveller arrives (0 with 6..8: nowhere)
     float x = 0, y = 0, z = 0;       // cols 6..8
     bool recall = false;             // col 10: may be designated as the return point
+    bool toReturn = false;           // col 11: goes to the return point (_RefTeleport.CanGotoResurrectPos: the thieves' den's gate)
     bool HasArrival() const { return region != 0 || x != 0 || y != 0 || z != 0; }
 };
 struct TeleportLink {

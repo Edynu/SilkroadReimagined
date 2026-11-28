@@ -255,6 +255,7 @@ public:
     std::vector<std::uint32_t> ExitsOf(std::uint32_t layer) const;       // its exits' entities
     std::vector<std::uint32_t> PillarsOf(std::uint32_t layer) const;     // its party recall pillars' entities
     bool AtPillar(std::uint32_t entity, std::uint32_t pillar);             // the player stands by its instance's pillar
+    bool AtExit(std::uint32_t entity, std::uint32_t exit);                 // and by one of its exits
     // The fortresses' Cave of Discipline: an instance of the catalog's siege world opened (its
     // layer; 0: none, or no such world), its time `seconds` (0: the world's); a player taken into it (false: not here, or it
     // is gone); whether a player re-enters it free (their latest instance entry is this layer of it, still standing,

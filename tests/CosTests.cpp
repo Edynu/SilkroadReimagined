@@ -2343,6 +2343,15 @@ TEST_CASE("Game server: the thieves' town scroll: a thief's only, with his trans
         if (thief.client->Expect(seen, 10ms) && seen.entity == cart.entity) cartThere = seen.position.region == den->region;
     }
     CHECK(cartThere);
+    // The den's gate (its point's CanGotoResurrectPos) offers the way to the return point and no teleport of its own;
+    // not with his transport out (0x1C10).
+    REQUIRE(den->toReturn);
+    thief.client->Send(proto::GateTalk{den->ownerRefObjId});
+    const auto menu = Next<proto::GateMenu>(thief);
+    CHECK((menu.services & proto::kGateToReturn) != 0);
+    CHECK((menu.services & proto::kGateTeleport) == 0);
+    thief.client->Send(proto::UseGate{den->ownerRefObjId, proto::kGateReturnDestination});
+    CHECK(Next<proto::GateRefused>(thief).status == proto::GateStatus::Transport);
     s.game.Stop();
 }
 

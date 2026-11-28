@@ -255,8 +255,11 @@ void NpcWindow::ShowGate(std::uint32_t gate, std::uint32_t services, std::vector
     Begin(g != nullptr ? context_.Text(g->nameKey) : std::string(), g != nullptr && context_.npcGreeting ? context_.npcGreeting(g->codename) : "");
     AddTaxLine();
     // The menu by the services, in the original's order: the return point
-    // (0x40, row 9), then the teleport (0x80, row 10).
+    // (0x40, row 9), the way to it (0x100, row 0x10), then the teleport (0x80, row 10).
     if ((services & proto::kGateRecallPoint) != 0) AddChoice(context_.Text("UIIT_CTL_RECALL_POSITION"), {Choice::Kind::RecallPoint, 0});
+    if ((services & proto::kGateToReturn) != 0) {
+        AddChoice(context_.Text("UIIT_CTL_TELEPORT_TO_RESURRECT_POS"), {Choice::Kind::Destination, proto::kGateReturnDestination});
+    }
     if ((services & proto::kGateTeleport) != 0) AddChoice(context_.Text("UIIT_CTL_TELEPORT_TARGET"), {Choice::Kind::Destinations, 0});
     // Ours: an end to the talk on the first menu too (the original's is closed by its button).
     AddChoice(context_.Text("UIIT_STT_NPC_CHATTING_WND_TALKEND"), {Choice::Kind::End, 0});
@@ -354,8 +357,13 @@ void NpcWindow::ShowNpc(std::uint32_t entity, const std::string& codename, const
     if ((services & proto::kNpcPopExchange) != 0) AddChoice(context_.Text("SN_TALK_CH_GACHA_OPERATOR_2"), {Choice::Kind::MagicPop, 1});
     // A party recall pillar: "Summon Party member" (NPC function 0x27 -> row 0x3D).
     if ((services & proto::kNpcPartySummon) != 0) AddChoice(context_.Text("UIIT_PAG_PARTY_SUMMON"), {Choice::Kind::PartySummon, 0});
+    // An instance's exit: "Exit Dungeon" (NPC function 0x29 -> row 0x3E; out at once, as the original's 0x751D).
+    if ((services & proto::kNpcDungeonExit) != 0) AddChoice(context_.Text("UIIT_STT_DUNGEON_EXIT"), {Choice::Kind::PartySummon, 1});
     // An NPC with a teleport point of its own (a ferry's ticket seller): a gate's rows, the return point then the teleport.
     if ((services & proto::kGateRecallPoint) != 0) AddChoice(context_.Text("UIIT_CTL_RECALL_POSITION"), {Choice::Kind::RecallPoint, 0});
+    if ((services & proto::kGateToReturn) != 0) {
+        AddChoice(context_.Text("UIIT_CTL_TELEPORT_TO_RESURRECT_POS"), {Choice::Kind::Destination, proto::kGateReturnDestination});
+    }
     if ((services & proto::kGateTeleport) != 0) AddChoice(context_.Text("UIIT_CTL_TELEPORT_TARGET"), {Choice::Kind::Destinations, 0});
     // Event So-Ok's registration row after the NPC's ordinary rows, by the state her desk told: 1 "Capture the Flag
     // Match Registration", 2 its cancel, 0 none; drawing it sets which answer is expected. Its colours are the rows'
@@ -971,8 +979,13 @@ bool NpcWindow::OnNotice(const ui::Notice& notice) {
         ShowAvatarGrant(context_, npc_);
         break;
     case Choice::Kind::PartySummon:
+        // The pillar's summon list, or (1) the exit's way out.
         close();
-        if (context_.instanceRequest) context_.instanceRequest(proto::OpenSummon::kId, proto::Encode(proto::OpenSummon{npc_}));
+        if (context_.instanceRequest && choice.destination == 1) {
+            context_.instanceRequest(proto::LeaveInstance::kId, proto::Encode(proto::LeaveInstance{npc_}));
+        } else if (context_.instanceRequest) {
+            context_.instanceRequest(proto::OpenSummon::kId, proto::Encode(proto::OpenSummon{npc_}));
+        }
         break;
     case Choice::Kind::Fortress: {
         // A fortress NPC's rows: the request goes with the NPC; a row that opens a window opens it beside

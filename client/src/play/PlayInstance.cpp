@@ -89,7 +89,7 @@ std::vector<std::string> PlayScreen::GapLines(std::uint32_t entity) {
     return out;
 }
 
-// Standing by a gap or an exit: what it does, asked first.
+// Standing by a gap (its question first), an exit or a pillar (its NPC window: "Exit Dungeon", "Summon Party member").
 void PlayScreen::UseAt(std::uint32_t entity) {
     const game::WorldView::Entity* e = view_.Find(entity);
     if (e == nullptr || replay_ || !shared_ || !shared_->session) return;
@@ -100,11 +100,7 @@ void PlayScreen::UseAt(std::uint32_t entity) {
         hud_.Confirm("UIIT_STT_CONFIRM_BOX", {data.Text("UIIT_MSG_GOD_GATE_MOVE")}, [this, entity](bool yes) {
             if (yes) shared_->session->SendGame(proto::EnterGap::kId, proto::Encode(proto::EnterGap{entity}));
         });
-    } else if (IsExit(*e)) {
-        hud_.Confirm("UIIT_STT_CONFIRM_BOX", {data.Text("SN_INS_QUEST_TELEPORT_BS")}, [this, entity](bool yes) {
-            if (yes) shared_->session->SendGame(proto::LeaveInstance::kId, proto::Encode(proto::LeaveInstance{entity}));
-        });
-    } else if (IsPillar(*e)) {
+    } else if (IsExit(*e) || IsPillar(*e)) {
         // Its NPC window (the server tells its one service), "Summon Party member" asking for the list.
         shared_->session->TalkToNpc(entity);
     }
@@ -327,7 +323,7 @@ void PlayScreen::HandleInstance(ScreenContext& context, const proto::InstanceEve
 }
 
 // The script's steps (--guild / --fortress): gap (the nearest gap walked to and its question shown), exit (the
-// nearest exit's), talisman:PLACE (the talisman in that place used: its question).
+// nearest exit's window: then npc-row:UIIT_STT_DUNGEON_EXIT), talisman:PLACE (the talisman in that place used: its question).
 bool PlayScreen::InstanceScriptStep(ScreenContext& context, const std::string& verb, const std::string& arg) {
     if (verb != "gap" && verb != "exit" && verb != "pillar" && verb != "talisman" && verb != "summon" && verb != "collection" &&
         verb != "collection-theme" && verb != "collection-story" && verb != "talisman-yes" && verb != "pillar-summon" && verb != "talismans") {

@@ -1141,6 +1141,7 @@ bool DecodeTeleportPoints(std::string_view text, std::vector<TeleportPoint>& out
         p.y = FloatOf(c[7]);
         p.z = FloatOf(c[8]);
         p.recall = c[10] == "1";
+        p.toReturn = c.size() > 11 && c[11] == "1";
         if (p.id != 0) out.push_back(std::move(p));
     }
     return !out.empty();

@@ -53,7 +53,9 @@ using MessageId = std::uint16_t;
 // 12: TradeScale carries the cargo and its rule (goods, the trader's unit, capacity, the scale, the three-star cap).
 // 13: the event guide's pages met (EventGuideState, EventGuideMet), kept by the server.
 // 14: the skill refusals Level, MonsterClass and TargetLevel (SkillUseStatus 31..33).
-inline constexpr std::uint32_t kProtocolVersion = 14;
+// 15: a gate's way to the return point (kGateToReturn, UseGate to kGateReturnDestination); an instance exit's row
+//     (kNpcDungeonExit).
+inline constexpr std::uint32_t kProtocolVersion = 15;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

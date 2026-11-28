@@ -418,7 +418,11 @@ TEST_CASE("Forgotten World: the catalog, a hole's instance in its own layer, its
         world.Teleport(me, at);
         REQUIRE(pump([&] { return world.Where(me) && world.Where(me)->position.layer == layer; }));
     }
+    // Standing by it, the player talks to it (its window's "Exit Dungeon"); not to the other one, out of reach.
+    CHECK(instances.AtExit(me, exits.front()));
+    CHECK_FALSE(instances.AtExit(me, exits.back()));
     instances.Handle(me, proto::LeaveInstance::kId, proto::Encode(proto::LeaveInstance{exits.front()}));
+    CHECK_FALSE(instances.AtExit(me, exits.front())); // out of the instance
     CHECK(instances.LayerOf(me) == 0);
     REQUIRE(pump([&] { return world.Where(me) && world.Where(me)->position.layer == 0; }));
     CHECK(!rig.entries.back().active);

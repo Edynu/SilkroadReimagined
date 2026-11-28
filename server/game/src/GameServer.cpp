@@ -781,6 +781,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         if (game::IsSpecialtyNpc(codename)) services |= proto::kNpcTrade; // its price board's row
         if (game::IsRepairNpc(codename)) services |= proto::kNpcRepair;  // the store's Repair and Repair all
         if (game::IsAvatarGrantNpc(codename)) services |= proto::kNpcAvatarGrant; // the avatars' blessing
+        if (codename == "NPC_INS_EXIT_TELEPORT") services = proto::kNpcDungeonExit; // an instance's exit: its one row
         // A league's keeper (functions 0x14 / 0x15 / 0x16): its rows.
         switch (game::LeagueOfNpc(codename)) {
         case game::JobType::Trader: services |= proto::kNpcJobTrader; break;
@@ -1481,6 +1482,10 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         // A party recall pillar of the player's instance: its one row.
         if (it == npcs.end() && instances && instances->AtPillar(player.entity, talk.entity)) {
             return SendMessage(*peer.connection, proto::NpcMenu{talk.entity, proto::kNpcPartySummon});
+        }
+        // One of its exits: "Exit Dungeon" (the original's NPC function 0x29, row 0x3E).
+        if (it == npcs.end() && instances && instances->AtExit(player.entity, talk.entity)) {
+            return SendMessage(*peer.connection, proto::NpcMenu{talk.entity, proto::kNpcDungeonExit});
         }
         // Busy (an exchange, its stall or another's, an alchemy run): 0x1C0B.
         if ((exchanges && exchanges->Busy(player.entity)) || (stalls && (stalls->Owner(player.entity) || stalls->Visiting(player.entity))) ||
@@ -8934,6 +8939,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
         std::uint32_t services = 0;
         if (!config.teleports->LinksFrom(point->id).empty()) services |= proto::kGateTeleport;
         if (point->recall) services |= proto::kGateRecallPoint;
+        if (point->toReturn) services |= proto::kGateToReturn;
         return services;
     }
 
@@ -9812,6 +9818,7 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
             menu.opened.push_back(QinTomb::kFloor5Gate);
         }
         if (point->recall) menu.services |= proto::kGateRecallPoint;
+        if (point->toReturn) menu.services |= proto::kGateToReturn;
         menu.tax = NpcTaxFor(point->ownerRefObjId, player);
         SendMessage(*peer.connection, menu);
     }
@@ -9853,6 +9860,18 @@ struct GameServer::State : SkillHost, PartyHost, GuildHost, FortressHost, Commun
                     }
                 }
             }
+        }
+        // To the return point (the original's 0x705A kind 1, a point whose CanGotoResurrectPos is set: the thieves' den's
+        // gate): not with a transport out (0x1C10), then to the town of the return point, free.
+        if (use.destination == proto::kGateReturnDestination) {
+            if (!from->toReturn) return refuse(proto::GateStatus::NoSuchLink);
+            if (TransportOut(player)) return refuse(proto::GateStatus::Transport);
+            const assets::TeleportPoint* to = ReturnArrival(player);
+            if (to == nullptr) return refuse(proto::GateStatus::Nowhere);
+            if (!CanTravelTo(to->region)) return refuse(proto::GateStatus::ServerDown);
+            core::LogInfo("{}: {} through {} to the return point {}", config.name, player.name, from->codename, to->codename);
+            TravelTo(peer.id, player, {to->region, to->x, to->y, to->z});
+            return;
         }
         // Through the snake gate into floor 5's copy (the link the tomb's opening gives it): no transport out (as the tomb's
         // other links), then the copy's admission.

@@ -759,6 +759,14 @@ struct Instances::State {
         return inst;
     }
 
+    bool AtExit(std::uint32_t entity, std::uint32_t exit) {
+        const auto me = players.find(entity);
+        Instance* inst = me != players.end() ? Of(me->second.layer) : nullptr;
+        if (inst == nullptr || std::find(inst->exits.begin(), inst->exits.end(), exit) == inst->exits.end()) return false;
+        const auto place = world.Where(entity), there = world.Where(exit);
+        return place && there && Distance(place->position, there->position) <= kNpcReach;
+    }
+
     void OpenSummon(std::uint32_t entity, std::uint32_t pillar) {
         Instance* inst = AtPillar(entity, pillar);
         const auto p = host.InstancePlayer(entity);
@@ -1409,6 +1417,7 @@ void Instances::BusMessage(const std::string& text) {
 }
 
 bool Instances::AtPillar(std::uint32_t entity, std::uint32_t pillar) { return s_->AtPillar(entity, pillar) != nullptr; }
+bool Instances::AtExit(std::uint32_t entity, std::uint32_t exit) { return s_->AtExit(entity, exit); }
 
 std::vector<std::uint32_t> Instances::PillarsOf(std::uint32_t layer) const {
     const auto it = s_->instances.find(layer);

@@ -21,6 +21,8 @@ constexpr float kGapReach = 100.0f; // ours: from how far the gap is entered (an
 // A party recall pillar's service in NpcMenu (1.188's NPC function 0x27: its menu row "Summon Party member",
 // UIIT_PAG_PARTY_SUMMON, kind 0x3D), told by the server to a player by its instance's pillar.
 constexpr std::uint32_t kNpcPartySummon = 0x400;
+// An instance's exit (NPC_INS_EXIT_TELEPORT, the original's NPC function 0x29): its row 0x3E "Exit Dungeon" sends LeaveInstance.
+constexpr std::uint32_t kNpcDungeonExit = 0x2000000;
 
 // --- From the server -----------------------------------------------------------------------------------------
 
