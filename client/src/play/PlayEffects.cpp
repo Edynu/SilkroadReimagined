@@ -709,7 +709,7 @@ void PlayScreen::KillOrbs(const proto::ExperienceGained& gained, double now) {
     // Each lands as the original's orbs do: its kind's absorption (the experience's blue indraft, the skill experience's
     // red) and hyanget.wav.
     const auto send = [&](const char* effect, const char* arrival, int n) {
-        for (int i = 0; i < n; ++i) stageEffects_.Homing(*world_, from, self, effect, now, orbsSent_++, arrival, "prim\\snd\\ui\\hyanget.wav");
+        for (int i = 0; i < n; ++i) stageEffects_.Homing(*world_, from, self, effect, now, orbsSent_++, arrival, "@SND_HYAN");
     };
     const std::size_t level = player_.self.level;
     const double basis = level < tables_->monsterExperience.size() ? double(tables_->monsterExperience[level]) : 0.0;
@@ -794,7 +794,11 @@ void PlayScreen::FlyEffects(ScreenContext& context) {
         }
         ++benchSoundCues_;
         benchSounds_.insert(cue.path);
-        if (context.audio != nullptr) context.audio->PlayEffect(cue.path, p);
+        // "@HANDLE": an interface handle's row of effectsound.txt (its file and volume), else a file.
+        if (context.audio != nullptr) {
+            if (cue.path.starts_with('@')) context.audio->PlayUiAt(std::string_view(cue.path).substr(1), p);
+            else context.audio->PlayEffect(cue.path, p);
+        }
     }
     // The hits' sounds 100 ms after them, where their targets are then (P12).
     for (auto it = hitSounds_.begin(); it != hitSounds_.end();) {

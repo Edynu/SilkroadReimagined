@@ -142,6 +142,14 @@ void GameAudio::Update(double dt) {
     sound_.Update(dt);
 }
 
+void GameAudio::PlayUiAt(std::string_view handle, glm::vec3 at) {
+    if (!Ready()) return;
+    audio::EffectSoundTable::Key key;
+    key.object = "UI";
+    key.handle = handle;
+    if (const audio::EffectSoundRow* row = tables_->effects.Pick(key, random_)) sound_.PlayAt(row->path, audio::Channel::Effects, ToAudio(at), row->volume);
+}
+
 void GameAudio::PlayUi(std::string_view handle, std::string_view event) {
     if (!Ready()) return;
     audio::EffectSoundTable::Key key;

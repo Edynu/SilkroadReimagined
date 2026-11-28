@@ -876,7 +876,7 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
             if (from != StageEffects::kNone && self != StageEffects::kNone) {
                 for (int i = 0; i < int(points->points - player_.self.berserk); ++i) {
                     stageEffects_.Homing(*world_, from, self, "battle\\hwan_v.efp", context.time, orbsSent_++, "battle\\hwn_violet_indraft.efp",
-                                         "prim\\snd\\ui\\hyanget.wav");
+                                         "@SND_HYAN");
                 }
             }
         }

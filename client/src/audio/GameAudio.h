@@ -87,6 +87,9 @@ public:
     void SecondSwing(std::string_view skill, glm::vec3 at);
     // A skill stage's sound (skilleffect.txt's SndBegin / SndEnd: a prim\snd\ path) at a place (K8).
     void PlayEffect(std::string_view path, glm::vec3 at, float volume = 1.0f);
+    // An interface handle's row of effectsound.txt (object UI) played at a place, its file and its volume (SND_HYAN: the
+    // orbs' landing, the original's snd_hyan).
+    void PlayUiAt(std::string_view handle, glm::vec3 at);
     // One of its hits landed there (SND_DMG of the attacker's last skill; a critical one prefers the
     // CRITYCAL rows). A critical sounds SND_CRIDMG first, as the original's: the skill's own rows, else a player's
     // (`player`) PLAYER rows tied to no skill (batCriHit; in berserk, `berserk`, the HWAN row's batHwanCriHit).
