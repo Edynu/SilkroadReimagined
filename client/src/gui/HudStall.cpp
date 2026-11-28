@@ -142,7 +142,7 @@ public:
             return;
         }
         opened_ = true;
-        // The owner's buttons' help (the original's 0x653DC0 on 5 and 6, and each slot's price button).
+        // The owner's buttons' help (the original's control help on 5 and 6, and each slot's price button).
         if (const ui::Widget* over = frame.pointer.hovered; over != nullptr && over->visible) {
             const char* key = over == Child(kChangeTitle) ? "UIIT_STT_TOGGLE_STORE_TITLE_CHANGE"
                               : over == Child(kOwnerMsg)  ? "UIIT_STT_TOGGLE_STORE_MASTER_MESSAGE"

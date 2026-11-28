@@ -23,7 +23,7 @@ namespace {
 
 constexpr float kWidth = 449.0f, kHeight = 430.0f;
 constexpr int kCategory = 30, kTarget = 31, kEmail = 32, kText = 33, kConfirm = 35, kCancel = 36, kPanel = 200;
-// The categories in the window's order (CIFCASRequestHelp::vf_028); the server's names in kHelpCategories.
+// The categories in the window's order (the original's CIFCASRequestHelp); the server's names in kHelpCategories.
 constexpr const char* kCategoryKeys[] = {"UIIT_STT_CAS_CUSTOMER_CENTER_REPORT_NOT_MOVE",     "UIIT_STT_CAS_CUSTOMER_CENTER_REPORT_BAD_MANNERED",
                                          "UIIT_STT_CAS_CUSTOMER_CENTER_REPORT_ADVERTISING",  "UIIT_STT_CAS_CUSTOMER_CENTER_REPORT_ACCOUNT_RELATED",
                                          "UIIT_STT_CAS_CUSTOMER_CENTER_REPORT_BUG",          "UIIT_STT_CAS_CUSTOMER_CENTER_REPORT_ILLEGAL_SOFTWARE",

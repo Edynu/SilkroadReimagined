@@ -3930,7 +3930,7 @@ void PlayScreen::HudRequests(ScreenContext& context) {
             // The server decides and answers (ItemMoved); what others see follows (EquipmentChanged).
             if (!replay_) shared_->session->MoveItem({std::uint8_t(r.value), std::uint8_t(r.extra & 0xFF), std::uint16_t(r.extra >> 8)});
             // A PvP suit put on with a growth pet out: 1.188's equipment warns "When wearing PvP Suit, growth pets are
-            // automatically unsummoned." (CIFEquipment::vf_070: a line and the warning banner; the piece still goes on). Ours
+            // automatically unsummoned." (its CIFEquipment: a line and the warning banner; the piece still goes on). Ours
             // when our server sends the pets away (the free-battle suit 3/1/7/5, any grab pet aside; 1.188's server never does).
             if (const std::uint8_t to = std::uint8_t(r.extra & 0xFF); to < game::slot::kWorn && tables_ && tables_->Usable()) {
                 const game::ItemInstance* item = player_.inventory.At(std::uint8_t(r.value));

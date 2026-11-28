@@ -471,7 +471,7 @@ private:
     std::vector<std::string> clipSets_{std::string()};
     std::uint32_t ClipKey(std::string_view set, std::uint32_t state);
     void ReleaseUnused(ScreenContext& context);
-    // Footprints (the original's 0xA5A3F0): at each step of a walking or running clip (its events of code 2, the
+    // Footprints (as the original's): at each step of a walking or running clip (its events of code 2, the
     // foot in their second value) on sand-like earth or snow (tile2d.ifo's kind 1 or 9 of the navmesh's tile under the
     // toe), a print of effect\footstep_sand.ddj / footstep_snow.ddj 2 across and 3.5 long under the toe, turned 4.5
     // degrees out from the walker's heading, the right foot's mirrored; 20 s on the ground.

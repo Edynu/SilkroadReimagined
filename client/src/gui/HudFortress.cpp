@@ -70,7 +70,7 @@ std::string GoldText(std::uint32_t gold) {
     return out;
 }
 
-// The original's help over a control (set by its window's code, 0x653DC0) while the mouse is on its place: a control that
+// The original's help over a control (set by its window's code) while the mouse is on its place: a control that
 // takes the mouse or a decoration of this window (nothing hovered then).
 void ShowHelp(ui::Frame& frame, ui::Widget& window, std::initializer_list<std::pair<int, const char*>> helps, const HudContext& c) {
     bool over = frame.pointer.hovered == nullptr && window.ScreenRect().Contains(frame.input.mouse());

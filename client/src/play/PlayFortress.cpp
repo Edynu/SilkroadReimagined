@@ -163,7 +163,7 @@ void PlayScreen::HandleFortress(ScreenContext& context, const proto::FortressEve
                           r.zone, r.refObjId, r.hp, r.maxHp, r.state, r.repairCost, r.upgradeGold, r.upgradePoints, int(r.upgradeLevel), r.waitMinutes);
         }
     }
-    // The war's countdowns (1.188's 0x7B69A0): the heart's seconds told with the towers' fall (kind 0x0A); a capture's
+    // The war's countdowns (as 1.188's player bar): the heart's seconds told with the towers' fall (kind 0x0A); a capture's
     // five minutes for those outside the new holder's side (its guild and union); the war's end clears both.
     if (const auto* n = std::get_if<proto::FortressNotice>(&event)) {
         using K = proto::FortressNoticeKind;
@@ -505,7 +505,7 @@ void PlayScreen::CastingTick(double now) {
 }
 
 // The countdowns of the fortress whose area the player stands in, on the warning banner at each whole minute, at 90 s and
-// each second under 31 (1.188's CIFPlayerMiniInfo tick, 0x7B69A0): "It is allowed to enter the fortress after %d seconds."
+// each second under 31 (1.188's CIFPlayerMiniInfo tick): "It is allowed to enter the fortress after %d seconds."
 // and "It is allowed to attack Fortress Heart after %d seconds.".
 void PlayScreen::StepFortressCountdowns(ScreenContext& context) {
     const game::WorldView::Entity* self = view_.Find(view_.Self());

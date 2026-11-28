@@ -169,7 +169,7 @@ private:
         if (data == nullptr) return;
         const auto inTab = [&](std::uint32_t id) { return tab_ == 0 ? id < 50000 : tab_ == 1 ? id >= 50000 && id < 100000 : id >= 100000; };
         const std::set<std::uint32_t> met = tab_ == 1 ? EventsMet(*data) : std::set<std::uint32_t>{};
-        // The quest guide: the quests up to the player's level + 10 (1.188's 0x7678D0, from its quest table: a topic whose
+        // The quest guide: the quests up to the player's level + 10 (as 1.188's, from its quest table: a topic whose
         // quest is not in questdata.txt never comes), a topic's quest named by its page (SN_PAYCON_<codename>).
         const int most = (c_.state != nullptr ? int(c_.state->self.level) : 1) + 10;
         const auto tooHigh = [&](const assets::GameGuideRow& r) {

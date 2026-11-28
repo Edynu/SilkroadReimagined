@@ -109,7 +109,7 @@ std::string EffectTooltip(const HudContext& context, const game::ActiveEffect& e
         return tip;
     }
     const auto add = [](std::string& tip, const std::string& line) { tip += (tip.empty() ? "" : "\n") + line; };
-    // An abnormal state (the 1.188 client's 0x7FC260): its title with its grade (" %d%s"), its series' line, a blank, what it
+    // An abnormal state (as the 1.188 client's tooltip): its title with its grade (" %d%s"), its series' line, a blank, what it
     // does (DE_UIIT_MSG_STATE_SKILL_CURSING_<code>); no time left.
     if (e.kind == game::ActiveEffect::Kind::State) {
         const StateKind* s = StateOf(e.id);
@@ -468,7 +468,7 @@ void BuffBoard::Draw(ui::Frame& frame) {
         // The time gauge: its black frame, then the light blue fill shrinking from the right; none
         // for what has no end.
         // A time service with a daily bonus (the premium's hours a day, spent in battle): 1.188's two gauges in one place
-        // (0x806D50 kind 3; 0x8056A0): s_stateodd_time02_gauge for its term (the item's Param1 seconds), the plain gauge
+        // (the buff board's kind 3): s_stateodd_time02_gauge for its term (the item's Param1 seconds), the plain gauge
         // over it for the bonus left of its day's (yesterday's and today's over Param3 / 1000, at most full).
         const assets::ItemRow* service = e.kind == game::ActiveEffect::Kind::TimedJob && (e.token & 0xFFFF0000u) == game::PlayerState::kTimedServiceToken &&
                                                  context_.items != nullptr

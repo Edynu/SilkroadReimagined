@@ -291,7 +291,7 @@ float3 MetalProbe(uint probe, float3 r) {
     return gTextures[NonUniformResourceIndex(probe)].SampleLevel(gSamplers[1], uv, 0).rgb;
 }
 
-// The Metallic Sheen (gfx::kMaterialEnvMap: a model's environment-map modifier, 1.188's CRTModEnvMap::vf_010): the part's
+// The Metallic Sheen (gfx::kMaterialEnvMap: a model's environment-map modifier, 1.188's CRTModEnvMap): the part's
 // texture alpha masks a shine added onto its colour before the light, as the original's stages: stage 0 the sphere map
 // (spheremap_gray, or spheremap_highlight with kMaterialEnvHighlight) at its texel for the camera-space normal (x 0.8 +
 // 0.5) times the texture factor (the environment's diffuse); stage 1 the part's texture plus its alpha times that, each

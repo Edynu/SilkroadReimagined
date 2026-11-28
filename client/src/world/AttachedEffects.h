@@ -6,10 +6,10 @@
 // outside Jangan, Donhwang's entrance room), Jangan's portal stone's glow, lamps,
 // flames. Every one the 1.188 files hold hangs at the model's root with an offset in its own space.
 //
-// The Video page's Light Effect (slot 7; 1.188's device 0x1113154, read by CRTModParticle's particles, CObjRenderer::vf_04C
-// and 0xC81450) shows them: off, every one fades out; on, they fade in, those whose modifier's second flag is set (the
-// lamps: cj_pal_lamp_light, the lanterns, the bonfire) only at night (the environment's time past 0.75 or before 0.25,
-// the device's 0x1113158 set by SWorld::vf_010). Ours: a one-second fade (the original's rate not read), and no
+// The Video page's Light Effect (slot 7; in 1.188 read by the particles' modifier and the object renderer) shows them:
+// off, every one fades out; on, they fade in, those whose modifier's second flag is set (the lamps: cj_pal_lamp_light,
+// the lanterns, the bonfire) only at night (the environment's time past 0.75 or before 0.25, as the original's world
+// tells its device). Ours: a one-second fade (the original's rate not read), and no
 // occlusion test (the original's CVisibleChecker fades one out behind a wall; ours are depth-tested).
 
 #include <array>

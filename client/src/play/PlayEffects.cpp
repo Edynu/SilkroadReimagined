@@ -176,7 +176,7 @@ void PlayScreen::StartShot(std::uint32_t caster, double at) {
 
 // A guard buff `target` holds: the first of its buffs whose presentation has a DefenseEfp (col 12; the Warriors' screens, the
 // ice wall): its hits show that effect, and 100 ms later sound its SND_DDMG instead of the attacker's SND_DMG
-// (1.188:0xA49780, the flag 0xA4F720 passes); null without one.
+// (as 1.188's hit, when its guard flag is set); null without one.
 const assets::SkillRow* PlayScreen::GuardBuffOf(std::uint32_t target) const {
     if (!tables_ || !tables_->Usable()) return nullptr;
     std::vector<std::uint32_t> held;

@@ -28,7 +28,7 @@ namespace proto = game::proto;
 
 void PlayScreen::HandleCos(ScreenContext& context, const proto::CosEvent& event) {
     if (const auto* summoned = std::get_if<proto::CosSummoned>(&event)) {
-        // A growth or pick pet just summoned: SND_COS_SUMMON (the original's CICCos::vf_068 for a fresh one; ours the
+        // A growth or pick pet just summoned: SND_COS_SUMMON (the original's CICCos for a fresh one; ours the
         // owner's alone, the world shown: not the pets already out when the player enters).
         const bool fresh = std::none_of(ownCoses_.begin(), ownCoses_.end(), [&](const OwnCos& c) { return c.entity == summoned->entity; });
         const auto kind = game::CosKind(summoned->kind);
