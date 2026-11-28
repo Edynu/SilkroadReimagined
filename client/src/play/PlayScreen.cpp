@@ -228,6 +228,8 @@ void PlayScreen::Enter(ScreenContext& context) {
     if (const std::string names = context.config.GetString("names", ""); !names.empty() && context.options != nullptr) {
         context.options->beta.namesFar = names == "far";
     }
+    // --sound-occlusion true|false: the Beta page's muffled sounds behind walls for this run (tries).
+    if (context.config.Has("sound-occlusion") && context.options != nullptr) context.options->beta.soundOcclusion = context.config.GetBool("sound-occlusion", false);
     if (const int gate = context.config.GetInt("use-gate", 0); gate > 0) {
         pendingGate_ = std::uint32_t(gate);
         gateTries_ = 20;
@@ -404,7 +406,12 @@ void PlayScreen::Script(ScreenContext& context) {
 
 void PlayScreen::Exit(ScreenContext& context, FrameSnapshot& snapshot) {
     if (aroundClicks_ > 0) core::LogInfo("game: --click-around: {} clicks, {} not answered with a walk", aroundClicks_, aroundMissed_);
-    if (context.audio != nullptr) context.audio->Silence(); // the place's music and ambience end with the world
+    if (context.audio != nullptr) {
+        context.audio->Silence(); // the place's music and ambience end with the world
+        context.audio->SetOcclusion(nullptr); // its test asks this screen
+        const audio::SoundSystem& s = context.audio->engine();
+        if (s.positionalPlayed > 0) core::LogInfo("game: sounds at a place {}, muffled behind walls {}", s.positionalPlayed, s.muffled);
+    }
     if (shared_) context.jobs.Wait(shared_->charactersJob);
     if (!recordPath_.empty()) {
         if (shared_ && shared_->session) shared_->session->Record(nullptr);
@@ -2056,6 +2063,36 @@ void PlayScreen::Listen(ScreenContext& context) {
     const glm::vec3 target(c.targetX, c.targetY, c.targetZ);
     const glm::vec3 dir(std::cos(c.pitch) * std::sin(c.yaw), std::sin(c.pitch), std::cos(c.pitch) * std::cos(c.yaw));
     audio->SetListener(c.fly ? target : target + dir * c.distance, c.fly ? dir : -dir, glm::vec3(0.0f, 1.0f, 0.0f));
+    // The Beta page's muffled sounds (ours): one ray on the navigation from the ear to the sound (raised 10 off the
+    // ground, stopping 8 short of it) when a sound starts; anything it meets (the terrain, a building's or a wall's
+    // triangles, a dungeon's floors) muffles it.
+    const bool occlusion = context.options != nullptr && context.options->beta.soundOcclusion;
+    if (occlusion != audio->Occluding()) {
+        if (!occlusion) {
+            audio->SetOcclusion(nullptr);
+        } else {
+            audio->SetOcclusion([this](glm::vec3 ear, glm::vec3 at) {
+                const game::WorldView::Entity* self = world_ ? view_.Find(view_.Self()) : nullptr;
+                if (self == nullptr) return false;
+                const std::uint16_t region = self->position.region;
+                const glm::vec3 base = world_->OriginRelative({region, 0.0f, 0.0f, 0.0f});
+                const glm::vec3 to = at + glm::vec3(0.0f, 10.0f, 0.0f);
+                glm::vec3 d = to - ear;
+                const float length = glm::length(d);
+                if (length < 20.0f) return false;
+                d /= length;
+                const float origin[3] = {ear.x - base.x, ear.y - base.y, ear.z - base.z}, direction[3] = {d.x, d.y, d.z};
+                game::NavHit hit;
+                const bool blocked = world_->Navigation().Ray(region, origin, direction, length - 8.0f, hit);
+                static int told = 0;
+                if (blocked && told < 20) {
+                    ++told;
+                    core::LogInfo("audio: a sound {:.0f} away muffled (the world {:.0f} along the way)", length, hit.distance);
+                }
+                return blocked;
+            });
+        }
+    }
     // The music and ambience of the area the character stands in; night from 18:00 to 6:00 (ours).
     if (const game::WorldView::Entity* self = view_.Find(view_.Self())) {
         const float t = world_->TimeOfDay();

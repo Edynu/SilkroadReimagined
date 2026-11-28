@@ -136,6 +136,11 @@ TEST_CASE("options survive a round trip through their file text; bad lines are i
     far.beta.namesFar = true;
     CHECK(Options::Parse(far.Serialize()).beta.namesFar);
     CHECK(!Options::Parse("beta.names=everywhere\n").beta.namesFar);
+    // The muffled sounds behind walls (ours): off by default, kept.
+    CHECK(!Options{}.beta.soundOcclusion);
+    Options muffled;
+    muffled.beta.soundOcclusion = true;
+    CHECK(Options::Parse(muffled.Serialize()).beta.soundOcclusion);
     // The extra quick bar: the original's defaults without the file (open, down, two lines, see-through, neither locked
     // nor fixed); its settings kept.
     const ExtraBarOptions bar0 = Options{}.extraBar;

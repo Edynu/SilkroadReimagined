@@ -200,6 +200,7 @@ private:
     ui::Widget* onlineInfo_[2] = {};   // the server's limits, the traffic to expect
     ui::RadioButton* betaMovement_ = nullptr; // Classic, Pathfinding
     ui::RadioButton* betaNames_ = nullptr;    // the names over heads: the original's, ours
+    ui::CheckBox* betaOcclusion_ = nullptr;   // sounds behind walls muffled (ours)
     int capturing_ = -1; // the key slot waiting for a key
     bool filled_ = false; // filled once its controls made their own parts (the first frame)
 };
@@ -390,7 +391,7 @@ void OptionWindow::BuildBeta(ui::Interface& ui) {
     // names over heads, the original's or ours.
     ui::Widget* page = MakeNode(ui, *this, "CIFStatic", 10 + kBetaPage, {11.0f, 62.0f, 364.0f, 270.0f});
     page->visible = false;
-    MakeNode(ui, *page, "CIFFrame", 4, {11.0f, 10.0f, 342.0f, 232.0f}, "interface\\option\\opt_inner_box_");
+    MakeNode(ui, *page, "CIFFrame", 4, {11.0f, 10.0f, 342.0f, 254.0f}, "interface\\option\\opt_inner_box_");
     ui::Widget* caption = MakeNode(ui, *page, "CIFStatic", 10, {18.0f, 14.0f, 326.0f, 12.0f});
     caption->SetText("Movement (experimental)");
     if (auto* s = ui::As<ui::Static>(caption)) s->textColor = kLabelColor;
@@ -421,6 +422,10 @@ void OptionWindow::BuildBeta(ui::Interface& ui) {
         radio->SetUnits(ui, {"The original's: within 300, and the one under the mouse", "Ours: players' names at any distance"});
         betaNames_ = radio;
     }
+    betaOcclusion_ = ui::As<ui::CheckBox>(MakeNode(ui, *page, "CIFCheckBox", 50, {18.0f, 244.0f, 16.0f, 16.0f}, "interface\\ifcommon\\com_checkbutton_off.ddj"));
+    ui::Widget* occlusion = MakeNode(ui, *page, "CIFStatic", 51, {40.0f, 246.0f, 300.0f, 12.0f});
+    occlusion->SetText("Sounds behind walls muffled (experimental)");
+    if (auto* s = ui::As<ui::Static>(occlusion)) s->textColor = ui::kWhite;
 }
 
 int OptionWindow::OnlineMax(int kind) const {
@@ -517,6 +522,7 @@ void OptionWindow::Fill() {
     }
     if (betaMovement_ != nullptr) betaMovement_->selected = int(draft_.beta.movement);
     if (betaNames_ != nullptr) betaNames_->selected = draft_.beta.namesFar ? 1 : 0;
+    if (betaOcclusion_ != nullptr) betaOcclusion_->checked = draft_.beta.soundOcclusion;
     for (std::size_t i = 0; i < keySlots_.size(); ++i) {
         const int vk = draft_.input.keys[i];
         if (ui::Widget* key = keySlots_[i]->Child(11)) key->SetText(int(i) == capturing_ ? std::string("...") : core::InputOptions::KeyName(vk));
@@ -606,6 +612,7 @@ void OptionWindow::Update(ui::Frame& frame) {
     // The movement as the Beta page's radio shows it.
     if (betaMovement_ != nullptr) draft_.beta.movement = core::BetaOptions::Movement(std::clamp(betaMovement_->selected, 0, 1));
     if (betaNames_ != nullptr) draft_.beta.namesFar = betaNames_->selected == 1;
+    if (betaOcclusion_ != nullptr) draft_.beta.soundOcclusion = betaOcclusion_->checked;
     // The video page's descriptions under the mouse (the original's UIIT_STT_VIDIO_TTDESC_01..17): the resolution, the
     // brightness, each of the original's rows (by its slot; ours have none).
     if (page_ == 0) {

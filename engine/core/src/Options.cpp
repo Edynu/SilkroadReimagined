@@ -410,6 +410,7 @@ std::string Options::Serialize() const {
     out << "online.players=" << online.players << "\nonline.monsters=" << online.monsters << "\nonline.radius=" << online.radius << "\n";
     out << "beta.movement=" << (beta.movement == BetaOptions::Movement::Pathfinding ? "pathfinding" : "classic") << "\n";
     out << "beta.names=" << (beta.namesFar ? "far" : "original") << "\n";
+    out << "beta.soundOcclusion=" << beta.soundOcclusion << "\n";
     out << "extrabar.open=" << extraBar.open << "\nextrabar.vertical=" << extraBar.vertical << "\nextrabar.twoLines=" << extraBar.twoLines
         << "\nextrabar.seeThrough=" << extraBar.seeThrough << "\nextrabar.locked=" << extraBar.locked << "\nextrabar.fixed=" << extraBar.fixed << "\n";
     return out.str();
@@ -498,6 +499,8 @@ Options Options::Parse(std::string_view text) {
             flag(o.extraBar.locked);
         } else if (key == "extrabar.fixed") {
             flag(o.extraBar.fixed);
+        } else if (key == "beta.soundOcclusion") {
+            flag(o.beta.soundOcclusion);
         } else if (key == "beta.names") {
             if (value == "far") o.beta.namesFar = true;
             else if (value == "original") o.beta.namesFar = false;

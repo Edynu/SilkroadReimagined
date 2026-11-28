@@ -44,6 +44,10 @@ public:
     void Shutdown();
     bool IsOpen() const { return sound_.IsOpen(); }
     const audio::SoundSystem& engine() const { return sound_; }
+    // The Beta page's muffled sounds behind walls (ours): the test of the world between the ear and a sound (the play
+    // screen's ray); null: off.
+    void SetOcclusion(std::function<bool(glm::vec3 ear, glm::vec3 sound)> occluded);
+    bool Occluding() const { return bool(sound_.occluded); }
 
     // The Audio page's three levels and mutes, applied at once (the Options window calls it on every
     // change of a slider or a mute, and again with the kept levels on Cancel).

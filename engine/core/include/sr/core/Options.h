@@ -169,6 +169,9 @@ struct BetaOptions {
     enum class Movement : int { Classic = 0, Pathfinding = 1 };
     Movement movement = Movement::Classic;
     bool namesFar = false;
+    // Ours, experimental: a sound with a wall, a building or a hill between it and the camera comes through muffled
+    // (one ray on the navigation when it starts; a low-pass filter and some volume off).
+    bool soundOcclusion = false;
 };
 
 // The extra quick bar (the original's CIFExtQuickSlot and its options window, which it keeps in Setting\SRExtQSOption.dat;

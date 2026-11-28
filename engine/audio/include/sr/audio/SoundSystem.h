@@ -19,6 +19,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -71,9 +72,16 @@ public:
 
     // The ear: where it is, where it looks and which way is up (the camera).
     void SetListener(Vec3 position, Vec3 forward, Vec3 up);
-    // 3D sounds: full volume within `reference` of the listener, falling off as reference / distance
-    // beyond it, constant past `farthest`. The defaults are ours (the original's not traced).
+    // 3D sounds: full volume within `reference` of the listener, falling off as reference / distance beyond it (the
+    // original's DirectSound inverse falloff; its buffers never set their distances, so they keep falling: our
+    // `farthest` far away), constant past `farthest`. The reference is ours (the original's unit not found).
     void SetDistances(float reference, float farthest);
+    // Ours, experimental: asked when a positional sound starts (listener, sound): true when the world stands between
+    // them; such a sound plays muffled (a low-pass filter: kMuffledGain, kMuffledGainHf). Null: never.
+    std::function<bool(Vec3 listener, Vec3 sound)> occluded;
+    static constexpr float kMuffledGain = 0.6f, kMuffledGainHf = 0.12f;
+    // Sounds muffled and played since the start (the tests' and the log's).
+    int muffled = 0, positionalPlayed = 0;
 
     // A file (a path in the file system) once, at the listener or at a place; `volume` 0..1 on top of
     // the channel's gain.
@@ -124,7 +132,9 @@ private:
     Device device_;
     double now_ = 0.0;
     float gains_[kChannelCount] = {1.0f, 1.0f, 1.0f};
-    float reference_ = 60.0f, farthest_ = 1200.0f;
+    float reference_ = 60.0f, farthest_ = 1.0e6f;
+    Vec3 listener_{};
+    bool efx_ = false; // the device has ALC_EXT_EFX: each voice has a low-pass filter
     std::unordered_map<std::string, std::unique_ptr<Clip>> clips_;
     std::vector<Voice> voices_;
     std::vector<Pending> pending_;

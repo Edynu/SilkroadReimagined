@@ -2,6 +2,7 @@
 
 #include <AL/al.h>
 #include <AL/alc.h>
+#include <AL/efx.h>
 
 #include <algorithm>
 #include <array>
@@ -27,6 +28,12 @@ constexpr std::size_t kStreamFrames = 22050;
 ALenum Format(int channels) { return channels == 2 ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16; }
 
 ALuint Id(std::uint32_t v) { return static_cast<ALuint>(v); }
+
+// The EFX filter calls, found on the device (ALC_EXT_EFX).
+LPALGENFILTERS genFilters = nullptr;
+LPALDELETEFILTERS deleteFilters = nullptr;
+LPALFILTERI filteri = nullptr;
+LPALFILTERF filterf = nullptr;
 
 // The game's left-handed coordinates to OpenAL's right-handed ones.
 void Flip(const Vec3& v, ALfloat out[3]) {
@@ -55,6 +62,7 @@ struct SoundSystem::Clip {
 
 struct SoundSystem::Voice {
     std::uint32_t source = 0;
+    std::uint32_t filter = 0; // its low-pass filter (EFX; 0: none)
     bool busy = false;
     Channel channel = Channel::Effects;
     float volume = 1.0f;
@@ -69,6 +77,7 @@ struct SoundSystem::Pending {
     float volume = 1.0f;
     bool positional = false;
     Vec3 position;
+    bool muffled = false;
     std::uint32_t loop = 0;
     double asked = 0.0;
 };
@@ -115,6 +124,25 @@ bool SoundSystem::OpenLoopback(int rate, std::string& error) {
         }
         v.source = source;
     }
+    // The low-pass filters (ours: the muffled sounds behind walls), when the device has EFX.
+    efx_ = false;
+    if (ALCdevice* dev = alcGetContextsDevice(alcGetCurrentContext()); dev != nullptr && alcIsExtensionPresent(dev, "ALC_EXT_EFX") == ALC_TRUE) {
+        genFilters = reinterpret_cast<LPALGENFILTERS>(alGetProcAddress("alGenFilters"));
+        deleteFilters = reinterpret_cast<LPALDELETEFILTERS>(alGetProcAddress("alDeleteFilters"));
+        filteri = reinterpret_cast<LPALFILTERI>(alGetProcAddress("alFilteri"));
+        filterf = reinterpret_cast<LPALFILTERF>(alGetProcAddress("alFilterf"));
+        efx_ = genFilters != nullptr && deleteFilters != nullptr && filteri != nullptr && filterf != nullptr;
+        for (Voice& v : voices_) {
+            if (!efx_) break;
+            ALuint filter = 0;
+            genFilters(1, &filter);
+            filteri(filter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+            filterf(filter, AL_LOWPASS_GAIN, kMuffledGain);
+            filterf(filter, AL_LOWPASS_GAINHF, kMuffledGainHf);
+            v.filter = filter;
+        }
+        alGetError();
+    }
     alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
     SetDistances(reference_, farthest_);
     return true;
@@ -127,6 +155,10 @@ void SoundSystem::Shutdown() {
         ALuint source = Id(v.source);
         alSourceStop(source);
         alDeleteSources(1, &source);
+        if (v.filter != 0 && deleteFilters != nullptr) {
+            ALuint filter = Id(v.filter);
+            deleteFilters(1, &filter);
+        }
     }
     voices_.clear();
     for (auto& s : streams_) {
@@ -167,6 +199,7 @@ void SoundSystem::SetListener(Vec3 position, Vec3 forward, Vec3 up) {
     Flip(up, o + 3);
     alListenerfv(AL_POSITION, p);
     alListenerfv(AL_ORIENTATION, o);
+    listener_ = position;
 }
 
 void SoundSystem::SetDistances(float reference, float farthest) {
@@ -209,7 +242,7 @@ void SoundSystem::Preload(std::string_view path) {
 void SoundSystem::Play(std::string_view path, Channel channel, float volume) {
     if (!device_.IsOpen() || path.empty()) return;
     Clip& clip = Request(path);
-    Pending p{clip.path, channel, volume, false, {}, 0, now_};
+    Pending p{clip.path, channel, volume, false, {}, false, 0, now_};
     if (clip.state == Clip::State::Ready) Start(p, clip);
     else if (clip.state == Clip::State::Loading) pending_.push_back(std::move(p));
 }
@@ -217,7 +250,12 @@ void SoundSystem::Play(std::string_view path, Channel channel, float volume) {
 void SoundSystem::PlayAt(std::string_view path, Channel channel, Vec3 position, float volume) {
     if (!device_.IsOpen() || path.empty()) return;
     Clip& clip = Request(path);
-    Pending p{clip.path, channel, volume, true, position, 0, now_};
+    Pending p{clip.path, channel, volume, true, position, false, 0, now_};
+    ++positionalPlayed;
+    if (occluded && occluded(listener_, position)) {
+        p.muffled = true;
+        ++muffled;
+    }
     if (clip.state == Clip::State::Ready) Start(p, clip);
     else if (clip.state == Clip::State::Loading) pending_.push_back(std::move(p));
 }
@@ -226,7 +264,7 @@ std::uint32_t SoundSystem::StartLoop(std::string_view path, Channel channel, flo
     if (!device_.IsOpen() || path.empty()) return 0;
     Clip& clip = Request(path);
     const std::uint32_t id = nextLoop_++;
-    Pending p{clip.path, channel, volume, false, {}, id, now_};
+    Pending p{clip.path, channel, volume, false, {}, false, id, now_};
     if (clip.state == Clip::State::Ready) Start(p, clip);
     else if (clip.state == Clip::State::Loading) pending_.push_back(std::move(p));
     return id;
@@ -275,6 +313,7 @@ void SoundSystem::Start(const Pending& p, Clip& clip) {
     alSourcei(source, AL_BUFFER, ALint(clip.buffer));
     alSourcei(source, AL_LOOPING, p.loop != 0 ? AL_TRUE : AL_FALSE);
     alSourcef(source, AL_GAIN, VoiceGain(*v));
+    if (efx_) alSourcei(source, AL_DIRECT_FILTER, p.positional && p.muffled && v->filter != 0 ? ALint(v->filter) : AL_FILTER_NULL);
     if (p.positional) {
         ALfloat at[3];
         Flip(p.position, at);

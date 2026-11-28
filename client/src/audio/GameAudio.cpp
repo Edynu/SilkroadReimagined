@@ -120,6 +120,14 @@ void GameAudio::SetLevels(const core::AudioOptions& options) {
 
 void GameAudio::SetListener(glm::vec3 eye, glm::vec3 forward, glm::vec3 up) { sound_.SetListener(ToAudio(eye), ToAudio(forward), ToAudio(up)); }
 
+void GameAudio::SetOcclusion(std::function<bool(glm::vec3 ear, glm::vec3 sound)> occluded) {
+    if (!occluded) {
+        sound_.occluded = nullptr;
+        return;
+    }
+    sound_.occluded = [test = std::move(occluded)](audio::Vec3 ear, audio::Vec3 at) { return test({ear.x, ear.y, ear.z}, {at.x, at.y, at.z}); };
+}
+
 float GameAudio::Random(float low, float high) { return high > low ? std::uniform_real_distribution<float>(low, high)(random_) : low; }
 
 void GameAudio::Update(double dt) {
