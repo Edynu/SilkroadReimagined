@@ -2575,6 +2575,13 @@ TEST_CASE("links: the guards take their share of their guarded one's hits, a div
         CHECK(use(scorn, 7, t0) == proto::SkillUseStatus::Ok);
         REQUIRE(others[7].state.buffs.size() == 1);
         CHECK(others[7].state.buffs[0].linkOwner == f.player.entity);
+        // The scorned one is told its buff with its scorner (B0BD's hitm field).
+        bool toldScorner = false;
+        for (const auto& t : f.host.told) {
+            const auto* b = std::get_if<proto::BuffAdded>(&t.message);
+            if (!t.observers && t.entity == 7 && b != nullptr && b->skill == scorn->id) toldScorner = b->source == f.player.entity;
+        }
+        CHECK(toldScorner);
         // The scorned one's skills on anyone but its scorner are refused.
         server::SkillCaster scorned = others[7].Caster();
         skills.Use(scorned, {scorn->id, Field::kSelected}, t0 + std::chrono::milliseconds(100));

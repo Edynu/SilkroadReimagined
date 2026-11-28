@@ -474,7 +474,7 @@ void PlayScreen::TakeStates(const proto::EntityStates& message, double now) {
     Afflicted& a = afflicted_[message.entity];
     std::vector<ShownState> next;
     for (const proto::StateRecord& r : message.states) {
-        ShownState s{game::StateKind(r.kind), now, now + double(r.ms) / 1000.0};
+        ShownState s{game::StateKind(r.kind), now, now + double(r.ms) / 1000.0, r.level};
         for (const ShownState& old : a.states) {
             if (old.kind == s.kind) s.since = old.since;
         }
@@ -593,6 +593,7 @@ std::vector<game::ActiveEffect> PlayScreen::StatesOf(std::uint32_t entity, doubl
         e.debuff = true;
         e.started = s.since;
         e.duration = std::max(0.0, s.until - s.since);
+        e.level = s.level;
         out.push_back(e);
     }
     return out;

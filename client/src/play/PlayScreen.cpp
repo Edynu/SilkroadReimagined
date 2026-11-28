@@ -938,6 +938,16 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         // After the state's own handling (an entry clears the list first): see below.
         pendingBuffs_.push_back(*buff);
         if (tables_ && tables_->Usable()) BuffEffects(buff->token, buff->skill, true);
+        // Scorned by another player (Msg_B0BD's hitm field): that player selected, and "[name] used [skill] skill.".
+        if (buff->source != 0 && !replay_) {
+            const game::WorldView::Entity* by = view_.Find(buff->source);
+            const assets::SkillRow* s = tables_ && tables_->Usable() ? tables_->skills.Find(buff->skill) : nullptr;
+            if (by != nullptr && s != nullptr) {
+                if (by->kind == proto::EntityKind::Character) SelectPlayer(buff->source);
+                const UiData& d = gui_.data();
+                player_.Post(game::GameMessage::Kind::General, FormatText(d.Text("UIIT_MSG_SKILL_EXECUTE"), {by->look.name, d.Text(s->nameKey)}), context.time);
+            }
+        }
     } else if (const auto* held = std::get_if<proto::ActionHeld>(&event)) {
         actionsHeld_ = held->count;
     } else if (const auto* punished = std::get_if<proto::AccountRestricted>(&event)) {

@@ -1132,6 +1132,7 @@ private:
     struct ShownState {
         game::StateKind kind = game::StateKind::Freeze;
         double since = 0, until = 0;
+        std::uint8_t level = 0;
     };
     struct Afflicted {
         std::vector<ShownState> states;

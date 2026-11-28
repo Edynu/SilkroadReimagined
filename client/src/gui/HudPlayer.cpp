@@ -23,20 +23,51 @@ void Put(ui::Widget* w, const std::string& text) {
     if (w != nullptr && w->text() != text) w->SetText(text);
 }
 
-// The abnormal states: bit, icon (icon\stateodd\s_<name>_icon.ddj) and the PARAM_<code> title.
+// The abnormal states: bit, icon (icon\stateodd\s_<name>_icon.ddj), the PARAM_<code> title and its series (the
+// tooltip's "<series> Abnormal status" line; the 1.188 client's table, whose petrify has none).
 struct StateKind {
     std::uint32_t bit;
     const char* icon;
     const char* code;
+    const char* series;
 };
+constexpr const char* kRestriction = "PARAM_RESTRICTION";
+constexpr const char* kWeakly = "PARAM_WEAKLY";
+constexpr const char* kCursing = "PARAM_CURSING";
 constexpr StateKind kStates[] = {
-    {0x1, "freeze", "FZ"},           {0x2, "frostbite", "FB"},        {0x4, "electricshock", "ES"},   {0x8, "burn", "BU"},
-    {0x10, "poisoning", "PS"},       {0x20, "zombi", "ZB"},           {0x40, "sleep", "SLEEP"},        {0x80, "root", "ROOT"},
-    {0x100, "blunting", "SLOW"},     {0x200, "fear", "FEAR"},         {0x400, "myopia", "MYOPIA"},     {0x800, "bleeding", "BLOOD"},
-    {0x1000, "stonecurse", "STONE"}, {0x2000, "dark", "DN"},          {0x4000, "stun", "STUN"},        {0x8000, "disease", "DISEASE"},  {0x10000, "confusion", "CHAOS"},
-    {0x20000, "decay", "CURSE_PD"},  {0x40000, "weakness", "CURSE_MD"}, {0x80000, "powerless", "CURSE_STR"},
-    {0x100000, "dissociation", "CURSE_INT"}, {0x200000, "panic", "CURSE_HP"}, {0x400000, "combustion", "CURSIE_MP"},
-    {0x1000000, "incubation", "TIME_BOMB"},
+    {0x1, "freeze", "FZ", kRestriction},
+    {0x2, "frostbite", "FB", kRestriction},
+    {0x4, "electricshock", "ES", kWeakly},
+    {0x8, "burn", "BU", kWeakly},
+    {0x10, "poisoning", "PS", kWeakly},
+    {0x20, "zombi", "ZB", kCursing},
+    {0x40, "sleep", "SLEEP", kRestriction},
+    {0x80, "root", "ROOT", kRestriction},
+    {0x100, "blunting", "SLOW", kRestriction},
+    {0x200, "fear", "FEAR", kCursing},
+    {0x400, "myopia", "MYOPIA", kCursing},
+    {0x800, "bleeding", "BLOOD", kWeakly},
+    {0x1000, "stonecurse", "STONE", nullptr},
+    {0x2000, "dark", "DN", kWeakly},
+    {0x4000, "stun", "STUN", "PARAM_ETC"},
+    {0x8000, "disease", "DISEASE", kCursing},
+    {0x10000, "confusion", "CHAOS", kCursing},
+    {0x20000, "decay", "CURSE_PD", kWeakly},
+    {0x40000, "weakness", "CURSE_MD", kWeakly},
+    {0x80000, "powerless", "CURSE_STR", kWeakly},
+    {0x100000, "dissociation", "CURSE_INT", kWeakly},
+    {0x200000, "panic", "CURSE_HP", kCursing},
+    {0x400000, "combustion", "CURSIE_MP", kCursing},
+    {0x1000000, "incubation", "TIME_BOMB", kCursing},
+};
+
+// The skills whose buff tooltip names them without their level (the 1.188 client's list: the fortress soldiers' and
+// the mall pets' skills).
+constexpr const char* kUnlevelledSkills[] = {
+    "SN_SKILL_ASSAULTING_SOILDER", "SN_SKILL_ELITE_ASSAULTING_SOILDER", "SN_SKILL_CENTURION",
+    "SN_SKILL_ASSAULTING_LEADER", "SN_SKILL_ELITE_IMPERIAL_GUARD", "SN_SKILL_COMBAT_COMMANDER",
+    "SN_SKILL_MALL_PET_SKILL_COLD", "SN_SKILL_MALL_PET_SKILL_FIRE", "SN_SKILL_MALL_PET_SKILL_LIGHTNING",
+    "SN_SKILL_MALL_PET_WATCH_CHULHYEN", "SN_SKILL_MALL_PET_WATCH_AGOL", "SN_SKILL_MALL_PET_GROWTH_POTION",
 };
 
 const StateKind* StateOf(std::uint32_t bit) {
@@ -77,29 +108,55 @@ std::string EffectTooltip(const HudContext& context, const game::ActiveEffect& e
         }
         return tip;
     }
-    // What it is, then the time left.
-    std::string tip;
+    const auto add = [](std::string& tip, const std::string& line) { tip += (tip.empty() ? "" : "\n") + line; };
+    // An abnormal state (the 1.188 client's 0x7FC260): its title with its grade (" %d%s"), its series' line, a blank, what it
+    // does (DE_UIIT_MSG_STATE_SKILL_CURSING_<code>); no time left.
     if (e.kind == game::ActiveEffect::Kind::State) {
-        tip = context.Text(StateTitle(e.id));
+        const StateKind* s = StateOf(e.id);
+        if (s == nullptr) return {};
+        std::string tip = context.Text(StateTitle(e.id));
+        if (e.level != 0) tip += std::format(" {}{}", e.level, context.Text("UIIT_STT_GRADE"));
+        if (s->series != nullptr) add(tip, context.Text(s->series) + " " + context.Text("UIIT_STT_MACROPOTION_ABNORMAL"));
+        const std::string what = std::string("DE_UIIT_MSG_STATE_SKILL_CURSING_") + s->code;
+        if (context.hasText && context.hasText(what)) tip += "\n\n" + context.Text(what);
+        return tip;
+    }
+    // A skill's buff: "<name> Lv <level>" (the soldiers' and the mall pets' skills without it), a blank, its description,
+    // what it does (the skill tooltip's effect lines), the time left, whom it is on. Else (the gallery's samples) its name.
+    std::string tip;
+    const assets::SkillRow* row = e.kind == game::ActiveEffect::Kind::Skill && context.skills != nullptr ? context.skills->Find(e.id) : nullptr;
+    if (row != nullptr) {
+        const bool unlevelled = std::any_of(std::begin(kUnlevelledSkills), std::end(kUnlevelledSkills), [&](const char* k) { return row->nameKey == k; });
+        tip = unlevelled ? context.Text(row->nameKey) : std::format("{} Lv {}", context.Text(row->nameKey), row->level);
+        tip += "\n";
+        if (!row->descKey.empty() && context.hasText && context.hasText(row->descKey) && !context.Text(row->descKey).empty()) {
+            add(tip, context.Text(row->descKey));
+            tip += "\n";
+        }
+        for (const std::string& line : SkillEffectTexts(*row, context)) add(tip, line);
     } else if (context.effectName) {
         tip = context.effectName(e);
     }
-    // A link the player made: whom it is on ("%s: %s").
-    if (!e.target.empty()) tip += (tip.empty() ? "" : "\n") + std::format("{} : {}", context.Text("UIIT_STT_TARGETTING"), e.target);
+    // The time left in the 1.188 client's steps: seconds; minutes and seconds; hours, minutes and seconds; days, hours,
+    // minutes and seconds.
     if (e.duration > 0.0) {
         const int left = std::max(0, int(std::ceil(e.started + e.duration - context.time)));
-        const std::string remain = context.Text("UIIT_STT_REMAIN_TIME");
+        const std::string remain = context.Text("UIIT_STT_REMAIN_TIME"), d = context.Text("PARAM_DAY"), h = context.Text("PARAM_HOUR"),
+                          m = context.Text("PARAM_MINUTE"), sec = context.Text("PARAM_SECOND");
         std::string line;
         if (left < 60) {
-            line = std::format("{} {}{}", remain, left, context.Text("PARAM_SECOND"));
+            line = std::format("{} {}{}", remain, left, sec);
         } else if (left < 3600) {
-            line = std::format("{} {}{} {}{}", remain, left / 60, context.Text("PARAM_MINUTE"), left % 60, context.Text("PARAM_SECOND"));
+            line = std::format("{} {}{} {}{}", remain, left / 60, m, left % 60, sec);
+        } else if (left < 86400) {
+            line = std::format("{} {}{} {}{} {}{}", remain, left / 3600, h, left / 60 % 60, m, left % 60, sec);
         } else {
-            line = std::format("{}: {}{} {}{} {}{}", remain, left / 86400, context.Text("PARAM_DAY"), left / 3600 % 24,
-                               context.Text("PARAM_HOUR"), left / 60 % 60, context.Text("PARAM_MINUTE"));
+            line = std::format("{} {}{} {}{} {}{} {}{}", remain, left / 86400, d, left / 3600 % 24, h, left / 60 % 60, m, left % 60, sec);
         }
-        tip += (tip.empty() ? "" : "\n") + line;
+        add(tip, line);
     }
+    // A link the player made: whom it is on ("%s : %s"), last.
+    if (!e.target.empty()) add(tip, std::format("{} : {}", context.Text("UIIT_STT_TARGETTING"), e.target));
     return tip;
 }
 

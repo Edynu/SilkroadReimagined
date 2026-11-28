@@ -629,7 +629,9 @@ bool Skills::InstallBuff(SkillCaster& caster, SkillCaster& holder, const assets:
         holder.state.aim = {};
         holder.state.nextAim = {};
     }
-    host_.ToCaster(holder.entity, BuffMessage(holder.state.buffs.back(), now));
+    proto::BuffAdded added = BuffMessage(holder.state.buffs.back(), now);
+    if (holder.entity != caster.entity && assets::FindSkillParam(skill, assets::SkillTag("hitm"))) added.source = caster.entity; // who scorned it
+    host_.ToCaster(holder.entity, added);
     host_.StatsChanged(holder.entity);
     core::LogInfo("skills: {} casts {} on {} ({} ms)", caster.entity, skill.codename,
                   holder.entity == caster.entity ? std::string("itself") : std::to_string(holder.entity), ms);

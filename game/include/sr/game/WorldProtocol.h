@@ -1091,11 +1091,15 @@ struct BuffAdded {
     std::uint32_t token = 0; // the server's instance of it
     std::uint32_t skill = 0; // skilldata id
     std::uint32_t ms = 0;    // left
+    // A Scorn ('hitm') put on the player by another: who (the original's B0BD hitm field; the client selects it and says
+    // "[name] used [skill] skill."). Only when it is cast, not in the re-sends.
+    std::uint32_t source = 0;
     template <typename V>
     void Visit(V& v) {
         v("token", token);
         v("skill", skill);
         v("ms", ms);
+        v("source", source);
     }
 };
 

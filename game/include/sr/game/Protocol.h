@@ -55,7 +55,8 @@ using MessageId = std::uint16_t;
 // 14: the skill refusals Level, MonsterClass and TargetLevel (SkillUseStatus 31..33).
 // 15: a gate's way to the return point (kGateToReturn, UseGate to kGateReturnDestination); an instance exit's row
 //     (kNpcDungeonExit).
-inline constexpr std::uint32_t kProtocolVersion = 15;
+// 16: a Scorn's caster with its buff (BuffAdded.source).
+inline constexpr std::uint32_t kProtocolVersion = 16;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

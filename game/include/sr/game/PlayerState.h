@@ -68,6 +68,7 @@ struct ActiveEffect {
     std::string icon, subject, text;
     // A time service's daily bonus as last told (proto::TimedService::bonus: yesterday's << 16 | today's), spent in battle.
     std::uint32_t bonus = 0;
+    std::uint8_t level = 0; // a state's grade (its record's level; the tooltip's "N Level")
 };
 
 // A mark the player put on someone (the Rogue's Tag Point, 'hntp'):
