@@ -6,6 +6,7 @@
 
 #include "gui/Hud.h"
 #include "gui/HudWindows.h"
+#include "sr/game/Skills.h"
 #include "sr/game/TimedServices.h"
 #include "gui/PortraitTexture.h"
 
@@ -438,6 +439,14 @@ void BuffBoard::Draw(ui::Frame& frame) {
             icon = context_.effectIcon(e);
         }
         if (!icon.empty()) frame.paint.Image(icon, {at.x, at.y, 20, 20}, {0, 0}, {1, 1}, tint);
+        // A link skill's buff ('lnks', the skill row's link parameter): window_all.ddj's small frame (u 0.9316..0.9551,
+        // v 0..0.0527) round its slot, 2 out on each side, its gauge inside, as the 1.188 board's slot.
+        if (e.kind == game::ActiveEffect::Kind::Skill && context_.skills != nullptr) {
+            if (const assets::SkillRow* skill = context_.skills->Find(e.id); skill != nullptr && game::TraitsOf(*skill).link) {
+                const float h = e.duration > 0.0 ? 24.0f : 20.0f;
+                frame.paint.Image("interface\\ifcommon\\window_all.ddj", {at.x - 2.0f, at.y - 2.0f, 24.0f, h + 4.0f}, {0.9316f, 0.0f}, {0.9551f, 0.0527f}, tint);
+            }
+        }
     }
     // The ended buffs' flash: the sheet's cells are 50 x 52 in 512 x 64, centred on the slot.
     for (const Ending& e : endings_) {

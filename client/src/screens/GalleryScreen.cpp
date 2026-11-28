@@ -1429,6 +1429,21 @@ void GalleryScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
                 sample_.timedServicesAt = sample_.now;
                 sample_.ShowTimedServices();
                 core::LogInfo("gallery: premium-gauges: {} effects, the service {} ({} s, bonus {})", sample_.effects.size(), row->codename, s.secondsLeft, s.bonus);
+                // A link skill's buff beside it (its frame round the slot), the lowest id of a link skill with an icon.
+                hudContext_.skills = &tables_->skills;
+                const assets::SkillRow* link = nullptr;
+                for (const auto& [id, skill] : tables_->skills.rows()) {
+                    if (game::TraitsOf(skill).link && !skill.iconPath.empty() && (link == nullptr || id < link->id)) link = &skill;
+                }
+                if (link != nullptr) {
+                    game::ActiveEffect e;
+                    e.kind = game::ActiveEffect::Kind::Skill;
+                    e.id = link->id;
+                    e.started = sample_.now;
+                    e.duration = 600.0;
+                    sample_.effects.push_back(e);
+                    core::LogInfo("gallery: premium-gauges: the link skill {}", link->codename);
+                }
             } else {
                 core::LogWarning("gallery: premium-gauges: no gold time item");
             }
