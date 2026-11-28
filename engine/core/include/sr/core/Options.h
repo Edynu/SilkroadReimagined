@@ -157,7 +157,9 @@ struct GameOptions {
 // than its own shares.
 struct OnlineOptions {
     static constexpr int kMax = 2000;
-    static constexpr int kMinRadius = 200, kMaxRadius = 600; // how far the player sees, in the minimap's units
+    // How far the player sees, in the minimap's units (the one sight range: the Video page's Character Sight Range, which
+    // 1.188 saves and never reads, stays shown and disabled).
+    static constexpr int kMinRadius = 50, kMaxRadius = 600;
     int players = 0, monsters = 0;
     int radius = kMaxRadius;
 };

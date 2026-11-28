@@ -1764,10 +1764,13 @@ void WorldScreen::PoseObjects(ScreenContext& context, FrameSnapshot& snapshot) {
     auto* memory = static_cast<std::byte*>(context.device.MappedMemory(palettes_[context.slot]));
     if (memory == nullptr) return;
     const double time = context.time;
+    // The Video page's Dynamic Animation (slot 12; the original's engine option 14): off, the map objects stand still on
+    // their clip's first frame (the original runs its animated objects' clips only while it is on).
+    const bool animate = context.options == nullptr || context.options->video.current()[12] != 0;
     context.jobs.ParallelFor(objects.size(), 32, [&](std::size_t begin, std::size_t end) {
         for (std::size_t i = begin; i < end; ++i) {
             WorldStreamer::Animated& a = objects[i];
-            a.pose.Evaluate(static_cast<float>((time + a.phase) * 1000.0), false);
+            a.pose.Evaluate(animate ? static_cast<float>((time + a.phase) * 1000.0) : 0.0f, false);
             const std::vector<glm::mat4>& palette = a.pose.Palette();
             const std::size_t bones = std::min<std::size_t>(palette.size(), WorldStreamer::kLargeBones);
             std::memcpy(memory + std::size_t{a.paletteOffset} * sizeof(glm::mat4), palette.data(), bones * sizeof(glm::mat4));

@@ -811,8 +811,9 @@ void ComboBox::Open() {
 }
 
 bool ComboBox::OnNotice(const Notice& notice) {
-    // The arrow opens the list, or closes it when it is open.
+    // The arrow opens the list, or closes it when it is open (a disabled one: neither; its text greyed).
     if (notice.kind != Notice::Kind::Clicked || notice.source->parent() != this || notice.control != 1) return false;
+    if (!enabled) return true;
     if (open()) Close();
     else Open();
     return true;
@@ -820,13 +821,15 @@ bool ComboBox::OnNotice(const Notice& notice) {
 
 void ComboBox::Mouse(Frame& frame) {
     // A click on the field does what the arrow does.
-    if (frame.pointer.held == this && frame.input.Released(MouseButton::Left) && Hit(frame.pointer.position)) {
+    if (enabled && frame.pointer.held == this && frame.input.Released(MouseButton::Left) && Hit(frame.pointer.position)) {
         if (open()) Close();
         else Open();
     }
 }
 
 void ComboBox::Update(Frame& frame) {
+    // A disabled one's choice greyed (as an edit's text).
+    if (auto* chosen = As<Static>(Child(3))) chosen->textColor = enabled ? kWhite : Rgba(180, 180, 180);
     if (!open()) return;
     Widget* popup = interface_->popup();
     // The list follows the field (a window dragged, a list scrolled), above it when it would leave

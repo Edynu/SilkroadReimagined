@@ -302,6 +302,8 @@ void OptionWindow::BuildVideo(ui::Interface& ui) {
             entries.push_back(name.starts_with("UI") ? context_.Text(name) : name);
         }
         add(context_.Text(rows[i].text), entries, rows[i].slot, -1);
+        // Character Sight Range: 1.188 saves it and nothing reads it; ours is the Online page's sight range alone.
+        if (rows[i].slot == 3 && videoRows_.back().combo != nullptr) videoRows_.back().combo->enabled = false;
     }
     for (std::size_t f = 0; f < FieldRows().size(); ++f) {
         add(FieldRows()[f].label, std::vector<std::string>(FieldRows()[f].entries.begin(), FieldRows()[f].entries.end()), -1, int(f));
