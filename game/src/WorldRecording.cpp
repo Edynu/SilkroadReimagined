@@ -175,7 +175,7 @@ bool IsWorldMessage(proto::MessageId id) {
     case proto::ViewLimitsAnswer::kId: return true;
     default: return (proto::IsGuildMessage(id) && id >= proto::GuildAnswer::kId) || (proto::IsFortressMessage(id) && id >= proto::FortressAnswer::kId) ||
                     (proto::IsCommunityMessage(id) && id >= proto::CommunityLists::kId) || (proto::IsExchangeMessage(id) && id >= proto::ExchangeAsked::kId) ||
-                    (proto::IsStallMessage(id) && id >= proto::StallAnswer::kId) || (proto::IsQuestMessage(id) && id < proto::QuestTalk::kId) ||
+                    (proto::IsStallMessage(id) && id >= proto::StallAnswer::kId) || (proto::IsQuestMessage(id) && (id < proto::QuestTalk::kId || id == proto::QuestEnterAsk::kId || id == proto::EventGuideState::kId)) ||
                     (proto::IsInstanceMessage(id) && id < proto::SelectGap::kId) || (proto::IsCosMessage(id) && id < proto::CosRide::kId) ||
                     (proto::IsJobMessage(id) && id >= proto::JobInfoMessage::kId) || (proto::IsMallMessage(id) && proto::IsMallAnswer(id)) ||
                     proto::IsPkMessage(id) || (proto::IsAcademyMessage(id) && !proto::IsAcademyRequest(id)) ||

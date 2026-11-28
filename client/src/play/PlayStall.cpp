@@ -165,6 +165,7 @@ void PlayScreen::StallVisits(double now) {
     if (pendingStall_ == 0 || replay_) return;
     if (StandingNear(pendingStall_, proto::kStallReach)) {
         shared_->session->SendGame(proto::StallVisit::kId, proto::Encode(proto::StallVisit{pendingStall_}));
+        GuideEvent(9, "5"); // another's stall (the event guide)
         pendingStall_ = 0;
     } else if (now > pendingStallUntil_) {
         pendingStall_ = 0;

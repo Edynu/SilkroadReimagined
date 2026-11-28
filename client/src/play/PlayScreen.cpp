@@ -691,6 +691,9 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
     } else if (const auto* menu = std::get_if<proto::NpcMenu>(&event)) {
         flag_.ClearDesk(); // So-Ok's desk comes after her menu (EventDesk)
         arena_.ClearDesk(); // and the arena manager's (ArenaDesk)
+        if (const game::WorldView::Entity* npc = view_.Find(menu->entity); npc != nullptr && tables_ && tables_->Usable()) {
+            if (const assets::ObjectRow* row = tables_->characters.Find(npc->look.model)) GuideEvent(3, row->codename);
+        }
         if (!replay_) {
             npcMenu_ = *menu;
             npcTax_ = menu->tax; // its fortress tax: the shop's prices shown with it
@@ -875,6 +878,8 @@ void PlayScreen::HandleEvent(ScreenContext& context, game::TitleEvent& event) {
         if (item->refId == 0) {
             line = FormatText(d.Text("UIIT_MSG_STATE_GAIN_GOLD"), {std::to_string(item->gold)});
         } else if (const assets::ItemRow* row = tables_ && tables_->Usable() ? tables_->items.Find(item->refId) : nullptr) {
+            // The event guide: a piece to wear (TID2 1), a ride's or a pet's item (TID2 2).
+            if (row->typeId[1] == 1 || row->typeId[1] == 2) GuideEvent(4, row->typeId[1] == 1 ? "1" : "2");
             const std::string name = d.Text(row->nameKey);
             line = row->typeId[1] == 3 ? FormatText(d.Text("UIIT_MSG_STATE_GET_ITEM_EXPENDABLE"), {name, std::to_string(item->count)})
                                        : FormatText(d.Text("UIIT_MSG_STATE_GET_ITEM_NONEXPENDABLE"), {name});
@@ -4950,6 +4955,7 @@ void PlayScreen::Update(ScreenContext& context, FrameSnapshot& snapshot) {
     StepQuestTimers(context);
     StepTempleNotices(context);
     StepFortressCountdowns(context);
+    StepEventGuides(context);
     CameraInput(context);
     FollowCamera();
     if (shown_) Interface(context, snapshot);

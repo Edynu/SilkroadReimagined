@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.29) # CMAKE_LINKER_TYPE (lld)
 # The version (the players' client's, its exe's version resource, the package and the launcher's manifest): one
 # number here. 0.1.1 was the first beta.
 project(SroReimagined
-    VERSION 0.1.33
+    VERSION 0.1.34
     DESCRIPTION "Clean-room Silkroad Online client with a modern renderer"
     LANGUAGES CXX)
 

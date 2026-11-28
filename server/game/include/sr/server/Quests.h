@@ -287,6 +287,7 @@ public:
 
     // A player in the world with its kept quests (_CharQuest); it is told its list.
     void Enter(std::uint32_t entity, std::vector<QuestRecord> records);
+    static constexpr std::uint32_t kEventGuideQuest = 1; // _RefQuest's QEVENT_GUIDE (the event guide's pages met)
     void Leave(std::uint32_t entity);
     // A request (false: it does not decode).
     bool Handle(std::uint32_t entity, game::proto::MessageId id, std::span<const std::byte> payload);
@@ -437,6 +438,9 @@ private:
     bool OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const game::QuestDef& q, const game::QuestDef::UseRule& u, Clock::time_point now);
     // A member's answer to its QuestEnterAsk: yes, still fit to go, taken in (the rule's start, else the instance's own).
     void EnterReply(std::uint32_t entity, const game::proto::QuestEnterReply& r);
+    // The event guide's pages met (proto::EventGuideMet): kept in the hidden quest QEVENT_GUIDE's record (kEventGuideQuest,
+    // status 5, the mask in QuestData1, as the original's), the new bits told back.
+    void EventGuideMet(std::uint32_t entity, std::uint64_t bits);
     // A talk rule of the quest at the NPC fitting the record's state (QuestDef::UseRule::npc; null: none); its question asked,
     // or the checks' words (Talk); its row picked (HandIn).
     const game::QuestDef::UseRule* TalkRule(const game::QuestDef& q, const QuestRecord& r, const std::string& npc) const;

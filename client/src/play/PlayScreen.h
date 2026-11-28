@@ -596,6 +596,26 @@ private:
     game::QuestView quests_;
     double lastTime_ = 0.0; // the clock's second of the last quest message (the windows' own lines)
     void HandleQuest(ScreenContext& context, const game::proto::QuestEvent& event);
+    // The event guide (eventguidedata.txt): an event of that kind met (1 a level: its value unused; 2 a quest taken, its
+    // codename; 3 an NPC chosen, its codename; 4 an item got, 1 a piece to wear, 2 a ride; 5 a league joined, 1 trader,
+    // 2 thief, 3 hunter; 6 a state, 1 the hwan gauge full, 2 HP at half or under, 3 a bad state, 4 skill points got; 7 an
+    // action icon, its id; 8 a window opened, its id; 9 others, 1 the first entry, 2 the first move, 3 the first field,
+    // 4 back in town after a death in the field, 5 another's stall, 6 the helper's icon): the pages it opens not met yet
+    // asked of the server (proto::EventGuideMet).
+    void GuideEvent(int kind, std::string_view value);
+    // The states the event guide watches, once a frame: the level, the hwan gauge, HP, a bad state, the skill points, the
+    // league, the party and academy pages, the first move and field, a death in the field then the town.
+    void StepEventGuides(ScreenContext& context);
+    struct GuideWatch {
+        int level = -1;
+        std::uint32_t skillPoints = 0;
+        bool skillPointsKnown = false;
+        std::optional<game::proto::WorldPosition> first; // where the player first stood
+        bool diedInField = false;
+        bool entered = false;
+    } guideWatch_;
+    bool eventGuidesKnown_ = false;      // the server's mask came (proto::EventGuideState)
+    std::uint64_t eventGuidesAsked_ = 0; // bits asked, not answered yet
     std::optional<game::proto::QuestMark> QuestMarkOf(std::uint32_t entity) const;
     // The Forgotten World (PlayInstance.cpp): the gaps' facts, the instance the
     // character is in, its collection book (theme << 8 | slot).

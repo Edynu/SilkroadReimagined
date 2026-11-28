@@ -2,6 +2,8 @@
 // what an NPC says into its talk window, and the lines of what happened: the quest banner across the top for a
 // goal's progress, a quest's goals met and a quest completed; the system messages for the reward and refusals.
 
+#include <algorithm>
+#include <cmath>
 #include <format>
 
 #include "play/PlayScreen.h"
@@ -34,6 +36,71 @@ void PlayScreen::StepQuestTimers(ScreenContext& context) {
             if (const std::size_t at = line.find("%d"); at != std::string::npos) line.replace(at, 2, std::to_string(left));
             player_.Post(game::GameMessage::Kind::General, line, context.time);
         }
+    }
+}
+
+// The event guide's rows for the player's country: "xxx" anyone, 중국 / 유럽 a country, an NPC row's "CH-..." / "EU-..." its
+// country's NPC; any other words (a state's, a window's) anyone.
+static bool EventGuideFor(std::string_view who, bool europe) {
+    while (!who.empty() && who.front() == ' ') who.remove_prefix(1);
+    if (who == "\xEC\xA4\x91\xEA\xB5\xAD" || who.starts_with("CH-")) return !europe;
+    if (who == "\xEC\x9C\xA0\xEB\x9F\xBD" || who.starts_with("EU-")) return europe;
+    return true;
+}
+
+void PlayScreen::GuideEvent(int kind, std::string_view value) {
+    if (!eventGuidesKnown_ || replay_ || !shared_ || !shared_->session) return;
+    const assets::GameGuideData* data = hudContext_.gameGuide ? hudContext_.gameGuide() : nullptr;
+    if (data == nullptr) return;
+    const bool europe = player_.self.race == 1;
+    std::uint64_t bits = 0;
+    for (const assets::EventGuideRow& e : data->events) {
+        if (!e.inService || e.kind != kind || e.guide < proto::kEventGuideFirst || e.guide >= proto::kEventGuideFirst + 64) continue;
+        const std::uint64_t bit = std::uint64_t(1) << (e.guide - proto::kEventGuideFirst);
+        if (((hudContext_.eventGuides | eventGuidesAsked_ | bits) & bit) != 0 || !EventGuideFor(e.who, europe)) continue;
+        // A level row: reached (its value the level); the others: that value met.
+        const bool met = kind == 1 ? int(player_.self.level) >= std::atoi(e.value.c_str()) : e.value == value;
+        if (met) bits |= bit;
+    }
+    if (bits == 0) return;
+    eventGuidesAsked_ |= bits;
+    shared_->session->SendGame(proto::EventGuideMet::kId, proto::Encode(proto::EventGuideMet{bits}));
+}
+
+void PlayScreen::StepEventGuides(ScreenContext&) {
+    if (!eventGuidesKnown_ || replay_ || !hudContext_.gameGuide || hudContext_.gameGuide() == nullptr) return;
+    const game::CharacterStatus& s = player_.self;
+    GuideWatch& w = guideWatch_;
+    if (!w.entered) {
+        w.entered = true;
+        GuideEvent(9, "1"); // the first entry into the world
+    }
+    if (int(s.level) != w.level) {
+        w.level = s.level;
+        GuideEvent(1, {});
+    }
+    if (s.berserk >= game::CharacterStatus::kBerserkBars) GuideEvent(6, "1");
+    if (s.maxHp > 0 && s.hp > 0 && s.hp * 2 <= s.maxHp) GuideEvent(6, "2");
+    if (std::any_of(player_.effects.begin(), player_.effects.end(), [](const game::ActiveEffect& e) { return e.kind == game::ActiveEffect::Kind::State; })) {
+        GuideEvent(6, "3");
+    }
+    if (w.skillPointsKnown && s.skillPoints > w.skillPoints) GuideEvent(6, "4");
+    w.skillPoints = s.skillPoints;
+    w.skillPointsKnown = true;
+    if (player_.job.type != game::JobType::None) GuideEvent(5, std::to_string(int(player_.job.type)));
+    if (hud_.Shown(hud::kMainPopup) && (hud_.Page() == hud::kPageParty || hud_.Page() == hud::kPageAcademy)) GuideEvent(8, std::to_string(hud_.Page()));
+    const game::WorldView::Entity* self = view_.Find(view_.Self());
+    if (self == nullptr) return;
+    const proto::WorldPosition& at = self->position;
+    if (!w.first) w.first = at;
+    if (at.region != w.first->region || std::hypot(at.x - w.first->x, at.z - w.first->z) > 1.0f) GuideEvent(9, "2");
+    // The field: out of every town (regioninfo.txt's areas); a death there, then standing in a town again.
+    const bool inTown = towns_.TownAt(at.region, at.x, at.z) >= 0;
+    if (!inTown) GuideEvent(9, "3");
+    if (s.hp == 0 && !inTown) w.diedInField = true;
+    if (w.diedInField && s.hp > 0 && inTown) {
+        w.diedInField = false;
+        GuideEvent(9, "4");
     }
 }
 
@@ -80,6 +147,19 @@ void PlayScreen::HandleQuest(ScreenContext& context, const proto::QuestEvent& ev
         }
         return;
     }
+    if (const auto* guides = std::get_if<proto::EventGuideState>(&event)) {
+        hudContext_.eventGuides = guides->mask;
+        eventGuidesKnown_ = true;
+        eventGuidesAsked_ &= ~guides->mask;
+        // A page newly met: its side icon (the highest new bit's page, as the original reads its answer).
+        if (guides->added != 0) {
+            int bit = 63;
+            while (((guides->added >> bit) & 1u) == 0) --bit;
+            ShowEventGuide(hudContext_, proto::kEventGuideFirst + std::uint32_t(bit));
+            core::LogInfo("game: event guide {} met", proto::kEventGuideFirst + std::uint32_t(bit));
+        }
+        return;
+    }
     if (const auto* guide = std::get_if<proto::QuestGuide>(&event)) {
         ShowQuestGuide(hudContext_, guide->rows); // the level-up's quest guide
         return;
@@ -98,6 +178,7 @@ void PlayScreen::HandleQuest(ScreenContext& context, const proto::QuestEvent& ev
                 if (said != q->talks.end()) banner(TextOf(data, said->text));
             }
             core::LogInfo("game: quest {} taken", q != nullptr ? q->codename : std::to_string(line.quest));
+            if (q != nullptr) GuideEvent(2, q->codename);
             break;
         case Kind::Progress:
             // The goal's line with its count put in (its text's "%d": "Collect 10 strong straws (3)"), on the quest

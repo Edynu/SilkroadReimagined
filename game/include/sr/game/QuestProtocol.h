@@ -212,6 +212,31 @@ struct QuestEnterReply {
     }
 };
 
+// The event guide's pages met (eventguidedata.txt's events: a level reached, a quest taken, an NPC chosen, ...): bit N the page
+// 50001 + N, kept by the server as the original keeps it (the hidden quest QEVENT_GUIDE's record, its QuestData1). Sent on
+// entering the world (`added` 0) and as EventGuideMet's answer (`added` the bits new: their side icon up).
+struct EventGuideState {
+    static constexpr MessageId kId = 0x1275;
+    std::uint64_t mask = 0;
+    std::uint64_t added = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("mask", mask);
+        v("added", added);
+    }
+};
+inline constexpr std::uint32_t kEventGuideFirst = 50001; // bit 0's page
+
+// The client met an event of the guide (the original's 0x70EA): its pages' bits.
+struct EventGuideMet {
+    static constexpr MessageId kId = 0x1276;
+    std::uint64_t bits = 0;
+    template <typename V>
+    void Visit(V& v) {
+        v("bits", bits);
+    }
+};
+
 enum class QuestCode : std::uint8_t {
     Ok = 0,
     TooFar = 1,      // the NPC is not near
@@ -316,7 +341,7 @@ struct QuestEnterAsk {
 };
 
 using QuestEvent = std::variant<QuestDefinition, QuestList, QuestChanged, QuestGone, NpcQuests, QuestSays, QuestAnswer, QuestRewarded, QuestMarks, QuestGuide,
-                                QuestEnterAsk>;
+                                QuestEnterAsk, EventGuideState>;
 
 // A server's quest message as the session's event; false for another id or a malformed payload.
 inline bool DecodeQuestEvent(MessageId id, std::span<const std::byte> payload, QuestEvent& out) {
@@ -337,6 +362,7 @@ inline bool DecodeQuestEvent(MessageId id, std::span<const std::byte> payload, Q
     case QuestMarks::kId: return as(QuestMarks{});
     case QuestGuide::kId: return as(QuestGuide{});
     case QuestEnterAsk::kId: return as(QuestEnterAsk{});
+    case EventGuideState::kId: return as(EventGuideState{});
     default: return false;
     }
 }
@@ -359,6 +385,8 @@ inline const char* QuestMessageName(MessageId id) {
     case QuestAbandon::kId: return "QuestAbandon";
     case QuestEnterAsk::kId: return "QuestEnterAsk";
     case QuestEnterReply::kId: return "QuestEnterReply";
+    case EventGuideState::kId: return "EventGuideState";
+    case EventGuideMet::kId: return "EventGuideMet";
     default: return "Quest?";
     }
 }

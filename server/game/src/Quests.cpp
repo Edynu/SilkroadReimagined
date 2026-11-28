@@ -497,6 +497,11 @@ void Quests::Enter(std::uint32_t entity, std::vector<QuestRecord> records) {
         list.active.push_back(StateOf(entity, *q, r));
     }
     Send(entity, list);
+    if (const auto guide = p.records.find(kEventGuideQuest); guide != p.records.end()) {
+        Send(entity, proto::EventGuideState{std::uint64_t(PackQuestProgress(guide->second.progress).first), 0});
+    } else {
+        Send(entity, proto::EventGuideState{});
+    }
     ResumeCatches(entity, p);
     TellMarks(entity, p);
 }
@@ -549,6 +554,12 @@ bool Quests::Handle(std::uint32_t entity, proto::MessageId id, std::span<const s
         proto::QuestEnterReply r;
         if (!proto::Decode(payload, r)) return false;
         EnterReply(entity, r);
+        return true;
+    }
+    case proto::EventGuideMet::kId: {
+        proto::EventGuideMet m;
+        if (!proto::Decode(payload, m)) return false;
+        EventGuideMet(entity, m.bits);
         return true;
     }
     default: return false;
@@ -2067,6 +2078,26 @@ bool Quests::OpenWorld(std::uint32_t entity, const QuestHost::Player& who, const
     }
     worlds_.push_back(std::move(world));
     return true;
+}
+
+void Quests::EventGuideMet(std::uint32_t entity, std::uint64_t bits) {
+    PlayerQuests* p = Of(entity);
+    if (p == nullptr || bits == 0) return;
+    QuestRecord& r = p->records[kEventGuideQuest];
+    const bool fresh = r.quest == 0;
+    if (fresh) {
+        r.quest = kEventGuideQuest;
+        r.status = proto::QuestStatus(5);
+        r.started = r.ended = UnixNow();
+    }
+    const auto [data1, data2] = PackQuestProgress(r.progress);
+    const std::uint64_t mask = std::uint64_t(data1);
+    const std::uint64_t added = bits & ~mask;
+    if (added != 0) {
+        r.progress = UnpackQuestProgress(std::int64_t(mask | added), data2);
+        host_.QuestSave(p->character, r);
+    }
+    Send(entity, proto::EventGuideState{mask | added, added});
 }
 
 void Quests::EnterReply(std::uint32_t entity, const proto::QuestEnterReply& r) {

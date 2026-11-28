@@ -241,6 +241,8 @@ struct HudContext {
     std::function<const std::vector<assets::Ui2dtRecord>*(const std::string& path)> layout2dt;
     // The game guide's topics and events (null until the interface's data is in).
     std::function<const assets::GameGuideData*()> gameGuide;
+    std::uint64_t eventGuides = 0;     // the event guide's pages met (proto::EventGuideState's mask)
+    std::uint32_t eventGuidePage = 0;  // the page its side icon opens
     // The premium package's entry (its item) used, as its chat command (the composite window's buttons).
     std::function<void(std::uint32_t item)> premiumUse;
     const game::WorldView* world = nullptr; // the minimap's dots (null: none)
@@ -1543,6 +1545,10 @@ std::uint32_t WornSocketSkill(HudContext& context, int index, bool dragged);
 void RegisterQuestWindows(ui::Interface& ui, HudContext& context);
 // The game guide (HudGameGuide.cpp).
 void RegisterGameGuideWindows(ui::Interface& ui, HudContext& context);
+// The guide open on that topic (its tab, its heading opened; 0: as it was).
+void OpenGameGuideAt(HudContext& context, std::uint32_t topic);
+// The event guide's side icon up for that page (snd_quest), its click opening the guide there.
+void ShowEventGuide(HudContext& context, std::uint32_t topic);
 void ToggleQuestWindow(HudContext& context);
 // The level-up's quest guide: the rows kept, the side icon up (none: put away).
 void ShowQuestGuide(HudContext& context, std::vector<game::proto::QuestGuide::Row> rows);

@@ -22,6 +22,7 @@
 #include "sr/assets/FileSystem.h"
 #include "sr/assets/GameData.h"
 #include "sr/game/Quest.h"
+#include "sr/game/WorldRecording.h"
 #include "sr/server/QuestScript.h"
 #include "sr/server/QuestStore.h"
 #include "sr/server/Quests.h"
@@ -1822,4 +1823,50 @@ TEST_CASE("QuestTaskNpcs: the open goals' NPCs under way, the finisher once achi
     CHECK(sr::game::QuestTaskNpcs(q, true, {5, 1, 1}) == std::vector<std::string>{"NPC_END"});
     q.finisher.clear();
     CHECK(sr::game::QuestTaskNpcs(q, true, {5, 1, 1}) == std::vector<std::string>{"NPC_TALK", "NPC_OTHER", "NPC_DELIVER"});
+}
+
+TEST_CASE("Quests: the event guide's pages met kept in QEVENT_GUIDE's record and told again on entry") {
+    RulesHost host;
+    server::Quests quests(host, {1.0, 2.0});
+    quests.Load({});
+    quests.Enter(1, {});
+    CHECK(host.Last<proto::EventGuideState>().mask == 0);
+
+    // The first entry's and the first move's pages (50001, 50002): both kept, both new.
+    Ask(quests, proto::EventGuideMet{0b11});
+    auto told = host.Last<proto::EventGuideState>();
+    CHECK(told.mask == 0b11);
+    CHECK(told.added == 0b11);
+    REQUIRE(host.saved.size() == 1);
+    const server::QuestRecord kept = host.saved.back();
+    CHECK(kept.quest == server::Quests::kEventGuideQuest);
+    CHECK(int(kept.status) == 5);
+    CHECK(server::PackQuestProgress(kept.progress).first == 0b11);
+
+    // One met again and one new: only the new one told as added.
+    Ask(quests, proto::EventGuideMet{0b110});
+    told = host.Last<proto::EventGuideState>();
+    CHECK(told.mask == 0b111);
+    CHECK(told.added == 0b100);
+    // None new: nothing saved.
+    const std::size_t saves = host.saved.size();
+    Ask(quests, proto::EventGuideMet{0b1});
+    CHECK(host.saved.size() == saves);
+    CHECK(host.Last<proto::EventGuideState>().added == 0);
+
+    // The record back on entry: its mask told (a bit high in the word too: the export's 0x800053).
+    quests.Leave(1);
+    server::QuestRecord stored = host.saved.back();
+    stored.progress = server::UnpackQuestProgress(0x800053, 0);
+    quests.Enter(1, {stored});
+    CHECK(host.Last<proto::EventGuideState>().mask == 0x800053);
+}
+
+TEST_CASE("Quests: the server's messages after the requests' ids reach the client's world") {
+    CHECK(game::IsWorldMessage(proto::QuestEnterAsk::kId));
+    CHECK(game::IsWorldMessage(proto::EventGuideState::kId));
+    CHECK(game::IsWorldMessage(proto::QuestGuide::kId));
+    CHECK_FALSE(game::IsWorldMessage(proto::QuestTalk::kId));
+    CHECK_FALSE(game::IsWorldMessage(proto::EventGuideMet::kId));
+    CHECK_FALSE(game::IsWorldMessage(proto::QuestEnterReply::kId));
 }

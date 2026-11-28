@@ -132,6 +132,7 @@ void PlayScreen::UseAction(ScreenContext& context, std::uint32_t action) {
     const auto send = [this](proto::MessageId id, std::vector<std::byte> payload) {
         if (!replay_) shared_->session->SendGame(id, std::move(payload));
     };
+    GuideEvent(7, std::to_string(action));
     switch (action) {
     case 1000: // Sit / Stand (N): the original's 0x704F with 4
         send(proto::SetMotion::kId, proto::Encode(proto::SetMotion{proto::kMotionSit}));

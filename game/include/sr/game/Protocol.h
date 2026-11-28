@@ -51,7 +51,8 @@ using MessageId = std::uint16_t;
 // 10: a member's fortress war position to those around (EntityGuild.fortressRole).
 // 11: a states-only skill's hit told (EntityDamaged with kDamageResist, damage 0).
 // 12: TradeScale carries the cargo and its rule (goods, the trader's unit, capacity, the scale, the three-star cap).
-inline constexpr std::uint32_t kProtocolVersion = 12;
+// 13: the event guide's pages met (EventGuideState, EventGuideMet), kept by the server.
+inline constexpr std::uint32_t kProtocolVersion = 13;
 
 // Limits when a field names none.
 inline constexpr std::size_t kMaxString = 1024;

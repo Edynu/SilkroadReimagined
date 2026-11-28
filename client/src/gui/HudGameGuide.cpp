@@ -9,7 +9,9 @@
 //   a heading (CIFGGMainSlot: gd_index_button_open / close, its title in 0xFFEFDAA4) opens and closes its topics
 //   (CIFGGSubSlot: the lamp gd_contents_lamp on the one shown, a white title), a topic shows its page.
 //   The tabs: the game guide's ids under 50000; the event guide's (50000..99999) whose events the player has met
-//   (eventguidedata.txt; ours reads its level and quest-taken events); the quest guide's (from 100000).
+//   (eventguidedata.txt's, the server's mask); the quest guide's (from 100000).
+// - the event guide's side icon (CIFEventGuide, ginterface 41): eventguide_1 / _2 by turns every 500 ms, snd_quest when it
+//   comes up for a page newly met; a click opens the guide on that page and puts it away.
 
 #include <algorithm>
 #include <array>
@@ -191,31 +193,30 @@ private:
         Layout();
     }
 
-    // The event guide's pages whose events the player has met: a level reached, a quest taken (or finished), for its
-    // country or anyone (ours: those two kinds).
-    std::set<std::uint32_t> EventsMet(const assets::GameGuideData& data) const {
+    // The event guide's pages the player has met: the server's mask (proto::EventGuideState; bit N the page 50001 + N).
+    std::set<std::uint32_t> EventsMet(const assets::GameGuideData&) const {
         std::set<std::uint32_t> out;
-        const game::PlayerState* s = c_.state;
-        if (s == nullptr) return out;
-        const bool europe = s->self.race == 1;
-        for (const assets::EventGuideRow& e : data.events) {
-            if (!e.inService) continue;
-            const bool forAnyone = e.who == "xxx", forChina = e.who == "\xEC\xA4\x91\xEA\xB5\xAD", forEurope = e.who == "\xEC\x9C\xA0\xEB\x9F\xBD";
-            if (!(forAnyone || (forChina && !europe) || (forEurope && europe))) continue;
-            bool done = false;
-            if (e.kind == 1) done = s->self.level >= std::atoi(e.value.c_str());
-            if (e.kind == 2 && c_.quests != nullptr) {
-                const auto taken = [&](std::uint32_t id) {
-                    const game::QuestDef* q = c_.quests->Find(id);
-                    return q != nullptr && q->codename == e.value;
-                };
-                for (const auto& [id, state] : c_.quests->Active()) done = done || taken(id);
-                for (const auto& [id, times] : c_.quests->Finished()) done = done || taken(id);
-            }
-            if (done) out.insert(e.guide);
+        for (int bit = 0; bit < 64; ++bit) {
+            if ((c_.eventGuides >> bit) & 1u) out.insert(game::proto::kEventGuideFirst + std::uint32_t(bit));
         }
         return out;
     }
+
+public:
+    // A topic shown by its id: its tab chosen, its heading opened, its page shown (the event guide's side icon).
+    void Choose(std::uint32_t id) {
+        SelectTab(id >= 100000 ? 2 : id >= 50000 ? 1 : 0);
+        for (const assets::GameGuideRow* r : rows_) {
+            if (r->level != 1 || r->id != id) continue;
+            open_.insert(r->parent);
+            chosen_ = id;
+            Layout();
+            if (onTopic) onTopic(r->pageKey, c_.Text(r->menuKey));
+            return;
+        }
+    }
+
+private:
 
     // The rows shown: the headings, each open one's topics under it.
     void Layout() {
@@ -283,8 +284,22 @@ public:
         if (page_ == nullptr || bar_ == nullptr) return;
         const int most = std::max(0, int(page_->contentHeight - page_->rect.h));
         bar_->SetRange(0, most, 18);
-        if (frame.pointer.hovered == page_ && frame.input.wheel() != 0.0f) bar_->SetPosition(bar_->position() + (frame.input.wheel() > 0.0f ? -18 : 18));
+        // The wheel over the page or its bar (the page itself takes no pointer: the window under it is the one hovered).
+        const auto overThis = [&] {
+            for (const ui::Widget* w = frame.pointer.hovered; w != nullptr; w = w->parent()) {
+                if (w == this) return true;
+            }
+            return false;
+        };
+        const ui::Vec2 m = frame.pointer.position;
+        const bool overPage = page_->ScreenRect().Contains(m) || bar_->ScreenRect().Contains(m);
+        if (frame.input.wheel() != 0.0f && overPage && overThis()) bar_->SetPosition(bar_->position() + (frame.input.wheel() > 0.0f ? -18 : 18));
         page_->scroll = float(std::min(bar_->position(), most));
+    }
+
+    void Open(std::uint32_t topic) {
+        if (menuFolded_) FoldMenu(false);
+        if (auto* menu = dynamic_cast<GuideMenu*>(Child(kMenu))) menu->Choose(topic);
     }
 
     bool OnNotice(const ui::Notice& n) override {
@@ -342,9 +357,44 @@ private:
     bool menuFolded_ = false;
 };
 
+class EventGuideIcon : public ui::Static {
+public:
+    EventGuideIcon(const assets::UiLayoutNode& node, HudContext& c) : Static(node), c_(c) {}
+    void Created(ui::Interface& ui) override {
+        Static::Created(ui);
+        interactive = true;
+    }
+    void Update(ui::Frame&) override {
+        texture = int(c_.time * 2.0) % 2 != 0 ? "icon\\etc\\eventguide_2.ddj" : "icon\\etc\\eventguide_1.ddj";
+    }
+    void Mouse(ui::Frame& frame) override {
+        if (!frame.input.Released(ui::MouseButton::Left) || frame.pointer.hovered != this || c_.hud == nullptr) return;
+        c_.hud->Hide(hud::kEventGuide);
+        OpenGameGuideAt(c_, c_.eventGuidePage);
+    }
+
+private:
+    HudContext& c_;
+};
+
 } // namespace
 
+void OpenGameGuideAt(HudContext& c, std::uint32_t topic) {
+    if (c.hud == nullptr) return;
+    c.hud->Show(hud::kGameGuide);
+    ui::Interface* ui = c.hud->interface();
+    if (auto* w = ui != nullptr ? dynamic_cast<GameGuideWindow*>(ui->Window(hud::kGameGuide)) : nullptr; w != nullptr && topic != 0) w->Open(topic);
+}
+
+void ShowEventGuide(HudContext& c, std::uint32_t topic) {
+    c.eventGuidePage = topic;
+    if (c.hud == nullptr || topic == 0) return;
+    c.hud->Show(hud::kEventGuide);
+    if (ui::Interface* ui = c.hud->interface()) ui->Sound("snd_quest");
+}
+
 void RegisterGameGuideWindows(ui::Interface& ui, HudContext& context) {
+    ui.Register("CIFEventGuide", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<EventGuideIcon>(n, *c); });
     ui.Register("CIFGameGuide", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<GameGuideWindow>(n, *c); });
     ui.Register("CIFGGMenu", [c = &context](const assets::UiLayoutNode& n) { return std::make_unique<GuideMenu>(n, *c); });
     ui.Register("SRGuidePage", [](const assets::UiLayoutNode& n) { return std::make_unique<GuidePage>(n); });

@@ -58,7 +58,8 @@ void PlayScreen::CommunityTick(double now) {
 }
 
 // The test steps: friend:NAME, friend-yes, friend-no, friend-delete:NAME, block:NAME, unblock:NAME,
-// letter:TO|TEXT, letters, letter-read:N, letter-open:N (the window's Read), letter-delete:N, community[:TAB].
+// letter:TO|TEXT, letters, letter-read:N, letter-open:N (the window's Read), letter-delete:N, community[:TAB]; event-guide (the
+// event guide's side icon clicked: the guide open on its page).
 bool PlayScreen::CommunityScriptStep(const std::string& verb, const std::string& arg, const std::string& step) {
     const auto send = [&](const auto& message) {
         using T = std::decay_t<decltype(message)>;
@@ -97,6 +98,10 @@ bool PlayScreen::CommunityScriptStep(const std::string& verb, const std::string&
         if (const auto* r = letterAt()) send(proto::LetterDelete{r->id});
     } else if (verb == "community") {
         ToggleCommunityPage(hudContext_, arg.empty() ? 0 : std::atoi(arg.c_str()));
+    } else if (verb == "event-guide") {
+        if (!hud_.Shown(hud::kEventGuide)) core::LogWarning("game: --guild {}: no event guide icon up", step);
+        hud_.Hide(hud::kEventGuide);
+        OpenGameGuideAt(hudContext_, hudContext_.eventGuidePage);
     } else {
         return false;
     }
